@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ansi_replay import emulate
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CMD = ["dotnet", "run", "-c", "Release", "--project", "samples/QxTui.Playground", "--no-build"]
+CMD = ["./samples/QxTui.Playground/bin/Release/net10.0/QxTui.Playground"]
 
 captured = bytearray()
 pid, fd = pty.fork()
@@ -34,11 +34,15 @@ script = [
     (8.5, b"2"),        # tab: text page (unicode wrap)
     (9.5, b"3"),        # tab: ball page (slider + speed label)
     (10.5, b"1"),       # back to widgets
-    (12.0, b"q"),
+    (11.0, b"3"),             # ball page, then resize while it runs
+    (11.2, ("resize", 30, 90)),
+    (11.8, ("resize", 40, 120)),
+    (12.4, b"1"),
+    (13.5, b"q"),
 ]
 si = 0
 try:
-    while time.time() - start < 12:
+    while time.time() - start < 18:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
             try:
@@ -50,7 +54,12 @@ try:
             captured += data
         el = time.time() - start
         while si < len(script) and el >= script[si][0]:
-            os.write(fd, script[si][1])
+            payload = script[si][1]
+            if isinstance(payload, tuple):  # ("resize", rows, cols)
+                fcntl.ioctl(fd, 0x5414,
+                            struct.pack("HHHH", payload[1], payload[2], 0, 0))
+            else:
+                os.write(fd, payload)
             si += 1
         if si >= len(script):
             w, _st = os.waitpid(pid, os.WNOHANG)

@@ -302,3 +302,12 @@ public class AppTests
         Assert.Equal(0, app.Scheduler.ActiveCount);
     }
 }
+
+public sealed class BlockWidgetPublic(char c, int fg) : Widget
+{
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = c, Fg = fg, Bg = -1 });
+    }
+}

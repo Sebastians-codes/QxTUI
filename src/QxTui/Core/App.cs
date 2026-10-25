@@ -55,6 +55,7 @@ public sealed class App : IDisposable
     // Quit() flips it, Run() re-arms it
     private bool _running = true;
     private long _lastPresentedCount;
+    private long _droppedAtLastSubmit;
     private int _presentedWindowFrames;
     private double _presentedWindowStart;
 
@@ -229,6 +230,7 @@ public sealed class App : IDisposable
         // the previous attempt — told the diff "nothing changed" and left
         // dim pixels on the terminal forever.)
         _back.Clear();
+        _renderer.Resync(); // terminal still shows the dim: repaint EVERY cell
         InvalidateAll();
     }
 
@@ -535,12 +537,22 @@ public sealed class App : IDisposable
         RenderResult result = default;
         if (anyRendered || relayoutThisFrame)
         {
+            // dropped delta frames desync the terminal (it never applied
+            // those diffs): the next frame after any drop must be FULL
+            bool resync = _presenter is not null &&
+                          _presenter.DroppedCount != _droppedAtLastSubmit;
+
             _output.Clear();
-            result = _renderer.Render(_back, _output);
+            result = _renderer.Render(_back, _output, forceFull: resync);
             if (_presenter is { } presenter)
+            {
                 presenter.Submit(_output.WrittenSpan);
+                _droppedAtLastSubmit = presenter.DroppedCount;
+            }
             else
+            {
                 _terminal.Write(_output.WrittenSpan); // synchronous test mode
+            }
 
             Stats.LastBytesWritten = result.BytesWritten;
             Stats.LastDirtyCells = result.DirtyCells;

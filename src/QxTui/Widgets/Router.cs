@@ -19,6 +19,10 @@ public sealed class Router : Widget
     private string _current = "";
 
     public string Current => _current;
+
+    /// <summary>Fires on every Switch — tab bars and breadcrumbs subscribe
+    /// so keyboard-driven switches update them too.</summary>
+    public Reactive.Signal<string> Changed { get; } = new("");
     public IReadOnlyCollection<string> Keys => _factories.Keys;
 
     public Router Register(string key, Func<Widget> factory)
@@ -44,6 +48,7 @@ public sealed class Router : Widget
         _current = key;
         page.Node.Grow = 1f; // pages fill the router slot by default
         AddChild(page);
+        Changed.Set(key);
         Invalidate();
     }
 
@@ -71,6 +76,7 @@ public sealed class TabBarWidget : Widget
         _router = router;
         _tabs = tabs;
         Clickable = true;
+        OnSignal(router.Changed); // repaint on ANY switch, keyboard or click
     }
 
     public TabBarWidget() : this(new Router(), []) { }

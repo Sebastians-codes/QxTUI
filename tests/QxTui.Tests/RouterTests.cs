@@ -169,3 +169,33 @@ public class PageSwitchCleanupTests
         Assert.Equal('t', app.Back[1, 0].Char); // new page's child painted
     }
 }
+
+public class TabBarFollowsRouterTests
+{
+    [Fact]
+    public void KeyboardSwitch_MovesActiveMarker()
+    {
+        var a = new PageWidget("aaaa");
+        var b = new PageWidget("bbbb");
+        var router = new Router();
+        router.Register("one", () => a).Register("two", () => b);
+        router.Switch("one");
+
+        var tabs = new TabBarWidget(router, ["one", "two"]);
+        var term = new FakeTerminal(30, 8);
+        using var app = new App(term, UI.Column(0, tabs.Height(1), router.Grow(1)),
+            targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        int accent = Theme.Night.Accent;
+        Assert.Equal(accent, app.Back[1, 0].Bg);   // "one" chip active
+        Assert.NotEqual(accent, app.Back[8, 0].Bg);
+
+        // switch via the router directly (what a key handler does)
+        router.Switch("two");
+        app.RunFrame();
+
+        Assert.NotEqual(accent, app.Back[1, 0].Bg); // old marker gone
+        Assert.Equal(accent, app.Back[8, 0].Bg);    // new marker follows
+    }
+}

@@ -29,6 +29,7 @@ public sealed class Renderer : IDisposable
     private CellBuffer _prev;
     private readonly List<DamageRect> _damage = new(64);
     private readonly bool _synchronizedOutput;
+    private bool _resync;
 
     public int Width => _prev.Width;
     public int Height => _prev.Height;
@@ -40,12 +41,21 @@ public sealed class Renderer : IDisposable
     }
 
     /// <summary>Call on terminal resize: reallocates the previous-frame buffer
-    /// and forces a full repaint on the next Render.</summary>
+    /// and schedules a full resync repaint.</summary>
     public void Resize(int width, int height)
     {
         _prev.Dispose();
         _prev = new CellBuffer(width, height);
+        Resync();
     }
+
+    /// <summary>
+    /// Declare that the terminal's content is unknown/stale: the next Render
+    /// serializes the WHOLE screen (including empty cells), repairing any
+    /// ghosts. An empty prev frame is NOT enough — cells empty in both back
+    /// and prev produce no damage, so old pixels would survive forever.
+    /// </summary>
+    public void Resync() => _resync = true;
 
     /// <summary>Resize the prev buffer to match a content-preserving back
     /// buffer: prev becomes a copy of back, so the next diff only reports
@@ -57,7 +67,11 @@ public sealed class Renderer : IDisposable
         back.Cells.CopyTo(_prev.Cells);
     }
 
-    public RenderResult Render(CellBuffer back, IBufferWriter<byte> output)
+    /// <param name="forceFull">Emit a whole-screen repaint regardless of
+    /// the diff. Used to RESYNC the terminal after dropped delta frames:
+    /// a missed delta leaves the terminal on a wrong base forever, and only
+    /// a full frame repairs it.</param>
+    public RenderResult Render(CellBuffer back, IBufferWriter<byte> output, bool forceFull = false)
     {
         if (back.Width != _prev.Width || back.Height != _prev.Height)
             throw new InvalidOperationException(
@@ -65,6 +79,13 @@ public sealed class Renderer : IDisposable
 
         _damage.Clear();
         int dirtyCells = Diff(back, _damage, out bool fullRepaint);
+        if (forceFull || _resync)
+        {
+            _resync = false;
+            fullRepaint = true;
+            _damage.Clear();
+            dirtyCells = back.Width * back.Height;
+        }
 
         var writer = new SpanWriter(output);
         if (_synchronizedOutput)

@@ -1,3 +1,5 @@
+using QxTui.Core;
+using QxTui.Render;
 using System.Text;
 using QxTui.Terminal;
 
@@ -112,5 +114,82 @@ public class FramePresenterTests
 
         Thread.Sleep(50);
         Assert.Equal(0, sink.Count);
+    }
+}
+
+public class DropResyncTests
+{
+    [Fact]
+    public void ForceFull_EmitsWholeScreen()
+    {
+        using var back = new CellBuffer(40, 10);
+        using var renderer = new QxTui.Render.Renderer(40, 10, synchronizedOutput: false);
+        var output = new System.Buffers.ArrayBufferWriter<byte>();
+
+        back.WriteText(5, 5, "x", fg: 7);
+        var delta = renderer.Render(back, output);
+        int deltaBytes = delta.BytesWritten;
+
+        output.Clear();
+        var full = renderer.Render(back, output, forceFull: true);
+
+        Assert.True(full.FullRepaint);
+        Assert.True(full.BytesWritten > deltaBytes * 5,
+            $"forceFull ({full.BytesWritten}) must dwarf the delta ({deltaBytes})");
+    }
+
+    [Fact]
+    public void DroppedFrames_TriggerResyncFullFrame()
+    {
+        // a sink that stalls: submits pile up and get dropped, then the app
+        // must resync with a full repaint on the next frame
+        var sizes = new List<int>();
+        var gate = new ManualResetEventSlim(true);
+        var sinkTerm = new SlowTerminal(sizes, gate);
+
+        var widget = new BlockWidgetPublic('.', 7);
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
+        root.Add(widget.Node);
+        widget.Node.Grow = 1f;
+
+        using var app = new App(sinkTerm, root, targetFps: 1000);
+        app.RunFrame(); // initial paint (writer consumes it)
+
+        gate.Reset(); // writer stalls from here on
+        int small = 0;
+        for (int i = 0; i < 6; i++)
+        {
+            widget.Invalidate();
+            app.RunFrame(pace: false);
+        }
+
+        gate.Set();
+        widget.Invalidate();
+        app.RunFrame(pace: false); // this one must resync (drops happened)
+        Thread.Sleep(100);          // let the writer drain
+
+        Assert.True(app.Stats.DroppedFrames > 0, "test setup must actually drop frames");
+        Assert.Contains(sizes, sz => sz > 40 * 10); // a full-screen frame went out
+        _ = small;
+    }
+
+    private sealed class SlowTerminal(List<int> sizes, ManualResetEventSlim gate) : ITerminal
+    {
+        public int Width { get; } = 40;
+        public int Height { get; } = 10;
+        public long Dropped;
+
+        public bool ConsumeResize() => false;
+        public bool TryReadInput(out byte b) { b = 0; return false; }
+
+        public void Write(ReadOnlySpan<byte> bytes)
+        {
+            gate.Wait(TimeSpan.FromSeconds(2));
+            lock (sizes) sizes.Add(bytes.Length);
+        }
+
+        public void Enter() { }
+        public void Exit() { }
+        public void Dispose() { }
     }
 }
