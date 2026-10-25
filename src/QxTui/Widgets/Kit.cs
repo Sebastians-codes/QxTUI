@@ -235,23 +235,43 @@ public sealed class ModalWidget : Widget
         foreach (var l in lines) w = Math.Min(screen.W - 4, Math.Max(w, l.Length + 4));
         int actionsWidth = 0;
         for (int i = 0; i < _actions.Length; i++)
-            actionsWidth += _actions[i].Label.Length + 5; // hint(2)+pad(2)+gap(1)
+            actionsWidth += _actions[i].Label.Length + 5;
         w = Math.Min(screen.W - 4, Math.Max(w, actionsWidth + 4));
-        int h = Math.Min(screen.H - 2, lines.Length + 4 + (_actions.Length > 0 ? 2 : 0));
+
+        // chips wrap inside the clamped width; the box grows vertically
+        int actionRows = _actions.Length == 0 ? 0 : ActionRows(w - 4);
+        int h = Math.Min(screen.H - 2,
+            lines.Length + 4 + (actionRows > 0 ? actionRows + 1 : 0));
         return new Rect((screen.W - w) / 2, (screen.H - h) / 2, w, h);
     }
 
-    /// <summary>Button-chip rects (the filled part), in order.</summary>
-    private List<(Rect Rect, Action Act)> ActionRects(Rect box)
+    private int ActionRows(int innerW)
     {
-        var result = new List<(Rect, Action)>(_actions.Length);
-        int x = box.X + 2;
-        int y = box.Bottom - 2;
+        int rows = 1, x = 0;
+        for (int i = 0; i < _actions.Length; i++)
+        {
+            int need = _actions[i].Label.Length + 5;
+            if (x + need > innerW && x > 0) { rows++; x = 0; }
+            x += need;
+        }
+        return rows;
+    }
+
+    /// <summary>Chip rects wrapped inside the box; rows stack upward from
+    /// the bottom edge. Single source for render + hit-testing.</summary>
+    private List<(Rect Rect, Action Act, int Idx)> LayoutActions(Rect box)
+    {
+        var result = new List<(Rect, Action, int)>(_actions.Length);
+        int innerW = box.W - 4;
+        int x = 0, row = 0;
         for (int i = 0; i < _actions.Length; i++)
         {
             int btnW = _actions[i].Label.Length + 2;
-            result.Add((new Rect(x + 2, y, btnW, 1), _actions[i].Act));
-            x += 2 + btnW + 1; // hint(2) + button + gap(1)
+            int need = btnW + 3;
+            if (x + need > innerW && x > 0) { row++; x = 0; }
+            int y = box.Bottom - 2 - row;
+            result.Add((new Rect(box.X + 2 + x + 2, y, btnW, 1), _actions[i].Act, i));
+            x += need;
         }
         return result;
     }
@@ -263,10 +283,8 @@ public sealed class ModalWidget : Widget
         // per-button hover for the chip highlight
         var box = BoxRect(Rect);
         int idx = -1;
-        var rects = ActionRects(box);
-        for (int i = 0; i < rects.Count; i++)
+        foreach (var (r, _, i) in LayoutActions(box))
         {
-            var r = rects[i].Rect;
             if (ev.X >= r.X && ev.X < r.Right && ev.Y == r.Y) { idx = i; break; }
         }
         if (idx != _hoverAction)
@@ -282,7 +300,7 @@ public sealed class ModalWidget : Widget
         var box = BoxRect(Rect);
 
         // action buttons first
-        foreach (var (r, act) in ActionRects(box))
+        foreach (var (r, act, _) in LayoutActions(box))
         {
             if (local.X >= r.X && local.X < r.Right && local.Y == r.Y)
             {
@@ -320,21 +338,15 @@ public sealed class ModalWidget : Widget
                 QxTui.Render.Text.Ellipsize(lines[i], box.W - 4),
                 fg: Theme.Get(ThemeRole.Text), bg: Theme.Get(ThemeRole.PanelBg));
 
-        // action button row: key hint + filled chip (hover brightens)
-        int ax = box.X + 2;
-        int ay = box.Bottom - 2;
-        for (int i = 0; i < _actions.Length; i++)
+        // action chips: key hint + filled button, wrapped inside the box
+        foreach (var (r, _, i) in LayoutActions(box))
         {
             string label = _actions[i].Label;
-            int btnW = label.Length + 2;
-
-            buffer.WriteTextClipped(Clip, ax, ay, $"{i + 1}", fg: Theme.Get(ThemeRole.Dim));
             int bg = Theme.Get(i == _hoverAction ? ThemeRole.Title : ThemeRole.Accent);
-            for (int cx = 0; cx < btnW; cx++)
-                buffer.WriteTextClipped(Clip, ax + 2 + cx, ay, " ", fg: 232, bg: bg);
-            buffer.WriteTextClipped(Clip, ax + 3, ay, label, fg: 232, bg: bg, bold: true);
-
-            ax += 2 + btnW + 1;
+            buffer.WriteTextClipped(Clip, r.X - 2, r.Y, $"{i + 1}", fg: Theme.Get(ThemeRole.Dim));
+            for (int cx = 0; cx < r.W; cx++)
+                buffer.WriteTextClipped(Clip, r.X + cx, r.Y, " ", fg: 232, bg: bg);
+            buffer.WriteTextClipped(Clip, r.X + 1, r.Y, label, fg: 232, bg: bg, bold: true);
         }
     }
 }

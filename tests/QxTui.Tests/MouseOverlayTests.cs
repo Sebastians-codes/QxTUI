@@ -743,3 +743,67 @@ public class WheelTests
         Assert.Equal(1f, sig.Value);
     }
 }
+
+public class OverlayStackTests
+{
+    [Fact]
+    public void Stack_TopSwallowsKeys_PopRevealsNext()
+    {
+        var seen = new List<char>();
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.OnKey = ev => { if (ev.Key == Key.Char) seen.Add(ev.Char); return true; };
+
+        var first = new ModalWidget("first", () => ["1"]);
+        var second = new ModalWidget("second", () => ["2"]);
+        app.PushOverlay(first);
+        app.PushOverlay(second);
+        Assert.Same(second, app.Overlay);
+
+        term.QueueInput((byte)'x');
+        app.RunFrame();
+        Assert.Empty(seen); // top swallowed
+
+        term.QueueInput((byte)0x1b); // pop second
+        app.RunFrame();
+        Assert.Same(first, app.Overlay);
+
+        term.QueueInput((byte)'x');
+        app.RunFrame();
+        Assert.Empty(seen); // first still modal
+
+        term.QueueInput((byte)0x1b); // pop first
+        app.RunFrame();
+        Assert.Null(app.Overlay);
+
+        term.QueueInput((byte)'x');
+        app.RunFrame();
+        Assert.Equal(['x'], seen); // base handler live again
+    }
+
+    [Fact]
+    public void Stack_TopPaintsOverLower()
+    {
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(40, 14);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        app.PushOverlay(new ModalWidget("first", () => ["aaaa"]));
+        app.RunFrame();
+        app.PushOverlay(new ModalWidget("second", () => ["bbbb"]));
+        app.RunFrame();
+
+        // both boxes centered; the TOP one's title wins the center cell row
+        var screen = System.Text.Encoding.Latin1.GetString(term.LastFrame!);
+        _ = screen;
+        // find titles in the back buffer instead:
+        string Row(int y) => string.Concat(Enumerable.Range(0, 40).Select(x => app.Back[x, y].Char));
+        bool anyRowHas(string t) => Enumerable.Range(0, 14).Any(y => Row(y).Contains(t));
+
+        Assert.True(anyRowHas("second"));
+        // first is dimmed under second: its title cells were overpainted
+        Assert.False(anyRowHas(" first "));
+    }
+}

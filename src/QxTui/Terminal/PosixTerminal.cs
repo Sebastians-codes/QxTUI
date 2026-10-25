@@ -44,7 +44,7 @@ public sealed class PosixTerminal : ITerminal
     private readonly string _savedSttyState;
     private readonly ConcurrentQueue<byte> _input = new();
     private readonly CancellationTokenSource _cts = new();
-    private readonly Task _readerTask;
+    private readonly Thread _readerThread;
     private readonly PosixSignalRegistration _sigwinch;
     private int _resized;
 
@@ -67,7 +67,12 @@ public sealed class PosixTerminal : ITerminal
             Volatile.Write(ref _resized, 1);
         });
 
-        _readerTask = Task.Run(ReadLoopAsync);
+        _readerThread = new Thread(ReadLoop)
+        {
+            IsBackground = true,
+            Name = "qxtui-input",
+        };
+        _readerThread.Start();
     }
 
     public void Enter()
@@ -122,22 +127,27 @@ public sealed class PosixTerminal : ITerminal
         }
     }
 
-    private async Task ReadLoopAsync()
+    // Blocking reads on a dedicated thread: async tty reads can miss epoll
+    // wakeups and silently drop keys under load; a kernel blocking read
+    // wakes on every byte. Closing the stream unblocks it on dispose.
+    private void ReadLoop()
     {
         byte[] buf = new byte[256];
         try
         {
             while (!_cts.IsCancellationRequested)
             {
-                int read = await _ttyIn.ReadAsync(buf.AsMemory(0, buf.Length), _cts.Token);
+                int read = _ttyIn.Read(buf, 0, buf.Length);
                 if (read <= 0)
                     break;
                 for (int i = 0; i < read; i++)
                     _input.Enqueue(buf[i]);
             }
         }
-        catch (OperationCanceledException) { }
-        catch (IOException) { } // tty closed
+        catch (Exception)
+        {
+            // tty closed / stream disposed during shutdown
+        }
     }
 
     private void WriteRaw(string s)
@@ -169,9 +179,9 @@ public sealed class PosixTerminal : ITerminal
             return; // idempotent — App owns the terminal and may dispose it
 
         try { _cts.Cancel(); } catch (ObjectDisposedException) { }
-        try { _readerTask.Wait(200); } catch { /* best effort */ }
+        try { _ttyIn.Dispose(); } catch { /* unblocks the reader */ }
+        try { _readerThread.Join(500); } catch { /* best effort */ }
         _sigwinch.Dispose();
-        _ttyIn.Dispose();
         _ttyOut.Dispose();
         _cts.Dispose();
     }

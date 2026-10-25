@@ -2,6 +2,7 @@ using QxTui.Animation;
 using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Playground;
+using System.Globalization;
 using QxTui.Reactive;
 using QxTui.Render;
 using QxTui.Terminal;
@@ -89,7 +90,7 @@ var filledDemo = new ButtonWidget(
 };
 
 var help = new LabelWidget(() =>
-    " t: theme   [ ]: fps   1/2/3 or click tabs: pages   o/click: popup   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+    " t: theme  [ ]: fps  1-4/click tabs  o/click: popup  Tab: focus  q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
 string[] PopupLines() =>
 [
@@ -112,6 +113,38 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
         ("240fps", () => SetFps(240)),
         ("480fps", () => SetFps(480)),
         ("1000fps", () => SetFps(1000)),
+        ("stack", () => app.PushOverlay(MakeConfirmModal())),
+    ]);
+
+// popover-on-popover: confirm modal opens a third level with fps settings
+ModalWidget MakeConfirmModal() => new("confirm",
+    () =>
+    [
+        "a second modal on top",
+        "of the first — esc pops",
+        "one level at a time.",
+    ],
+    dim: true,
+    actions:
+    [
+        ("fps settings", () => app.PushOverlay(MakeFpsModal())),
+        ("close", () => app.PopOverlay()),
+    ]);
+
+ModalWidget MakeFpsModal() => new("fps settings",
+    () =>
+    [
+        "third level: popovers on",
+        "popovers on popovers.",
+        $"current target: {app.TargetFps} fps",
+    ],
+    dim: true,
+    actions:
+    [
+        ("30", () => SetFps(30)),
+        ("120", () => SetFps(120)),
+        ("240", () => SetFps(240)),
+        ("1000", () => SetFps(1000)),
     ]);
 
 ButtonWidget? openBtn = null;
@@ -182,8 +215,11 @@ var textPage = new ContainerWidget();
 textPage.Node.Direction = FlexDirection.Column;
 textPage.Node.Gap = 1;
 var input = new TextFieldWidget { Placeholder = "type here… (Tab leaves the field)" };
-var echo = new LabelWidget(() => $"you typed: {input.Text}");
-input.Changed += _ => echo.Invalidate();
+string submitted = "";
+var echo = new LabelWidget(() =>
+    submitted.Length > 0 ? $"submitted: {submitted}" : $"you typed: {input.Text}");
+input.Changed += t => { submitted = ""; echo.Invalidate(); };
+input.Submitted += t => { submitted = t; echo.Invalidate(); };
 
 var textTitle = new LabelWidget(() => "text wrapping + unicode widths");
 var ellipDemo = new LabelWidget(
@@ -194,13 +230,42 @@ textPage.AddChild(echo); echo.Node.Height = 1;
 textPage.AddChild(wrapDemo); wrapDemo.Node.Grow = 1f;
 textPage.AddChild(ellipDemo); ellipDemo.Node.Height = 1;
 
+// ---- page 4: virtualized list (10k rows, only visible ones paint) --------
+
+var listPage = new ContainerWidget();
+listPage.Node.Direction = FlexDirection.Column;
+listPage.Node.Gap = 1;
+
+var listHint = new LabelWidget(() =>
+    "10,000 rows — only the visible slice paints. wheel / drag-scroll, " +
+    "click or Tab to focus, then arrows / PgUp / PgDn / Home / End");
+var bigList = new ListView(() => 10_000)
+{
+    RenderRow = (buffer, clip, rect, i, selected) =>
+    {
+        var theme = app.Theme;
+        if (selected)
+            buffer.FillRect(rect.X, rect.Y, rect.W, rect.H,
+                new Cell { Char = ' ', Fg = -1, Bg = theme.Get(ThemeRole.PanelBg) });
+        buffer.WriteTextClipped(clip, rect.X + 1, rect.Y,
+            string.Create(CultureInfo.InvariantCulture,
+                $"row {i,5}  value {(i * 7) % 97,3}  {new string('#', 1 + i % 40)}"),
+            fg: selected ? theme.Get(ThemeRole.Title) : theme.Get(ThemeRole.Text));
+    },
+};
+listPage.AddChild(listHint);
+listHint.Node.Height = 1;
+listPage.AddChild(bigList);
+bigList.Node.Grow = 1f;
+
 var router = new Router();
 router.Register("widgets", () => widgetsPage)
       .Register("text", () => textPage)
-      .Register("ball", () => ball);
+      .Register("ball", () => ball)
+      .Register("list", () => listPage);
 router.Switch("widgets");
 
-var tabBar = new TabBarWidget(router, ["widgets", "text", "ball"]);
+var tabBar = new TabBarWidget(router, ["widgets", "text", "ball", "list"]);
 
 app.SetRoot(UI.Column(1,
     hud.Height(1),
@@ -246,6 +311,9 @@ app.OnKey = ev =>
             return true;
         case Key.Char when ev.Char is '3':
             router.Switch("ball");
+            return true;
+        case Key.Char when ev.Char is '4':
+            router.Switch("list");
             return true;
 
         case Key.Char when ev.Char is 'o' or 'O':

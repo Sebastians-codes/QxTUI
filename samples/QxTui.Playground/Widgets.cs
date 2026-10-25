@@ -144,6 +144,11 @@ internal sealed class BallWidget : Widget
         surface.SetPixel(bx, by, 255);
         surface.Draw();
 
+        // opaque strip where the child slider row lives: the ball must read
+        // as colliding with the UI, not sneaking behind transparent chrome
+        buffer.FillRect(r.X + 1, r.Bottom - 2, r.W - 2, 1,
+            new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+
         Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), "square pixels", Theme.Get(ThemeRole.Title));
     }

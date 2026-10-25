@@ -228,6 +228,10 @@ public sealed class Renderer : IDisposable
 
     private static void WriteColor(ref SpanWriter w, System.ReadOnlySpan<byte> kind, int c)
     {
+        // EVERY SGR part must start with ';': dropping it produced
+        // ESC[038;5;45m which terminals misparse (and sometimes swallow
+        // following bytes as sequence params — vanishing panels)
+        w.WriteRaw(";"u8);
         if (Core.Color.IsRgb(c))
         {
             w.WriteRaw(kind);

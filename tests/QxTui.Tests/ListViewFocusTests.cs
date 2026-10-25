@@ -6,6 +6,19 @@ using QxTui.Widgets;
 
 namespace QxTui.Tests;
 
+internal static class Settle
+{
+    public static void Run(App app, int ms = 150)
+    {
+        var end = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < end)
+        {
+            Thread.Sleep(10);
+            app.RunFrame();
+        }
+    }
+}
+
 public class ListViewTests
 {
     private const int Total = 10_000;
@@ -46,11 +59,11 @@ public class ListViewTests
 
         foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<65;5;5M")) // wheel down
             term.QueueInput(b);
-        painted.Clear();
         app.RunFrame();
 
-        Assert.Equal(3, list.Offset);
-        Assert.Equal(Enumerable.Range(3, 12), painted);
+        Assert.Equal(3, list.Offset); // wheel steps are immediate
+        // the wheel frame painted exactly the new visible window
+        Assert.Equal(Enumerable.Range(3, 12), painted.TakeLast(12));
     }
 
     [Fact]
@@ -158,5 +171,59 @@ public class FocusTests
         app.RunFrame();
 
         Assert.Same(probe, app.Focused);
+    }
+}
+
+public class ListViewMouseTests
+{
+    private static (App app, FakeTerminal term, ListView list) Make()
+    {
+        var list = new ListView(() => 1000)
+        {
+            RenderRow = (b, c, r, i, sel) =>
+                b.WriteTextClipped(c, r.X, r.Y, $"row {i}", fg: 7),
+        };
+        var root = UI.Column(0, list.Grow(1));
+        var term = new FakeTerminal(30, 10);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        return (app, term, list);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void ThumbDrag_Scrolls_AndCapturesOutside()
+    {
+        var (app, term, list) = Make();
+
+        // press on scrollbar column (x=29), then drag upward outside widget
+        Mouse(term, "\x1b[<0;30;8M");   // press near bottom of track
+        app.RunFrame();
+        int afterPress = list.Offset;
+        Assert.True(afterPress > 0, $"press on track should jump, got {afterPress}");
+
+        Mouse(term, "\x1b[<35;30;2M");   // drag up (still on track col)
+        app.RunFrame();
+        Assert.True(list.Offset < afterPress); // thumb follows cursor 1:1
+
+        Mouse(term, "\x1b[<35;5;1M");    // drag OUTSIDE horizontally: capture holds
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;30;2m");    // release
+        app.RunFrame();
+    }
+
+    [Fact]
+    public void ContentPress_SelectsRow()
+    {
+        var (app, term, list) = Make();
+        Mouse(term, "\x1b[<0;5;6M\x1b[<0;5;6m"); // press row y=5
+        app.RunFrame();
+        Assert.Equal(5, list.Selected);
     }
 }

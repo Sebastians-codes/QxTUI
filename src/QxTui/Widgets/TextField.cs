@@ -90,6 +90,13 @@ public sealed class TextFieldWidget : Widget
 
             case Key.Enter:
                 Submitted?.Invoke(Text);
+                App?.Focus(null); // confirm and hand focus back to the app
+                return true;
+
+            case Key.Space:
+                _chars.Insert(_cursor, ' ');
+                _cursor++;
+                Emit();
                 return true;
 
             case Key.Char when ev.Char >= ' ':

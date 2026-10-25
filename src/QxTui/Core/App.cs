@@ -192,28 +192,26 @@ public sealed class App : IDisposable
         }
         for (int i = 0; i < _roots.Count; i++)
             Walk(_roots[i]);
-        if (_overlay is not null && !_widgets.Contains(_overlay))
-            _widgets.Add(_overlay);
+        for (int oi = 0; oi < _overlays.Count; oi++)
+            if (!_widgets.Contains(_overlays[oi]))
+                _widgets.Add(_overlays[oi]);
     }
 
     // ---- overlays (popups/modals) ------------------------------------------
 
-    /// <summary>The modal widget currently on top, if any.</summary>
-    public Widget? Overlay => _overlay;
-    private Widget? _overlay;
+    /// <summary>The modal widget currently on top of the stack, if any.</summary>
+    public Widget? Overlay => _overlays.Count > 0 ? _overlays[^1] : null;
+    private readonly List<Widget> _overlays = [];
 
     /// <summary>Show a modal on top of everything. It receives keys first
     /// (HandleKey) and all mouse events; render order puts it last = top.</summary>
     public void PushOverlay(Widget overlay)
     {
-        if (_overlay is not null)
-            PopOverlay(); // one modal at a time (v1)
-
-        _overlay = overlay;
+        _overlays.Add(overlay);
         if (_registered.Add(overlay))
         {
             overlay.Mount(this);
-            _widgets.Add(overlay); // last = top of the z-order
+            _widgets.Add(overlay); // appended = top of the z-order
         }
         ResetHover();
         overlay.Invalidate();
@@ -222,10 +220,10 @@ public sealed class App : IDisposable
     /// <summary>Close the modal and repaint what it covered.</summary>
     public void PopOverlay()
     {
-        if (_overlay is null) return;
+        if (_overlays.Count == 0) return;
 
-        var ov = _overlay;
-        _overlay = null;
+        var ov = _overlays[^1];
+        _overlays.RemoveAt(_overlays.Count - 1);
         _widgets.Remove(ov);
         _roots.Remove(ov);
         _registered.Remove(ov);
@@ -274,8 +272,8 @@ public sealed class App : IDisposable
         // a dragging widget captures all mouse events until release
         if (_pressed is { CapturesMouse: true } cap)
             return cap;
-        if (_overlay is not null)
-            return _overlay;
+        if (_overlays.Count > 0)
+            return _overlays[^1];
         for (int i = _widgets.Count - 1; i >= 0; i--)
             if (_widgets[i].Rect.Contains(x, y))
                 return _widgets[i];
@@ -291,6 +289,8 @@ public sealed class App : IDisposable
         }
         _hovered = null;
     }
+
+    private bool IsOverlay(Widget w) => _overlays.Contains(w);
 
     private void RouteMouse(MouseEvent ev)
     {
@@ -454,8 +454,17 @@ public sealed class App : IDisposable
 
         while (_running && _keyParser.TryReadKey(out var keyEvent))
         {
-            // modal overlay gets first chance at keys
-            if (_overlay is { } overlayKeys && overlayKeys.HandleKey(keyEvent))
+            // overlay stack gets first chance at keys, top first
+            bool consumed = false;
+            for (int oi = _overlays.Count - 1; oi >= 0; oi--)
+            {
+                if (_overlays[oi].HandleKey(keyEvent))
+                {
+                    consumed = true;
+                    break;
+                }
+            }
+            if (consumed)
                 continue;
 
             // Tab cycles focus among focusable widgets
@@ -513,9 +522,9 @@ public sealed class App : IDisposable
             if (_widgets[i].PerFrame)
                 _widgets[i].Invalidate();
 
-        // overlay covers the viewport; positioned outside the layout tree
-        if (_overlay is { } ov)
-            ov.Node.SetRect(new Rect(0, 0, _back.Width, _back.Height));
+        // overlays cover the viewport; positioned outside the layout tree
+        for (int oi = 0; oi < _overlays.Count; oi++)
+            _overlays[oi].Node.SetRect(new Rect(0, 0, _back.Width, _back.Height));
 
         // 4) layout pass (pure) when needed; rect-changed widgets go dirty.
         //    Their stale cells at the PREVIOUS rect must be cleared so the
@@ -547,14 +556,16 @@ public sealed class App : IDisposable
         }
 
         // 5) retained render: only dirty widgets touch the back buffer
-        bool modalOpen = _overlay is not null;
+        bool modalOpen = false;
+        for (int oi = 0; oi < _overlays.Count; oi++)
+            if (_overlays[oi].BlocksBaseRendering) modalOpen = true;
 
-        // z-order: the overlay is the top layer — repaint it LAST EVERY
+        // z-order: overlays are the top layers — repaint them LAST EVERY
         // frame, not only when dirty. Otherwise base widgets that render
-        // on top of its stale pixels (floating popups over live content)
-        // glitch through it. The diff keeps the wire cost at real changes.
-        if (_overlay is not null)
-            _overlay.Invalidate();
+        // on top of their stale pixels glitch through. The diff keeps the
+        // wire cost at real changes.
+        for (int oi = 0; oi < _overlays.Count; oi++)
+            _overlays[oi].Invalidate();
 
         bool anyRendered = false;
         for (int i = 0; i < _widgets.Count; i++)
@@ -563,8 +574,7 @@ public sealed class App : IDisposable
             // a DIMMED modal blocks the base: frozen base keeps the dim
             // layer clean (otherwise ticking widgets repaint over the dim
             // patchwork-style). Floating popups let the background live.
-            if (_overlay is { BlocksBaseRendering: true } &&
-                !ReferenceEquals(widget, _overlay))
+            if (modalOpen && !IsOverlay(widget))
                 continue;
             if (widget.Dirty)
             {
@@ -610,6 +620,7 @@ public sealed class App : IDisposable
             Stats.LastDamageRects = result.DamageRects;
         }
 
+
         // 7) stats + pace
         double workMs = NowMs() - startMs;
         Stats.Fps = _pacer.Fps;
@@ -647,7 +658,7 @@ public sealed class App : IDisposable
                 for (int i = 0; i < _widgets.Count; i++)
                 {
                     var w2 = _widgets[i];
-                    if (ReferenceEquals(w2, _overlay)) continue; // full-screen: would hide gaps
+                    if (IsOverlay(w2)) continue; // full-screen: would hide gaps
                     if (w2.Rect.Contains(x, y))
                     {
                         covered = true;
@@ -685,8 +696,8 @@ public sealed class App : IDisposable
     {
         foreach (var w in _roots)
             w.Dispose(); // cascades to children
-        if (_overlay is not null)
-            _overlay.Dispose();
+        for (int oi = 0; oi < _overlays.Count; oi++)
+            _overlays[oi].Dispose();
         _presenter?.Dispose();
         _back.Dispose();
         _renderer.Dispose();

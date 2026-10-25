@@ -25,6 +25,9 @@ public sealed class ListView : Widget
     public int RowHeight { get; set; } = 1;
     public bool ShowScrollbar { get; set; } = true;
 
+    private bool _dragThumb;
+    private int _grabDelta;      // cursor offset inside the thumb at grab
+
     /// <summary>Index of the first visible row.</summary>
     public int Offset { get; private set; }
 
@@ -35,6 +38,8 @@ public sealed class ListView : Widget
     {
         Count = count;
         Focusable = true;
+        Clickable = true;
+        CapturesMouse = true; // thumb drags survive leaving the widget
     }
 
     public void ScrollTo(int index)
@@ -44,6 +49,8 @@ public sealed class ListView : Widget
         Invalidate();
     }
 
+    /// <summary>Wheel: immediate small steps — discrete notches feel wrong
+    /// when eased (the 'awkward accel'); raw steps read as smooth.</summary>
     public void ScrollBy(int delta) => ScrollTo(Offset + delta);
 
     private int VisibleRows() =>
@@ -65,8 +72,8 @@ public sealed class ListView : Widget
                 Selected = Selected >= Offset + rows ? Offset + rows - 1 : Math.Max(0, Selected - 1);
                 EnsureVisible();
                 return true;
-            case Key.PageDown: ScrollBy(rows); return true;
-            case Key.PageUp: ScrollBy(-rows); return true;
+            case Key.PageDown: ScrollTo(Offset + rows); return true;   // keys jump now
+            case Key.PageUp: ScrollTo(Offset - rows); return true;
             case Key.Home: ScrollTo(0); Selected = 0; return true;
             case Key.End: ScrollTo(total); Selected = total - 1; return true;
             default: return false;
@@ -83,16 +90,90 @@ public sealed class ListView : Widget
 
     public override bool OnMouse(MouseEvent ev)
     {
+        var r = Rect;
         switch (ev.Kind)
         {
             case MouseKind.WheelUp:
                 ScrollBy(-3);
                 return true;
+
             case MouseKind.WheelDown:
                 ScrollBy(3);
                 return true;
-            default:
+
+            case MouseKind.Press:
+                if (ShowScrollbar && ev.X >= r.Right - 1)
+                {
+                    // grab the thumb where the cursor is (no teleport), or
+                    // jump-page when pressing the track outside the thumb
+                    int thumbY = ThumbY();
+                    int thumbH = ThumbH();
+                    if (ev.Y >= thumbY && ev.Y < thumbY + thumbH)
+                        _grabDelta = ev.Y - thumbY;
+                    else
+                    {
+                        _grabDelta = thumbH / 2;
+                        ScrollTo(ev.Y < thumbY ? Offset - VisibleRows() : Offset + VisibleRows());
+                    }
+                    _dragThumb = true;
+                    DragTo(ev.Y);
+                    return true;
+                }
+                // press on content: select that row
+                Selected = Math.Clamp(Offset + (ev.Y - r.Y) / Math.Max(1, RowHeight),
+                    0, Math.Max(0, Count() - 1));
+                Invalidate();
                 return false;
+
+            case MouseKind.Motion:
+                if (_dragThumb)
+                {
+                    DragTo(ev.Y);
+                    return true;
+                }
+                return false;
+
+            default: // release
+                _dragThumb = false;
+                return false;
+        }
+    }
+
+    private int ThumbH()
+    {
+        int total = Count();
+        int rows = VisibleRows();
+        if (total <= rows) return Rect.H;
+        return Math.Max(1, rows * Rect.H / total);
+    }
+
+    private int ThumbY()
+    {
+        int total = Count();
+        int rows = VisibleRows();
+        if (total <= rows) return Rect.Y;
+        return Rect.Y + Offset * (Rect.H - ThumbH()) / Math.Max(1, total - rows);
+    }
+
+    /// <summary>Thumb follows the cursor 1:1 (minus the grab delta), with
+    /// fractional accumulation so slow drags don't quantize to whole rows.</summary>
+    private void DragTo(int y)
+    {
+        var r = Rect;
+        int total = Count();
+        int rows = VisibleRows();
+        if (total <= rows) return;
+
+        int trackH = Math.Max(1, r.H - ThumbH());
+        double thumbTop = y - r.Y - _grabDelta;
+        double frac = Math.Clamp(thumbTop / trackH, 0, 1);
+        // thumb follows the cursor 1:1 — easing here reads as rubber-band
+        // lag; the grab delta already removes the grab-time jump
+        int target = Math.Clamp((int)Math.Round(frac * (total - rows)), 0, total - rows);
+        if (target != Offset)
+        {
+            Offset = target;
+            Invalidate();
         }
     }
 

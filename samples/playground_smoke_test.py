@@ -29,20 +29,26 @@ script = [
     (3.0, b"t"),        # theme → Amber
     (4.0, b"]"),        # fps 120 → 240
     (5.0, b"o"),        # open floating popup
-    (6.0, b"4"),        # modal action 4: 240fps
-    (7.5, b"\x1b"),    # esc closes it
-    (8.5, b"2"),        # tab: text page (unicode wrap)
-    (9.5, b"3"),        # tab: ball page (slider + speed label)
-    (10.5, b"1"),       # back to widgets
-    (11.0, b"3"),             # ball page, then resize while it runs
-    (11.2, ("resize", 30, 90)),
-    (11.8, ("resize", 40, 120)),
-    (12.4, b"1"),
-    (13.5, b"q"),
+    (6.0, b"7"),        # modal action 7: stack confirm modal
+    (6.6, b"1"),        # confirm action 1: stack fps modal (3rd level)
+    (7.2, b"3"),        # fps modal action 3: 240fps
+    (7.8, b"\x1b"),    # pop level 3
+    (8.2, b"\x1b"),    # pop level 2
+    (8.6, b"\x1b"),    # pop level 1
+    (9.5, b"2"),        # tab: text page (unicode wrap)
+    (10.5, b"3"),       # tab: ball page (slider + speed label)
+    (11.5, b"1"),       # back to widgets
+    (12.0, b"3"),       # ball page, then resize while it runs
+    (12.2, ("resize", 30, 90)),
+    (12.8, ("resize", 40, 120)),
+    (13.4, b"4"),       # tab: virtualized list
+    (14.0, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
+    (14.6, b"1"),
+    (16.0, b"q"),
 ]
 si = 0
 try:
-    while time.time() - start < 18:
+    while time.time() - start < 22:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
             try:
@@ -104,8 +110,10 @@ checks = {
     "default 1x":       "speed 1.0x" in text,
     "help line":        "t: theme" in text,
     "tab bar":          " widgets " in text and " ball " in text,
+    "virtual list":     "row     0" in text or "row     1" in text,
     "popup opens":      "modals swallow" in text,
     "popup fps buttons": "240fps" in text,
+    "modal stack":      "second modal" in text and "third level" in text,
     "popup closes":     "modals swallow" not in screen,
     "clean exit":       "\x1b[?1049l" in text,
 }
