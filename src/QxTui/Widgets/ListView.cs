@@ -261,11 +261,16 @@ public sealed class ListView : Widget
         Offset = Math.Clamp(Offset, 0, Math.Max(0, total - rows));
         _target = Math.Clamp(_target, 0, Math.Max(0, total - rows));
 
-        // hardware scroll: window shifted vertically → repaint exposed only
+        // hardware scroll: window shifted vertically → repaint exposed
+        // only. The rect MUST be the full widget width: SU/SD shift whole
+        // terminal rows (every column), so a content-only rect leaves the
+        // scrollbar column shifted on the terminal but not in the front
+        // buffer — its exposed rows blank out and never repaint (the
+        // vanishing scrollbar).
         int deltaCells = (Offset - _lastRenderedOffset) * RowHeight;
         _lastRenderedOffset = Offset;
         if (deltaCells != 0)
-            App?.ScrollHint(new Rect(r.X, r.Y, contentW, r.H), deltaCells);
+            App?.ScrollHint(r, deltaCells);
 
         int last = Math.Min(total, Offset + rows);
         for (int i = Offset; i < last; i++)

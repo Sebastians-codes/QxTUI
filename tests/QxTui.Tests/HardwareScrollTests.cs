@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Text;
+using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Render;
+using QxTui.Widgets;
 
 namespace QxTui.Tests;
 
@@ -136,5 +138,56 @@ public class HardwareScrollGateTests
 
         Assert.DoesNotContain("\x1b[3S", s);
         Assert.DoesNotContain("\x1b[1;10r", s);
+    }
+}
+
+public class ScrollbarColumnSurvivesScrollTests
+{
+    private static CellBuffer WithTrack(int shift)
+    {
+        var b = new CellBuffer(20, 10);
+        for (int y = 0; y < 10; y++)
+        {
+            for (int x = 0; x < 19; x++)
+                b[x, y] = new Cell { Char = (char)('a' + ((y + shift) % 26)), Fg = 7 };
+            b[19, y] = new Cell { Char = '│', Fg = 8 }; // scrollbar track
+        }
+        return b;
+    }
+
+    [Fact]
+    public void FullWidthHint_RepaintsExposedScrollbarColumn()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(WithTrack(0), outp);
+
+        // hint covers the track column (what ListView now sends)
+        r.ScrollHint(new Rect(0, 0, 20, 10), 2);
+        var out2 = new ArrayBufferWriter<byte>();
+        r.Render(WithTrack(2), out2);
+        string frame = Encoding.UTF8.GetString(out2.WrittenSpan);
+
+        // exposed rows serialize the track glyph too — otherwise the
+        // terminal's shifted-blank track cells never repaint (vanishing
+        // scrollbar)
+        Assert.Contains("│", frame);
+    }
+
+    [Fact]
+    public void ContentOnlyHint_WouldLeaveTrackBlank_Documented()
+    {
+        // the old bug, pinned: a content-width hint never serializes the
+        // track column on scroll frames
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(WithTrack(0), outp);
+
+        r.ScrollHint(new Rect(0, 0, 19, 10), 2); // content only (old rect)
+        var out2 = new ArrayBufferWriter<byte>();
+        r.Render(WithTrack(2), out2);
+        string frame = Encoding.UTF8.GetString(out2.WrittenSpan);
+
+        Assert.DoesNotContain("│", frame);
     }
 }
