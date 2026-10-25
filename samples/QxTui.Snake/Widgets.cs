@@ -125,7 +125,7 @@ internal sealed class SnakeWidget : Widget
         _surface.Draw();
 
         // border: framework primitive
-        QxTui.Render.Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, 238);
+        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, 238);
 
         // overlays
         if (!_model.Alive)

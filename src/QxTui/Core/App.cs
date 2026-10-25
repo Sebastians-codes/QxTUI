@@ -92,9 +92,15 @@ public sealed class App : IDisposable
         _presentedWindowStart = NowMs() / 1000.0;
     }
 
-    /// <summary>Register a widget (attached to its Node) for the frame loop.</summary>
+    /// <summary>The palette widgets paint with (semantic roles, not ints).</summary>
+    public Theme Theme { get; set; } = Theme.Default;
+
+    /// <summary>Register a widget (attached to its Node) for the frame loop.
+    /// Mounts it: declared Tick/OnSignal hooks bind to this app's scheduler
+    /// and signals, and will be disposed with the app.</summary>
     public App AddWidget(Widget widget)
     {
+        widget.Mount(this);
         _widgets.Add(widget);
         return this;
     }
