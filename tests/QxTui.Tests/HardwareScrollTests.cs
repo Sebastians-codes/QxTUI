@@ -80,7 +80,8 @@ public class HardwareScrollTests
         // regression: every row identical, so a naive diff after a shift
         // sees "no change" and never repaints the terminal's blank
         // exposed rows -> ghost holes (the bug behind the user screenshot)
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false)
+            { HardwareScroll = true };
         static CellBuffer Uniform()
         {
             var b = new CellBuffer(20, 10);
@@ -158,7 +159,8 @@ public class ScrollbarColumnSurvivesScrollTests
     [Fact]
     public void FullWidthHint_RepaintsExposedScrollbarColumn()
     {
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false)
+            { HardwareScroll = true };
         var outp = new ArrayBufferWriter<byte>();
         r.Render(WithTrack(0), outp);
 
@@ -179,7 +181,8 @@ public class ScrollbarColumnSurvivesScrollTests
     {
         // the old bug, pinned: a content-width hint never serializes the
         // track column on scroll frames
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false)
+            { HardwareScroll = true };
         var outp = new ArrayBufferWriter<byte>();
         r.Render(WithTrack(0), outp);
 

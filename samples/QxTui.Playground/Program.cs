@@ -60,6 +60,7 @@ var hud = new HudWidget(() => themeNames[themeIdx], app.TargetFpsSignal);
 var ball = new BallWidget(speed);
 var staticPanel = new StaticPanelWidget();
 var stats = new StatsPanelWidget(staticPanel, ball);
+stats.MaxRenderHz = 10; // per-component cap demo: HUD text doesn't need 120Hz
 
 var wrapDemo = new TextWidget(() =>
     "wrapping: 日本語のテキスト flows by 2-col runes, emoji 👍 = 2 cols, " +

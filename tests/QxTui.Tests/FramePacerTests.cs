@@ -166,3 +166,29 @@ public class AdaptivePacingTests
             Assert.Equal(120, app.AdaptToPresented(118)); // keeping up: no change
     }
 }
+
+public class PerComponentCapTests
+{
+    [Fact]
+    public void MaxRenderHz_DefersRepaints_NotDrops()
+    {
+        var w = new BlockWidgetPublic('x', 7) { MaxRenderHz = 20 }; // 50ms
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
+        w.Node.Grow = 1;
+        root.Add(w.Node);
+        var term = new FakeTerminal(10, 4);
+        using var app = new App(term, root, targetFps: 240, asyncPresenting: false);
+        app.RunFrame();
+        long first = w.RenderCount;
+
+        w.Invalidate();
+        app.RunFrame();              // inside the 50ms window: deferred
+        Assert.Equal(first, w.RenderCount);
+        Assert.True(w.Dirty);        // deferred, NOT dropped
+
+        Thread.Sleep(70);
+        w.Invalidate();
+        app.RunFrame();
+        Assert.Equal(first + 1, w.RenderCount);
+    }
+}

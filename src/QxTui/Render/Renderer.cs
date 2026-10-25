@@ -34,7 +34,12 @@ public sealed class Renderer : IDisposable
     /// exposed rows serialize, keeping scroll frames ~1KB so terminals
     /// keep presenting at speed. Disable if an emulator misimplements
     /// SU/SD (front buffer stays authoritative either way).</summary>
-    public bool HardwareScroll { get; set; } = true;
+    /// <summary>Default OFF: our stream is verified clean against a
+    /// conformant SU/SD terminal (scroll_integrity_probe), but foot's
+    /// scroll-region execution under load produced tinted artifacts and
+    /// at least one crash at high targets — correctness first; toggle in
+    /// the playground popup for terminals that behave.</summary>
+    public bool HardwareScroll { get; set; }
 
     private Layout.Rect _hintRect;
     private int _hintDelta;

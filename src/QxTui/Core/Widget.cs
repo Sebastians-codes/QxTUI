@@ -227,12 +227,27 @@ public abstract class Widget
     /// CellBuffer clips anything outside.</summary>
     public abstract void Render(CellBuffer buffer);
 
-    internal void RenderTracked(CellBuffer buffer)
+    /// <summary>Per-component repaint cap in Hz (0 = uncapped). A dirty
+    /// widget whose last paint is newer than 1/Hz stays dirty and paints
+    /// on the next eligible frame — deferred, never dropped. Lets a HUD
+    /// tick at 5Hz while a ball animates at 120Hz in the same scene.</summary>
+    public double MaxRenderHz { get; set; }
+    private long _lastRenderTs = long.MinValue / 2;
+
+    internal bool RenderTracked(CellBuffer buffer)
     {
+        if (MaxRenderHz > 0)
+        {
+            long now = Environment.TickCount64;
+            if ((now - _lastRenderTs) * MaxRenderHz < 1000)
+                return false; // too soon: stay dirty, skip this frame
+            _lastRenderTs = now;
+        }
         _lastBuffer = buffer;
         Render(buffer);
         RenderCount++;
         Dirty = false;
+        return true;
     }
 
     /// <summary>Releases ticks/subscriptions declared via Tick/OnSignal.

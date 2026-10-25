@@ -181,6 +181,8 @@ public sealed class App : IDisposable
         _scheduler = new AnimationScheduler(time);
         _pacer = new FramePacer(targetFps);
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
+        _snapW = _back.Width;
+        _snapH = _back.Height;
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _presenter = asyncPresenting ? new FramePresenter(terminal.Write) : null;
         _userTargetFps = targetFps;
@@ -757,16 +759,18 @@ public sealed class App : IDisposable
                 continue;
             if (widget.Dirty)
             {
-                widget.RenderTracked(_back);
-                anyRendered = true;
-                if (Trace)
-                    _traceRendered.Add($"{widget.GetType().Name}:{widget.Rect}");
+                if (widget.RenderTracked(_back))
+                {
+                    anyRendered = true;
+                    if (Trace)
+                        _traceRendered.Add($"{widget.GetType().Name}:{widget.Rect}");
 
-                // a parent repainting its full rect erases its children's
-                // pixels: children must repaint in the same frame (they come
-                // later in pre-order), or they'd blink/vanish
-                for (int c = 0; c < widget.Children.Count; c++)
-                    widget.Children[c].Invalidate();
+                    // a parent repainting its full rect erases its children's
+                    // pixels: children must repaint in the same frame (they come
+                    // later in pre-order), or they'd blink/vanish
+                    for (int c = 0; c < widget.Children.Count; c++)
+                        widget.Children[c].Invalidate();
+                }
             }
         }
 
