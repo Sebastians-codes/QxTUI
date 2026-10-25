@@ -18,6 +18,7 @@ internal sealed class SnakeWidget : Widget
     private readonly Signal<bool> _alive;
     private long _lastStepTs;
     private HalfBlockSurface? _surface;
+    private readonly Scenery _scenery = new();
     public bool Paused;
 
     public SnakeWidget(QxTui.Animation.AnimationScheduler scheduler, Signal<int> score, Signal<bool> alive)
@@ -107,8 +108,9 @@ internal sealed class SnakeWidget : Widget
             buffer[r.Right - 1, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
         }
 
-        // square pixels: food, then snake (head brightest)
+        // square pixels: scenery first, then food, then snake (head brightest)
         _surface.Clear();
+        _scenery.Paint(_surface, now / 1000.0);
         _surface.SetPixel(_model.Food.X, _model.Food.Y, 196);
         for (int i = _model.Body.Count - 1; i >= 0; i--)
             _surface.SetPixel(_model.Body[i].X, _model.Body[i].Y, i == 0 ? 46 : 42);
