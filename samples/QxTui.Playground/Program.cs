@@ -143,7 +143,9 @@ ModalWidget MakeFpsModal() => new("fps settings",
     [
         "third level: popovers on",
         "popovers on popovers.",
-        $"current target: {app.TargetFps} fps",
+        $"current target: {app.RequestedFps} fps",
+        $"effective: {app.TargetFps} fps (may adapt down)",
+        $"presented: {app.Stats.PresentedFps.ToString("F0")} fps",
     ],
     dim: true,
     actions:

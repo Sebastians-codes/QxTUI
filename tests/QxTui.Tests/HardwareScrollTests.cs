@@ -224,3 +224,56 @@ public class DropRepairTests
         Assert.Equal(0, idle.DirtyCells); // converged
     }
 }
+
+public class TabRoundTripHoleTests
+{
+    private sealed class RenderOnceWidget : Widget
+    {
+        public int Renders;
+        public override void Render(CellBuffer buffer)
+        {
+            // like the playground's static panel: paints fully whenever the
+            // FRAMEWORK asks (i.e. when dirty); "static" means never dirtied
+            // in steady state — NOT refusing to repaint after an erase
+            Renders++;
+            var r = Rect;
+            buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = 'S', Fg = 7 });
+        }
+    }
+
+    [Fact]
+    public void StaticWidget_SurvivesTabRoundTrip_NoErasedHoles()
+    {
+        var once = new RenderOnceWidget();
+        var page1 = new ContainerWidget();
+        page1.Node.Direction = FlexDirection.Column;
+        page1.Node.Height = 5;
+        once.Node.Grow = 1;
+        page1.AddChild(once);
+
+        var page2 = new ContainerWidget();
+        page2.Node.Direction = FlexDirection.Column;
+        page2.Node.Height = 5;
+
+        var router = new Router();
+        router.Register("a", () => page1);
+        router.Register("b", () => page2);
+        var root = UI.Column(0, router.Grow(1));
+        var term = new FakeTerminal(20, 8);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        router.Switch("a");
+        app.RunFrame();
+        Assert.Equal('S', app.Back[0, 0].Char);
+
+        router.Switch("b");
+        app.RunFrame();
+        router.Switch("a");   // round trip: page1 was erased on detach
+        app.RunFrame();
+
+        // the render-once widget must have been re-dirtied on re-attach,
+        // not left clean over its erased pixels
+        Assert.Equal('S', app.Back[0, 0].Char);
+        Assert.Equal(2, once.Renders); // exactly one repaint for the return
+    }
+}

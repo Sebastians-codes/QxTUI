@@ -218,6 +218,18 @@ public sealed class App : IDisposable
             AttachSubtree(child.Children[i]);
         RebuildFlat();
         _needsLayout = true; // new nodes need rects before they can paint
+
+        // a re-attached subtree (tab round-trip) was ERASED on detach but
+        // its widgets may still consider themselves clean — static panels
+        // render exactly once, idle buttons only on state change — so
+        // without this their erased holes persist forever
+        void Dirty(Widget w)
+        {
+            w.Invalidate();
+            for (int i = 0; i < w.Children.Count; i++)
+                Dirty(w.Children[i]);
+        }
+        Dirty(child);
     }
 
     internal void DetachSubtree(Widget child, bool dispose = true)
@@ -251,6 +263,24 @@ public sealed class App : IDisposable
         {
             var r = rects[i];
             _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+        }
+
+        // erasing also destroys pixels of widgets that STAY registered
+        // (anything the detached subtree overlapped): they must repaint or
+        // the intersection stays a hole
+        for (int i = 0; i < _widgets.Count; i++)
+        {
+            var w = _widgets[i];
+            var wr = w.Rect;
+            for (int j = 0; j < rects.Count; j++)
+            {
+                var r = rects[j];
+                if (wr.X < r.Right && r.X < wr.Right && wr.Y < r.Bottom && r.Y < wr.Bottom)
+                {
+                    w.Invalidate();
+                    break;
+                }
+            }
         }
     }
 
