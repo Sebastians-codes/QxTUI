@@ -315,14 +315,101 @@ public class ModalActionTests
         app.PushOverlay(modal);
         app.RunFrame();
 
-        // action row sits at box.Bottom-2; box is centered: compute like the widget
-        // screen 40x12 → box w = max(24, len("x")+4, len(" 1:go ")+4) = 24; h = 1+4+2 = 7
-        // box = ((40-24)/2, (12-7)/2) = (8, 2); action row y = 2+7-2 = 7; x = 8+2 = 10
-        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;11;8M\x1b[<0;11;8m"))
+        // chip layout: box (8,2,24,7); action row y=7; hint at x=10,
+        // button chip rect x=12..15 → click (13,7) = 1-based (14,8)
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;14;8M\x1b[<0;14;8m"))
             term.QueueInput(b);
         app.RunFrame();
 
         Assert.Equal(1, hits);
         Assert.NotNull(app.Overlay);
+    }
+}
+
+public class FloatingPopupTests
+{
+    [Fact]
+    public void FloatingPopup_KeepsBaseRendering()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        Assert.Equal(1, baseWidget.RenderCount);
+
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        baseWidget.Invalidate();
+        app.RunFrame();
+        baseWidget.Invalidate();
+        app.RunFrame();
+
+        Assert.Equal(3, baseWidget.RenderCount); // background stays live
+    }
+
+    [Fact]
+    public void DimmedModal_StillFreezesBase()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: true));
+        baseWidget.Invalidate();
+        app.RunFrame();
+
+        Assert.Equal(1, baseWidget.RenderCount); // frozen under the dim
+    }
+
+    [Fact]
+    public void ModalContent_IsReactive()
+    {
+        int counter = 0;
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(30, 12);
+        var clock = new QxTui.Animation.VirtualTimeSource();
+        using var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+
+        var modal = new ModalWidget("t", () => [$"n={counter}"], dim: false);
+        app.PushOverlay(modal);
+        app.RunFrame();
+        Assert.Equal(1, modal.RenderCount);
+
+        counter = 7;
+        clock.Advance(TimeSpan.FromMilliseconds(300)); // past the 250ms tick
+        app.RunFrame();
+
+        Assert.True(modal.RenderCount >= 2,
+            $"modal must re-render on its tick to stay reactive, got {modal.RenderCount}");
+    }
+}
+
+public class OverlayZOrderTests
+{
+    [Fact]
+    public void Overlay_RepaintsOverBase_EveryFrame_EvenWhenBaseIsDirty()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+
+        // base repaints every frame (floating popup => not frozen)
+        for (int i = 0; i < 3; i++)
+        {
+            baseWidget.Invalidate();
+            app.RunFrame();
+        }
+
+        // box interior must still be the modal's, not the base's 'T'
+        // screen 30x12, box = (3,3,24,5) → center (15,5)
+        Assert.NotEqual('T', app.Back[15, 5].Char);
+        Assert.Equal(233, app.Back[15, 5].Bg); // modal panel bg wins
     }
 }

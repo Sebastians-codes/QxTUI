@@ -375,13 +375,23 @@ public sealed class App : IDisposable
 
         // 5) retained render: only dirty widgets touch the back buffer
         bool modalOpen = _overlay is not null;
+
+        // z-order: the overlay is the top layer — repaint it LAST EVERY
+        // frame, not only when dirty. Otherwise base widgets that render
+        // on top of its stale pixels (floating popups over live content)
+        // glitch through it. The diff keeps the wire cost at real changes.
+        if (_overlay is not null)
+            _overlay.Invalidate();
+
         bool anyRendered = false;
         for (int i = 0; i < _widgets.Count; i++)
         {
             var widget = _widgets[i];
-            // a modal blocks the base: frozen base keeps the dim layer clean
-            // (otherwise ticking widgets repaint over the dim patchwork-style)
-            if (modalOpen && !ReferenceEquals(widget, _overlay))
+            // a DIMMED modal blocks the base: frozen base keeps the dim
+            // layer clean (otherwise ticking widgets repaint over the dim
+            // patchwork-style). Floating popups let the background live.
+            if (_overlay is { BlocksBaseRendering: true } &&
+                !ReferenceEquals(widget, _overlay))
                 continue;
             if (widget.Dirty)
             {

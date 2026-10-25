@@ -72,7 +72,7 @@ checks = {
     "stats panel":      "static renders: 1" in screen or "static renders:" in text,
     "help line":        "t: theme" in text,
     "popup opens":      "modals swallow" in text,
-    "popup fps buttons": "4:240fps" in text,
+    "popup fps buttons": "240fps" in text,
     "popup closes":     "modals swallow" not in screen,
     "clean exit":       "\x1b[?1049l" in text,
 }

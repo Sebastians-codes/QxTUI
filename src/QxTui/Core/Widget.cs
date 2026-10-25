@@ -108,6 +108,11 @@ public abstract class Widget
     /// must be enabled; the App maintains this and invalidates on change).</summary>
     public bool Hovered { get; internal set; }
 
+    /// <summary>While this widget is the open overlay: freeze base paints
+    /// (dimmed modals need it to keep the dim clean). Floating popups set
+    /// false so the background stays live behind them.</summary>
+    public bool BlocksBaseRendering { get; set; }
+
     /// <summary>Raw mouse events hitting this widget's rect. Return true to
     /// consume (stop routing to widgets below).</summary>
     public virtual bool OnMouse(MouseEvent ev) => false;

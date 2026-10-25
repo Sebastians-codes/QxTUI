@@ -140,6 +140,8 @@ public sealed class ModalWidget : Widget
         _dim = dim;
         _actions = actions ?? [];
         Clickable = true;
+        BlocksBaseRendering = dim; // floating popups keep the background live
+        Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
     }
 
     public override bool HandleKey(KeyEvent ev)
@@ -166,13 +168,13 @@ public sealed class ModalWidget : Widget
         foreach (var l in lines) w = Math.Min(screen.W - 4, Math.Max(w, l.Length + 4));
         int actionsWidth = 0;
         for (int i = 0; i < _actions.Length; i++)
-            actionsWidth += _actions[i].Label.Length + 7; // " 1:label "
+            actionsWidth += _actions[i].Label.Length + 5; // hint(2)+pad(2)+gap(1)
         w = Math.Min(screen.W - 4, Math.Max(w, actionsWidth + 4));
         int h = Math.Min(screen.H - 2, lines.Length + 4 + (_actions.Length > 0 ? 2 : 0));
         return new Rect((screen.W - w) / 2, (screen.H - h) / 2, w, h);
     }
 
-    /// <summary>Screen rects of the action buttons, in order.</summary>
+    /// <summary>Button-chip rects (the filled part), in order.</summary>
     private List<(Rect Rect, Action Act)> ActionRects(Rect box)
     {
         var result = new List<(Rect, Action)>(_actions.Length);
@@ -180,11 +182,32 @@ public sealed class ModalWidget : Widget
         int y = box.Bottom - 2;
         for (int i = 0; i < _actions.Length; i++)
         {
-            string label = $" {i + 1}:{_actions[i].Label} ";
-            result.Add((new Rect(x, y, label.Length, 1), _actions[i].Act));
-            x += label.Length + 1;
+            int btnW = _actions[i].Label.Length + 2;
+            result.Add((new Rect(x + 2, y, btnW, 1), _actions[i].Act));
+            x += 2 + btnW + 1; // hint(2) + button + gap(1)
         }
         return result;
+    }
+
+    private int _hoverAction = -1;
+
+    public override bool OnMouse(MouseEvent ev)
+    {
+        // per-button hover for the chip highlight
+        var box = BoxRect(Rect);
+        int idx = -1;
+        var rects = ActionRects(box);
+        for (int i = 0; i < rects.Count; i++)
+        {
+            var r = rects[i].Rect;
+            if (ev.X >= r.X && ev.X < r.Right && ev.Y == r.Y) { idx = i; break; }
+        }
+        if (idx != _hoverAction)
+        {
+            _hoverAction = idx;
+            Invalidate();
+        }
+        return false;
     }
 
     public override void OnClick(Point local)
@@ -220,22 +243,30 @@ public sealed class ModalWidget : Widget
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
         Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Double,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
-        buffer.WriteTextClipped(Clip, box.Right - 4, box.Y, "[x]", fg: Theme.Get(ThemeRole.Danger), bold: true);
+        // [x] as a filled chip, same language as the action buttons
+        buffer.WriteTextClipped(Clip, box.Right - 4, box.Y, " x ",
+            fg: 232, bg: Theme.Get(ThemeRole.Danger), bold: true);
 
         var lines = _lines();
         for (int i = 0; i < lines.Length && box.Y + 2 + i < box.Bottom - 1; i++)
             buffer.WriteTextClipped(Clip, box.X + 2, box.Y + 2 + i, lines[i],
                 fg: Theme.Get(ThemeRole.Text), bg: Theme.Get(ThemeRole.PanelBg));
 
-        // action button row
+        // action button row: key hint + filled chip (hover brightens)
         int ax = box.X + 2;
         int ay = box.Bottom - 2;
         for (int i = 0; i < _actions.Length; i++)
         {
-            string label = $" {i + 1}:{_actions[i].Label} ";
-            buffer.WriteTextClipped(Clip, ax, ay, label,
-                fg: Theme.Get(ThemeRole.Title), bg: Theme.Get(ThemeRole.PanelBg), bold: true);
-            ax += label.Length + 1;
+            string label = _actions[i].Label;
+            int btnW = label.Length + 2;
+
+            buffer.WriteTextClipped(Clip, ax, ay, $"{i + 1}", fg: Theme.Get(ThemeRole.Dim));
+            int bg = Theme.Get(i == _hoverAction ? ThemeRole.Title : ThemeRole.Accent);
+            for (int cx = 0; cx < btnW; cx++)
+                buffer.WriteTextClipped(Clip, ax + 2 + cx, ay, " ", fg: 232, bg: bg);
+            buffer.WriteTextClipped(Clip, ax + 3, ay, label, fg: 232, bg: bg, bold: true);
+
+            ax += 2 + btnW + 1;
         }
     }
 }
