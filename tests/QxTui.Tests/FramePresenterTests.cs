@@ -222,3 +222,46 @@ public class DropResyncTests
         public void Dispose() { }
     }
 }
+
+public class WrittenIdTests
+{
+    private sealed class GateSink(List<string> seen, ManualResetEventSlim gate)
+    {
+        public void Write(ReadOnlySpan<byte> b)
+        {
+            gate.Wait(TimeSpan.FromSeconds(2));
+            lock (seen) seen.Add(System.Text.Encoding.UTF8.GetString(b));
+        }
+    }
+
+    [Fact]
+    public void WrittenId_SkipsDroppedSubmits()
+    {
+        var seen = new List<string>();
+        var gate = new ManualResetEventSlim(true);
+        using var p = new FramePresenter(new GateSink(seen, gate).Write);
+
+        p.Submit("frame1"u8, 1);
+        SpinWait.SpinUntil(() => { lock (seen) return seen.Count == 1; }, TimeSpan.FromSeconds(2));
+        Assert.Equal(1, p.WrittenId);
+
+        gate.Reset();                 // writer blocks inside the next write
+        p.Submit("frame2"u8, 2);      // writer grabs it, stalls
+        Thread.Sleep(50);             // let the wake land before submitting
+        p.Submit("frame3"u8, 3);      // mailbox
+        p.Submit("frame4"u8, 4);      // replaces 3 -> 3 is DROPPED
+        Assert.Equal(1, p.WrittenId); // nothing new reached the terminal
+
+        gate.Set();
+        SpinWait.SpinUntil(() => { lock (seen) return seen.Count == 3; }, TimeSpan.FromSeconds(2));
+
+        lock (seen)
+        {
+            // the dropped frame's content never reaches the terminal, so
+            // it must never be a repair base
+            Assert.Equal(["frame1", "frame2", "frame4"], seen);
+        }
+        Assert.Equal(4, p.WrittenId);
+        Assert.Equal(1, p.DroppedCount);
+    }
+}

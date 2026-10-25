@@ -59,6 +59,13 @@ public sealed class App : IDisposable
     private CellBuffer _back;
     private Renderer _renderer;
     private CellBuffer? _lastSubmitted;
+    private CellBuffer? _snapA;
+    private CellBuffer? _snapB;
+    private long _snapIdA = long.MinValue;
+    private long _snapIdB = long.MinValue;
+    private long _submitId;
+    private int _snapW = -1;
+    private int _snapH = -1;
     private readonly FramePresenter? _presenter;
     private bool _needsLayout = true;
     // true by default so RunFrame() works standalone (headless tests);
@@ -671,6 +678,10 @@ public sealed class App : IDisposable
             _back.Resize(w, h, preserve: false);
             _lastSubmitted?.Dispose();
             _lastSubmitted = null; // size changes; recreated on next submit
+            _snapA?.Dispose(); _snapA = null;
+            _snapB?.Dispose(); _snapB = null;
+            _snapIdA = _snapIdB = long.MinValue;
+            _snapW = w; _snapH = h;
             _renderer.Resize(w, h); // fresh empty prev → diff = whole screen
             InvalidateAll();
             _needsLayout = true;
@@ -706,7 +717,11 @@ public sealed class App : IDisposable
 
                 var prev = widget.Node.PreviousRect;
                 if (!prev.Equals(default(Rect)) && !prev.Equals(widget.Rect))
+                {
                     _back.FillRect(prev.X, prev.Y, prev.W, prev.H, Cell.Empty);
+                    if (Trace)
+                        _traceErases.Add($"{widget.GetType().Name}:{prev}");
+                }
                 widget.Invalidate();
             }
 
@@ -744,6 +759,8 @@ public sealed class App : IDisposable
             {
                 widget.RenderTracked(_back);
                 anyRendered = true;
+                if (Trace)
+                    _traceRendered.Add($"{widget.GetType().Name}:{widget.Rect}");
 
                 // a parent repainting its full rect erases its children's
                 // pixels: children must repaint in the same frame (they come
@@ -772,14 +789,25 @@ public sealed class App : IDisposable
             // front buffer on the last SUBMITTED content and repair with a
             // minimal delta (a full repaint here would flood a terminal
             // that is already drowning: drop → 40KB → more drops)
-            if (dropped && _lastSubmitted is not null)
-                _renderer.AdoptPrev(_lastSubmitted);
+            if (dropped && _presenter is not null)
+            {
+                // rebase on the frame the writer ACTUALLY wrote: a dropped
+                // submit's snapshot is content the terminal never saw, and
+                // diffing against it freezes holes forever
+                var written = _presenter.WrittenId;
+                var snap = written == _snapIdA ? _snapA
+                           : written == _snapIdB ? _snapB
+                           : _lastSubmitted;
+                if (snap is not null)
+                    _renderer.AdoptPrev(snap);
+            }
 
             _output.Clear();
             result = _renderer.Render(_back, _output, forceFull: false);
+            long frameId = ++_submitId;
             if (_presenter is { } presenter)
             {
-                presenter.Submit(_output.WrittenSpan);
+                presenter.Submit(_output.WrittenSpan, frameId);
             }
             else
             {
@@ -787,9 +815,25 @@ public sealed class App : IDisposable
             }
             _renderedWindowFrames++;
 
-            _lastSubmitted ??= new CellBuffer(_back.Width, _back.Height);
-            if (_lastSubmitted.Width == _back.Width && _lastSubmitted.Height == _back.Height)
-                _back.Cells.CopyTo(_lastSubmitted.Cells);
+            if (_back.Width == _snapW && _back.Height == _snapH)
+            {
+                // two-slot ring keyed by submit id: the frame the writer
+                // last wrote is always one of these two snapshots
+                if (frameId % 2 == 0)
+                {
+                    _snapA ??= new CellBuffer(_back.Width, _back.Height);
+                    _back.Cells.CopyTo(_snapA.Cells);
+                    _snapIdA = frameId;
+                    _lastSubmitted = _snapA;
+                }
+                else
+                {
+                    _snapB ??= new CellBuffer(_back.Width, _back.Height);
+                    _back.Cells.CopyTo(_snapB.Cells);
+                    _snapIdB = frameId;
+                    _lastSubmitted = _snapB;
+                }
+            }
 
             Stats.LastBytesWritten = result.BytesWritten;
             Stats.LastDirtyCells = result.DirtyCells;
@@ -803,6 +847,7 @@ public sealed class App : IDisposable
         Stats.FrameWorkP50Ms = _pacer.FrameTimeP50Ms;
         Stats.FrameWorkP99Ms = _pacer.FrameTimeP99Ms;
         Stats.DroppedFrames = _presenter?.DroppedCount ?? 0;
+        TraceFrame(relayoutThisFrame);
         UpdatePresentedFps();
 
         if (pace)
@@ -817,6 +862,48 @@ public sealed class App : IDisposable
     /// resize) and gets cleared so the diff erases it on the terminal.
     /// O(cells × widgets) — only runs on layout frames.
     /// </summary>
+    // ---- debug ledger (QXTUI_TRACE=1): one line per frame with relayout,
+    // prev-rect erases, uncovered clears, rendered widgets, and whether the
+    // back buffer still holds a probe string. For hunting bake-in frames.
+    internal static readonly bool Trace =
+        Environment.GetEnvironmentVariable("QXTUI_TRACE") == "1";
+    private static System.IO.StreamWriter? _traceWriter;
+    private static System.IO.StreamWriter TraceWriter =>
+        _traceWriter ??= new System.IO.StreamWriter(
+            Environment.GetEnvironmentVariable("QXTUI_TRACE_FILE")
+                ?? "/tmp/qxtui_trace.log", append: false);
+    private int _traceFrame;
+    private readonly List<string> _traceErases = new();
+    private readonly List<string> _traceRendered = new();
+    private int _traceUncovered;
+
+    private void TraceFrame(bool relayout)
+    {
+        if (!Trace) return;
+        bool probe = BackContains("damage isolation");
+        var w = TraceWriter;
+        w.WriteLine($"f{_traceFrame} relayout={relayout} uncovered={_traceUncovered} " +
+                    $"probe={probe} erases=[{string.Join(",", _traceErases)}] " +
+                    $"rendered=[{string.Join(",", _traceRendered)}]");
+        w.Flush();
+        _traceErases.Clear();
+        _traceRendered.Clear();
+        _traceUncovered = 0;
+        _traceFrame++;
+    }
+
+    private bool BackContains(string text)
+    {
+        var cells = _back.Cells;
+        int ni = 0;
+        for (int i = 0; i < cells.Length; i++)
+        {
+            ni = cells[i].Char == text[ni] ? ni + 1 : 0;
+            if (ni == text.Length) return true;
+        }
+        return false;
+    }
+
     private void ClearUncovered()
     {
         if (_widgets.Count == 0)
@@ -842,7 +929,10 @@ public sealed class App : IDisposable
                     }
                 }
                 if (!covered)
+                {
                     _back[x, y] = Cell.Empty;
+                    _traceUncovered++;
+                }
             }
         }
     }
@@ -893,6 +983,8 @@ public sealed class App : IDisposable
         _presenter?.Dispose();
         _back.Dispose();
         _lastSubmitted?.Dispose();
+        _snapA?.Dispose();
+        _snapB?.Dispose();
         _renderer.Dispose();
         _terminal.Dispose();
     }

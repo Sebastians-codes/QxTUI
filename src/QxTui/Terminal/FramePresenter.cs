@@ -21,8 +21,15 @@ public sealed class FramePresenter : IDisposable
 
     private byte[]? _buffer;
     private int _length;
+    private long _pendingId;
+    private long _writtenId;
     private bool _hasFrame;
     private bool _stopped;
+
+    /// <summary>Id of the frame the writer actually handed to the terminal.
+    /// Dropped submits never reach it — rebasing repair on anything else
+    /// diffs against content the terminal never showed (frozen holes).</summary>
+    public long WrittenId => Volatile.Read(ref _writtenId);
 
     /// <summary>Frames actually handed to the terminal (emulator-limited).</summary>
     public long PresentedCount => Volatile.Read(ref _presented);
@@ -59,7 +66,12 @@ public sealed class FramePresenter : IDisposable
 
     /// <summary>Hand a frame to the writer. Never blocks on the terminal:
     /// if the previous frame is still waiting, it is dropped (latest wins).</summary>
-    public void Submit(ReadOnlySpan<byte> frame)
+    public void Submit(ReadOnlySpan<byte> frame) => Submit(frame, 0);
+
+    /// <summary>Hand a frame to the writer with an app-assigned id. Never
+    /// blocks on the terminal: if the previous frame is still waiting, it
+    /// is dropped (latest wins) — and its id NEVER becomes WrittenId.</summary>
+    public void Submit(ReadOnlySpan<byte> frame, long id)
     {
         lock (_gate)
         {
@@ -78,6 +90,7 @@ public sealed class FramePresenter : IDisposable
 
             frame.CopyTo(_buffer);
             _length = frame.Length;
+            _pendingId = id;
             _hasFrame = true;
             Monitor.PulseAll(_gate);
         }
@@ -89,6 +102,7 @@ public sealed class FramePresenter : IDisposable
         {
             byte[] buffer;
             int length;
+            long id;
 
             lock (_gate)
             {
@@ -100,6 +114,7 @@ public sealed class FramePresenter : IDisposable
 
                 buffer = _buffer!;
                 length = _length;
+                id = _pendingId;
                 _buffer = null;
                 _hasFrame = false;
             }
@@ -110,6 +125,7 @@ public sealed class FramePresenter : IDisposable
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0
                         / System.Diagnostics.Stopwatch.Frequency;
             if (ms > _maxWriteMs) _maxWriteMs = ms;
+            Volatile.Write(ref _writtenId, id); // THIS content is on screen
             Interlocked.Increment(ref _presented);
 
             ArrayPool<byte>.Shared.Return(buffer);
