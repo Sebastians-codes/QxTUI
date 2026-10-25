@@ -601,6 +601,18 @@ public sealed class App : IDisposable
             SetCellPixelSize(_keyParser.CellPixW, _keyParser.CellPixH);
             _terminal.Write("\x1b[?1016h"u8); // reply proved capability
         }
+        else if (_cellPixH == 0 && _keyParser.WinPixH > 0 &&
+                 _terminal.Height > 0 && _terminal.Width > 0)
+        {
+            // foot ignores 16 t but answers 14 t: derive the cell size
+            int ch = _keyParser.WinPixH / _terminal.Height;
+            int cw = _keyParser.WinPixW / _terminal.Width;
+            if (ch >= 4 && cw >= 4) // sanity: a "cell" smaller than 4px is a lie
+            {
+                SetCellPixelSize(cw, ch);
+                _terminal.Write("\x1b[?1016h"u8);
+            }
+        }
 
         while (_running && _keyParser.TryReadMouse(out var mouseEvent))
             RouteMouse(ToCellCoords(mouseEvent));
@@ -825,7 +837,17 @@ public sealed class App : IDisposable
             _mouseWindowEvents = 0;
             _presentedWindowFrames = 0;
             _presentedWindowStart = nowS;
-            AdaptToPresented(Stats.PresentedFps);
+
+            // adapt ONLY on evidence of flooding: we submitted clearly more
+            // than the terminal showed. An idle scene renders ~4fps because
+            // nothing changes — treating that as a slow terminal demoted
+            // user targets while the app was merely quiet.
+            bool saturated = Stats.RenderedFps > Stats.PresentedFps * 1.2;
+            bool busy = Stats.RenderedFps > 10;
+            if (saturated)
+                AdaptToPresented(Stats.PresentedFps);
+            else if (busy)
+                AdaptToPresented(Math.Max(Stats.PresentedFps, _effectiveFps * 0.95));
         }
     }
 

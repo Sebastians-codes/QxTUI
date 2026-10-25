@@ -86,3 +86,32 @@ public class PixelMouseTests
             .GetValue(list) is true);
     }
 }
+
+public class CellSizeFallbackTests
+{
+    [Fact]
+    public void Parser_ReadsWindowSizeReply()
+    {
+        var p = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[4;800;1600t"))
+            p.Feed(b);
+        Assert.Equal(1600, p.WinPixW);
+        Assert.Equal(800, p.WinPixH);
+    }
+
+    [Fact]
+    public void WindowReply_DerivesCellSize_When16tUnanswered()
+    {
+        var list = new ListView(() => 100);
+        var root = UI.Column(0, list.Grow(1));
+        var term = new FakeTerminal(80, 40); // 1600/80=20px cols, 800/40=20px rows
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[4;800;1600t"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.Equal(20, app.CellPixelH);
+        Assert.Equal(20, app.CellPixelW);
+    }
+}

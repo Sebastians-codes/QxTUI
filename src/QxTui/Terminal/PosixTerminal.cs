@@ -86,6 +86,7 @@ public sealed class PosixTerminal : ITerminal
         // proves the terminal can answer it — pixel coords misread as cells
         // would break all input otherwise
         WriteRaw("\x1b[16t");    // cell size in px
+        WriteRaw("\x1b[14t");    // window size in px (fallback cell probe)
         WriteRaw("\x1b[2J");      // clear
     }
 

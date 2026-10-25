@@ -44,6 +44,7 @@ public sealed class KeyParser
     private int _plen;
     private int _param0;
     private bool _isMouse;
+    private bool _paramDone;
     private State _state = State.Ground;
 
     public void Feed(byte b)
@@ -61,6 +62,7 @@ public sealed class KeyParser
                         _state = State.Csi;
                         _plen = 0;
                         _param0 = 0;
+                        _paramDone = false;
                         _isMouse = false;
                         break;
                     case (byte)'O':
@@ -84,8 +86,12 @@ public sealed class KeyParser
                 {
                     if (_plen < _params.Length)
                         _params[_plen++] = b;
-                    if (b >= '0' && b <= '9' && _plen <= 3)
-                        _param0 = _param0 * 10 + (b - '0'); // first numeric param
+                    // first numeric param ONLY: stop at the first ';'
+                    // (the old _plen<=3 heuristic read "4;800" as 48)
+                    if (b >= '0' && b <= '9' && !_paramDone)
+                        _param0 = _param0 * 10 + (b - '0');
+                    else if (b == ';')
+                        _paramDone = true;
                     break;
                 }
 
@@ -97,6 +103,8 @@ public sealed class KeyParser
                     ParseMouse(b);
                 else if (b == (byte)'t' && _param0 == 16)
                     ParseCellSize();   // CSI 16 ; w ; h t
+                else if (b == (byte)'t' && _param0 == 4)
+                    ParseWindowSize(); // CSI 4 ; h ; w t (fallback probe)
                 else
                 {
                     var ev = Translate(b, _param0);
@@ -157,6 +165,34 @@ public sealed class KeyParser
         {
             CellPixW = w;
             CellPixH = h;
+        }
+    }
+
+    /// <summary>Window size in pixels (CSI 14 t reply). Divided by the
+    /// terminal's rows/cols this yields the cell size when CSI 16 t is
+    /// unanswered (foot ignores 16 t but answers 14 t).</summary>
+    public int WinPixW { get; private set; }
+    public int WinPixH { get; private set; }
+
+    private void ParseWindowSize()
+    {
+        int h = 0, w = 0, field = 0, acc = 0;
+        for (int i = 0; i <= _plen; i++)
+        {
+            if (i < _plen && _params[i] >= '0' && _params[i] <= '9')
+            {
+                acc = acc * 10 + (_params[i] - '0');
+                continue;
+            }
+            if (field == 1) h = acc;
+            else if (field == 2) w = acc;
+            field++;
+            acc = 0;
+        }
+        if (w > 0 && h > 0)
+        {
+            WinPixW = w;
+            WinPixH = h;
         }
     }
 

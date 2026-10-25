@@ -39,17 +39,23 @@ public class FramePresenterTests
         var sink = new Sink();
         using var presenter = new FramePresenter(sink.Write);
 
+        // warm the writer thread first: under parallel-suite load thread
+        // startup can exceed the submit spacing, and the first burst frame
+        // would be a legitimate latest-wins drop (not what this tests)
+        presenter.Submit(Encoding.ASCII.GetBytes("warm"));
+        SpinWait.SpinUntil(() => sink.Count == 1, TimeSpan.FromSeconds(2));
+
         for (int i = 0; i < 20; i++)
         {
             presenter.Submit(Encoding.ASCII.GetBytes($"frame{i:00}"));
             Thread.Sleep(2); // spaced like a real paced loop; writer keeps up
         }
 
-        SpinWait.SpinUntil(() => sink.Count == 20, TimeSpan.FromSeconds(2));
+        SpinWait.SpinUntil(() => sink.Count == 21, TimeSpan.FromSeconds(2));
 
-        Assert.Equal(20, sink.Count);
+        Assert.Equal(21, sink.Count);
         Assert.Equal("frame19", sink.Last());
-        Assert.Equal(20, presenter.PresentedCount);
+        Assert.Equal(21, presenter.PresentedCount);
         Assert.Equal(0, presenter.DroppedCount);
     }
 
