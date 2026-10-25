@@ -173,15 +173,21 @@ public class DropResyncTests
 
         gate.Set();
         widget.Char = 'z'; widget.Invalidate(); app.RunFrame(pace: false);
-        Thread.Sleep(150);          // let the writer drain
+        // wait on CONDITIONS, not wall clock: suite load makes fixed sleeps flaky
+        SpinWait.SpinUntil(() =>
+        {
+            lock (writes) return writes.Any(w => w.Contains('z'));
+        }, TimeSpan.FromSeconds(3));
 
         Assert.True(app.Stats.DroppedFrames > 0, "test setup must actually drop frames");
         // terminal converges on the truth: some write carries the 'z' block
         Assert.Contains(writes, w => w.Contains('z'));
         // repair frame is a delta: no whole-screen sweep (the old repair
         // opened with ESC[H and serialized every row, empty margins too)
+        string lastWrite;
+        lock (writes) lastWrite = writes.Count > 0 ? writes[^1] : "";
         Assert.True(sizes.Count >= 2, "expected initial + post-stall writes");
-        Assert.DoesNotContain("\x1b[H", sizes.Count > 0 ? writes[^1] : "");
+        Assert.DoesNotContain("\x1b[H", lastWrite);
     }
 
     private sealed class SlowTerminal(List<int> sizes, ManualResetEventSlim gate,

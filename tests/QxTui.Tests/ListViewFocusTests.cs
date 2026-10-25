@@ -316,13 +316,14 @@ public class HalfRowThumbTests
         list.ScrollTo(495);
         app.RunFrame();
 
-        Assert.Equal('▄', app.Back[29, 4].Char);
-        Assert.Equal('▀', app.Back[29, 5].Char);
+        // half position: lower-half dot band + upper-half dot band
+        Assert.Equal(ListView.BrailleBand(2, 3), app.Back[29, 4].Char);
+        Assert.Equal(ListView.BrailleBand(0, 1), app.Back[29, 5].Char);
 
-        // whole positions stay whole blocks
+        // whole positions: full dot blocks, same texture
         list.ScrollTo(0);
         app.RunFrame();
-        Assert.Equal('█', app.Back[29, 0].Char);
+        Assert.Equal(ListView.BrailleBand(0, 3), app.Back[29, 0].Char);
     }
 }
 
