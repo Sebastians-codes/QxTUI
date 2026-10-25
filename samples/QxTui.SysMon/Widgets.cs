@@ -300,6 +300,7 @@ internal sealed class NetWidget : Widget
     private static readonly double[] Scales =
         [100 * 1024, 1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024, 1024 * 1024 * 1024];
     private double _scale = Scales[0];
+    private int _lowSamples;
 
     public NetWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
@@ -327,9 +328,29 @@ internal sealed class NetWidget : Widget
             _tx.Push((float)_currTx);
             _lastSampleTs = now;
 
+            // Hysteresis: step UP immediately when traffic demands it, but
+            // step DOWN only after ~3 windows of quiet — otherwise a burst
+            // leaving the window flips the scale and re-stretches the line.
             double peak = Math.Max(_rx.Max(0f), _tx.Max(0f));
-            foreach (double candidate in Scales)
-                if (peak <= candidate) { _scale = candidate; break; }
+            if (peak > _scale)
+            {
+                foreach (double candidate in Scales)
+                    if (peak <= candidate) { _scale = candidate; break; }
+                _lowSamples = 0;
+            }
+            else if (peak < _scale / 10)
+            {
+                if (++_lowSamples >= 36) // 36 samples = 3 windows at 10Hz/12s
+                {
+                    int idx = Array.IndexOf(Scales, _scale);
+                    if (idx > 0) _scale = Scales[idx - 1];
+                    _lowSamples = 0;
+                }
+            }
+            else
+            {
+                _lowSamples = 0;
+            }
         }
 
         float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
@@ -340,12 +361,12 @@ internal sealed class NetWidget : Widget
             $"▼ {LinuxProc.HumanBytes(rxRate)}/s", fg: 42);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 12s", fg: 238);
         Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx, 42,
-            scaleMax: (float)_scale, phase: f);
+            scaleMax: (float)_scale); // rigid columns: spiky data must translate, not morph
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
             $"▲ {LinuxProc.HumanBytes(txRate)}/s", fg: 141);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 12s", fg: 238);
         Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx, 141,
-            scaleMax: (float)_scale, phase: f);
+            scaleMax: (float)_scale); // rigid columns
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
             $"graph full-scale: {LinuxProc.HumanBytes(_scale)}/s", fg: 238);
     }
