@@ -248,6 +248,19 @@ public sealed class ListView : Widget
         }
     }
 
+    /// <summary>Braille glyph with both dot columns filled over dot-rows
+    /// [from..to] (0..3, top-down): quarter-row vertical bands for
+    /// sub-half scrollbar precision.</summary>
+    internal static char BrailleBand(int from, int to)
+    {
+        int[] left = [0x01, 0x02, 0x04, 0x40];
+        int[] right = [0x08, 0x10, 0x20, 0x80];
+        int bits = 0;
+        for (int row = from; row <= to; row++)
+            bits |= left[row] | right[row];
+        return (char)(0x2800 + bits);
+    }
+
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
@@ -293,14 +306,19 @@ public sealed class ListView : Widget
         // rows, but half-block glyphs give two sub-positions per cell, so
         // the indicator creeps in half-cursor steps instead of hopping
         double posExact = thumbOff * (r.H - thumbH) / Math.Max(1, total - rows);
-        int half = (int)Math.Round(posExact * 2);
-        int topRow = r.Y + half / 2;
-        bool startsMidRow = half % 2 == 1;
+        int quarter = (int)Math.Round(posExact * 4);
+        int topRow = r.Y + quarter / 4;
+        int rem = quarter % 4;
 
         int accent = Theme.Get(ThemeRole.Accent);
-        if (startsMidRow)
+        if (rem == 0)
         {
-            // [row+0.5 .. row+0.5+thumbH]: lower half, full rows, upper half
+            for (int y = topRow; y < Math.Min(r.Bottom, topRow + thumbH); y++)
+                buffer.WriteTextClipped(Clip, sx, y, "█", fg: accent);
+        }
+        else if (rem == 2)
+        {
+            // half-row: [row+0.5 .. row+0.5+thumbH]
             if (topRow < r.Bottom)
                 buffer.WriteTextClipped(Clip, sx, topRow, "▄", fg: accent);
             for (int y = topRow + 1; y < Math.Min(r.Bottom, topRow + thumbH); y++)
@@ -311,8 +329,16 @@ public sealed class ListView : Widget
         }
         else
         {
-            for (int y = topRow; y < Math.Min(r.Bottom, topRow + thumbH); y++)
+            // quarter-row: braille patterns carry 4 dot-rows per cell, so
+            // partial edges render at 1/4 precision (Block Elements has no
+            // top-anchored quarter glyphs — a Unicode limit, not a font one)
+            if (topRow < r.Bottom)
+                buffer.WriteTextClipped(Clip, sx, topRow, BrailleBand(rem, 3).ToString(), fg: accent);
+            for (int y = topRow + 1; y < Math.Min(r.Bottom, topRow + thumbH); y++)
                 buffer.WriteTextClipped(Clip, sx, y, "█", fg: accent);
+            int lastRow = topRow + thumbH;
+            if (lastRow < r.Bottom)
+                buffer.WriteTextClipped(Clip, sx, lastRow, BrailleBand(0, rem - 1).ToString(), fg: accent);
         }
     }
 }

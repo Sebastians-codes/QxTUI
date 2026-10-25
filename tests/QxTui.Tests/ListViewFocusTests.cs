@@ -325,3 +325,37 @@ public class HalfRowThumbTests
         Assert.Equal('█', app.Back[29, 0].Char);
     }
 }
+
+public class QuarterRowThumbTests
+{
+    [Fact]
+    public void Thumb_RendersAtQuarterRowPrecision_ViaBraille()
+    {
+        // 1000 rows / 10 visible / track 9: offset 28 -> pos ~0.25 rows
+        var list = new ListView(() => 1000)
+        {
+            RenderRow = (b, c, r, i, sel) =>
+                b.WriteTextClipped(c, r.X, r.Y, $"row {i}", fg: 7),
+        };
+        var root = UI.Column(0, list.Grow(1));
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        list.ScrollTo(28);
+        app.RunFrame();
+
+        // top edge at 1/4: dotted band over dot-rows 1..3, then 0..0
+        Assert.Equal(ListView.BrailleBand(1, 3), app.Back[29, 0].Char);
+        Assert.Equal(ListView.BrailleBand(0, 0), app.Back[29, 1].Char);
+    }
+
+    [Fact]
+    public void BrailleBand_MapsDotRows()
+    {
+        Assert.Equal((char)(0x2800 + 0x01 + 0x08), ListView.BrailleBand(0, 0));
+        Assert.Equal((char)(0x2800 + 0x40 + 0x80), ListView.BrailleBand(3, 3));
+        Assert.Equal((char)(0x2800 + 0x01 + 0x02 + 0x04 + 0x40
+                             + 0x08 + 0x10 + 0x20 + 0x80), ListView.BrailleBand(0, 3));
+    }
+}
