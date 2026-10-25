@@ -196,12 +196,34 @@ public abstract class Widget
     /// Return true to consume.</summary>
     public virtual bool HandleKey(KeyEvent ev) => false;
 
+    private HalfBlockSurface? _pixels;
+    private Rect _pixelsRect;
+
+    /// <summary>Cached square-pixel canvas for this widget, rebuilt when the
+    /// rect changes (the rebuild flag is your cue to clear trails/state in
+    /// the old coordinate space).</summary>
+    protected (HalfBlockSurface Surface, bool Rebuilt) Pixels(Rect r, Cell background)
+    {
+        int pw = Math.Max(1, r.W - 2);
+        int ph = Math.Max(2, (r.H - 2) * 2);
+        bool rebuilt = _pixels is null || _pixelsRect != r;
+        if (rebuilt)
+        {
+            _pixels = new HalfBlockSurface(_lastBuffer!, r.X + 1, r.Y + 1, pw, ph, background);
+            _pixelsRect = r;
+        }
+        return (_pixels!, rebuilt);
+    }
+
+    private CellBuffer? _lastBuffer;
+
     /// <summary>Called by App exactly when Dirty. Draw within Rect bounds;
     /// CellBuffer clips anything outside.</summary>
     public abstract void Render(CellBuffer buffer);
 
     internal void RenderTracked(CellBuffer buffer)
     {
+        _lastBuffer = buffer;
         Render(buffer);
         RenderCount++;
         Dirty = false;

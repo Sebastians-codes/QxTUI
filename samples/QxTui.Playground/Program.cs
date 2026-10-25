@@ -34,7 +34,6 @@ var app = new App(terminal, new LayoutNode(), targetFps: 120);
 var linear = new Signal<float>(0f);
 var cubic = new Signal<float>(0f);
 var back = new Signal<float>(0f);
-var fpsSig = new Signal<int>(120);
 
 app.Scheduler.Animate(linear, 1f, new Transition(TimeSpan.FromSeconds(3), Easing.Linear, RepeatMode.Reverse));
 app.Scheduler.Animate(cubic, 1f, new Transition(TimeSpan.FromSeconds(2), Easing.OutCubic, RepeatMode.Reverse));
@@ -56,7 +55,7 @@ var walkHist = new RingHistory(120);
 
 var speed = new Signal<float>(0.5f); // mid-travel = exactly 1.0x
 
-var hud = new HudWidget(() => themeNames[themeIdx], fpsSig);
+var hud = new HudWidget(() => themeNames[themeIdx], app.TargetFpsSignal);
 var ball = new BallWidget(speed);
 var staticPanel = new StaticPanelWidget();
 var stats = new StatsPanelWidget(staticPanel, ball);
@@ -76,11 +75,7 @@ var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);
 var walkSpark = new SparklineWidget(walkHist, ThemeRole.Success, autoFloor: 10f);
 
 // feeder invalidates its dependents (kit widgets are draw-only)
-var feederWired = new FeederWidget(sineHist, walkHist, onChanged: () =>
-{
-    sineSpark.Invalidate();
-    walkSpark.Invalidate();
-});
+var feederWired = new FeederWidget(sineHist, walkHist);
 
 bool filledOn = false;
 var filledDemo = new ButtonWidget(
@@ -106,11 +101,7 @@ string[] PopupLines() =>
     "esc / [x] / dim click closes.",
 ];
 
-void SetFps(int v)
-{
-    app.SetTargetFps(v);
-    fpsSig.Set(v);
-}
+void SetFps(int v) => app.SetTargetFps(v); // TargetFpsSignal updates HUDs
 
 ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
     actions:
@@ -238,7 +229,6 @@ app.OnKey = ev =>
             int i = Array.IndexOf(fpsPresets, app.TargetFps);
             i = ev.Char == ']' ? Math.Min(i + 1, fpsPresets.Length - 1) : Math.Max(i - 1, 0);
             app.SetTargetFps(fpsPresets[i]);
-            fpsSig.Set(fpsPresets[i]);
             return true;
         }
 

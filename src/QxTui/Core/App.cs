@@ -55,7 +55,7 @@ public sealed class App : IDisposable
     // Quit() flips it, Run() re-arms it
     private bool _running = true;
     private long _lastPresentedCount;
-    private long _droppedAtLastSubmit;
+    private long _droppedSeen;
     private int _presentedWindowFrames;
     private double _presentedWindowStart;
 
@@ -69,9 +69,17 @@ public sealed class App : IDisposable
     public int BackHeight => _back.Height;
     public int TargetFps => _pacer.TargetFps;
 
+    /// <summary>The fps target as a signal — HUDs bind to it instead of
+    /// mirroring SetTargetFps calls by hand.</summary>
+    public Reactive.Signal<int> TargetFpsSignal { get; }
+
     /// <summary>Retarget the frame rate at runtime (e.g. from a pause menu).
     /// Takes effect from the next frame.</summary>
-    public void SetTargetFps(int fps) => _pacer.SetTargetFps(fps);
+    public void SetTargetFps(int fps)
+    {
+        _pacer.SetTargetFps(fps);
+        TargetFpsSignal.Set(fps);
+    }
 
     /// <summary>Raw byte callback (legacy/simple apps). Return false to quit.</summary>
     public Func<byte, bool>? OnInput { get; set; }
@@ -97,6 +105,7 @@ public sealed class App : IDisposable
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _presenter = asyncPresenting ? new FramePresenter(terminal.Write) : null;
+        TargetFpsSignal = new Reactive.Signal<int>(targetFps);
         RegisterTree(_root); // DSL-composed widgets render without manual AddWidget
         _presentedWindowStart = NowMs() / 1000.0;
     }
@@ -538,16 +547,19 @@ public sealed class App : IDisposable
         if (anyRendered || relayoutThisFrame)
         {
             // dropped delta frames desync the terminal (it never applied
-            // those diffs): the next frame after any drop must be FULL
+            // those diffs): the next frame after any drop must be FULL.
+            // Capture the count BEFORE submitting: a drop caused by this
+            // frame's own submit must trigger the NEXT frame's resync.
             bool resync = _presenter is not null &&
-                          _presenter.DroppedCount != _droppedAtLastSubmit;
+                          _presenter.DroppedCount != _droppedSeen;
+            if (_presenter is not null)
+                _droppedSeen = _presenter.DroppedCount;
 
             _output.Clear();
             result = _renderer.Render(_back, _output, forceFull: resync);
             if (_presenter is { } presenter)
             {
                 presenter.Submit(_output.WrittenSpan);
-                _droppedAtLastSubmit = presenter.DroppedCount;
             }
             else
             {

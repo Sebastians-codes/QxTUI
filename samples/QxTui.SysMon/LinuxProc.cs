@@ -177,14 +177,6 @@ internal static class LinuxProc
         return rows;
     }
 
-    public static string HumanBytes(double bytes)
-    {
-        string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
-        int u = 0;
-        while (bytes >= 1024 && u < units.Length - 1) { bytes /= 1024; u++; }
-        return $"{bytes.ToString(bytes >= 100 ? "F0" : "F1", CultureInfo.InvariantCulture)}{units[u]}";
-    }
-
     public static string HumanDuration(TimeSpan ts) => ts switch
     {
         { Days: > 0 } d => $"{d.Days}d {d.Hours}h {d.Minutes}m",

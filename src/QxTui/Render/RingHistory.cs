@@ -9,6 +9,10 @@ public sealed class RingHistory(int capacity)
     private readonly float[] _data = new float[capacity];
     private int _head;
 
+    /// <summary>Bumps on every Push — sparklines bind to this instead of
+    /// samples wiring invalidation callbacks by hand.</summary>
+    public Reactive.Signal<long> Pushed { get; } = new(0);
+
     public int Count { get; private set; }
     public int Capacity => capacity;
 
@@ -17,6 +21,7 @@ public sealed class RingHistory(int capacity)
         _data[_head] = value;
         _head = (_head + 1) % capacity;
         if (Count < capacity) Count++;
+        Pushed.Set(Pushed.Value + 1);
     }
 
     /// <summary>i-th oldest value (0 = oldest).</summary>

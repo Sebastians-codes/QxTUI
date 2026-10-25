@@ -42,16 +42,15 @@ internal sealed class FeederWidget : Widget
 {
     private readonly RingHistory _sine;
     private readonly RingHistory _walk;
-    private readonly Action _onChanged;
     private double _t;
     private float _level = 50f;
     private readonly Random _rng = new(1234);
 
-    public FeederWidget(RingHistory sine, RingHistory walk, Action onChanged)
+    // no invalidation wiring: RingHistory.Pushed notifies bound sparklines
+    public FeederWidget(RingHistory sine, RingHistory walk)
     {
         _sine = sine;
         _walk = walk;
-        _onChanged = onChanged;
 
         Tick(TimeSpan.FromMilliseconds(50), _ =>
         {
@@ -59,7 +58,6 @@ internal sealed class FeederWidget : Widget
             _sine.Push((float)(50 + 45 * Math.Sin(_t * 2.1)));
             _level = Math.Clamp(_level + (float)(_rng.NextDouble() - 0.5) * 18, 2, 98);
             _walk.Push(_level);
-            _onChanged();
         });
     }
 
@@ -71,7 +69,6 @@ internal sealed class FeederWidget : Widget
 /// The fast-moving element that makes the fps target visible.</summary>
 internal sealed class BallWidget : Widget
 {
-    private HalfBlockSurface? _surface;
     private float _px = 0.3f, _py = 0.4f, _vx = 0.55f, _vy = 0.4f;
     // time-based trail: a frame-count trail shrinks as fps rises (24 points
     // = 0.2s at 120fps but 0.024s at 1000fps). Age-based expiry keeps the
@@ -80,7 +77,6 @@ internal sealed class BallWidget : Widget
     private const int TrailMs = 250;
     private long _lastTs = Environment.TickCount64;
     private readonly Signal<float> _speed;
-    private Rect _lastRect;
 
     public BallWidget(Signal<float> speed)
     {
@@ -106,17 +102,12 @@ internal sealed class BallWidget : Widget
 
         // surface fills the inset area ABOVE the child row (last inner row
         // belongs to children, e.g. the slider)
-        int pw = r.W - 2, ph = Math.Max(2, r.H - 3) * 2;
-        // ANY rect change (size OR position) needs a new surface: a stale
-        // origin paints the ball into the wrong place, and stale trail
-        // points from the old coordinate space show up as lone specks
-        if (_surface is null || _lastRect != r)
-        {
-            _surface = new HalfBlockSurface(buffer, r.X + 1, r.Y + 1, pw, ph,
-                new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+        // framework-cached canvas: rebuilt on any rect change; the rebuilt
+        // flag is the cue to drop trail points from the old coordinate space
+        var (surface, rebuilt) = Pixels(r,
+            new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+        if (rebuilt)
             _trail.Clear();
-            _lastRect = r;
-        }
 
         long now = Environment.TickCount64;
         double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);
@@ -136,22 +127,22 @@ internal sealed class BallWidget : Widget
             if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
         }
 
-        int bx = (int)(_px * (pw - 1));
-        int by = (int)(_py * (ph - 1));
+        int bx = (int)(_px * (surface.PixelWidth - 1));
+        int by = (int)(_py * (surface.PixelHeight - 1));
         _trail.Enqueue((bx, by, now));
         while (_trail.Count > 0 && now - _trail.Peek().TsMs > TrailMs)
             _trail.Dequeue();
 
-        _surface.Clear();
+        surface.Clear();
         foreach (var (tx, ty, ts) in _trail)
         {
             // fade by AGE: oldest dim → newest bright, identical at any fps
             int age = (int)(now - ts);
             int c = 252 - (age * (252 - 236)) / TrailMs;
-            _surface.SetPixel(tx, ty, Math.Clamp(c, 236, 252));
+            surface.SetPixel(tx, ty, Math.Clamp(c, 236, 252));
         }
-        _surface.SetPixel(bx, by, 255);
-        _surface.Draw();
+        surface.SetPixel(bx, by, 255);
+        surface.Draw();
 
         Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), "square pixels", Theme.Get(ThemeRole.Title));

@@ -17,7 +17,6 @@ internal sealed class SnakeWidget : Widget
     private readonly Signal<int> _score;
     private readonly Signal<bool> _alive;
     private long _lastStepTs;
-    private HalfBlockSurface? _surface;
     private readonly Scenery _scenery = new();
 
     // draw-time interpolation: the snake slides between grid cells instead
@@ -72,13 +71,9 @@ internal sealed class SnakeWidget : Widget
         // playfield in SQUARE pixels: one column per cell, two rows per cell
         int pw = r.W - 2, ph = (r.H - 2) * 2;
         if (_model.Width != pw || _model.Height != ph)
-        {
             _model.Resize(pw, ph);
-            _surface = null; // rebuild canvas for the new size
-        }
 
-        _surface ??= new HalfBlockSurface(buffer, r.X + 1, r.Y + 1, pw, ph,
-            new Cell { Char = ' ', Fg = -1, Bg = 233 });
+        var (_surface, _) = Pixels(r, new Cell { Char = ' ', Fg = -1, Bg = 233 });
 
         // fixed-step simulation; snapshot the pre-step body for interpolation
         long now = Environment.TickCount64;

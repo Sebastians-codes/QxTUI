@@ -36,21 +36,28 @@ internal sealed class HeaderWidget : Widget
 
 internal sealed class CpuWidget : Widget
 {
-    // Sample the kernel at 5Hz (200ms windows: enough ticks for resolution),
-    // but RENDER at 30Hz interpolating between samples.
-    private const double SampleMs = 200;
-    private const double Alpha = 0.35;
-
     private readonly RingHistory _hist = new(180);
+    private readonly SmoothedSampler _agg;
     private LinuxProc.CpuSample _prevAgg;
+    private List<LinuxProc.CpuSample> _lastCores = [];
     private List<LinuxProc.CpuSample> _prevCores = [];
-    private double _prevAggSmooth, _currAggSmooth;
     private readonly double[] _prevCore = new double[256];
     private readonly double[] _currCore = new double[256];
     private int _coreCount;
-    private long _lastSampleTs;
 
-    public CpuWidget() => Tick(TimeSpan.FromMilliseconds(33)); // 30Hz render
+    public CpuWidget()
+    {
+        // sample /proc at 5Hz inside the sampler; render interpolates at 30Hz
+        _agg = new SmoothedSampler(() =>
+        {
+            var (aggSample, cores) = LinuxProc.ReadCpu();
+            double u = LinuxProc.Utilization(_prevAgg, aggSample);
+            _prevAgg = aggSample;
+            _lastCores = cores;
+            return u;
+        }, 200, 0.35);
+        Tick(TimeSpan.FromMilliseconds(33));
+    }
 
     public override void Render(CellBuffer buffer)
     {
@@ -58,32 +65,23 @@ internal sealed class CpuWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
 
         long now = Environment.TickCount64;
-        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
+        if (_agg.Update(now))
         {
-            var (aggSample, cores) = LinuxProc.ReadCpu();
-            double aggPct = LinuxProc.Utilization(_prevAgg, aggSample);
-            _prevAgg = aggSample;
-
-            _prevAggSmooth = _currAggSmooth;
-            _currAggSmooth += (aggPct - _currAggSmooth) * Alpha;
-
-            _coreCount = Math.Min(cores.Count, _currCore.Length);
+            _coreCount = Math.Min(_lastCores.Count, _currCore.Length);
             for (int i = 0; i < _coreCount; i++)
             {
                 double pct = i < _prevCores.Count
-                    ? LinuxProc.Utilization(_prevCores[i], cores[i])
+                    ? LinuxProc.Utilization(_prevCores[i], _lastCores[i])
                     : 0;
                 _prevCore[i] = _currCore[i];
-                _currCore[i] += (pct - _currCore[i]) * Alpha;
+                _currCore[i] += (pct - _currCore[i]) * 0.35;
             }
-            _prevCores = cores;
-
-            _hist.Push((float)_currAggSmooth);
-            _lastSampleTs = now;
+            _prevCores = _lastCores;
+            _hist.Push((float)_agg.Current);
         }
 
-        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
-        double agg = _prevAggSmooth + (_currAggSmooth - _prevAggSmooth) * f;
+        double agg = _agg.Value;
+        float f = _agg.Phase;
 
         Panel.Frame(buffer, r, $"CPU ({_coreCount})", Theme.Success, Theme);
 
@@ -121,14 +119,21 @@ internal sealed class CpuWidget : Widget
 
 internal sealed class MemWidget : Widget
 {
-    private const double SampleMs = 250;
-
     private readonly RingHistory _hist = new(120);
-    private double _prevFrac, _currFrac;
+    private readonly SmoothedSampler _used;
     private LinuxProc.MemInfo _last = new(0, 0, 0, 0, 0, 0);
-    private long _lastSampleTs;
 
-    public MemWidget() => Tick(TimeSpan.FromMilliseconds(100)); // 10Hz render
+    public MemWidget()
+    {
+        _used = new SmoothedSampler(() =>
+        {
+            _last = LinuxProc.ReadMem();
+            return _last.TotalKb > 0
+                ? (_last.TotalKb - _last.AvailableKb) / (double)_last.TotalKb * 100
+                : 0;
+        }, 250, 0.5);
+        Tick(TimeSpan.FromMilliseconds(100));
+    }
 
     public override void Render(CellBuffer buffer)
     {
@@ -137,24 +142,15 @@ internal sealed class MemWidget : Widget
         Panel.Frame(buffer, r, "MEMORY", Theme.Accent, Theme);
 
         long now = Environment.TickCount64;
-        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
-        {
-            _last = LinuxProc.ReadMem();
-            double frac = _last.TotalKb > 0
-                ? (_last.TotalKb - _last.AvailableKb) / (double)_last.TotalKb
-                : 0;
-            _prevFrac = _currFrac;
-            _currFrac = frac;
-            _hist.Push((float)(frac * 100));
-            _lastSampleTs = now;
-        }
+        if (_used.Update(now))
+            _hist.Push((float)_used.Current);
 
-        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
-        double usedFrac = _prevFrac + (_currFrac - _prevFrac) * f;
+        double usedFrac = _used.Value / 100.0;
+        float f = _used.Phase;
         var m = _last;
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"{LinuxProc.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {LinuxProc.HumanBytes(m.TotalKb * 1024.0)}"
+            $"{Format.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {Format.HumanBytes(m.TotalKb * 1024.0)}"
             + $"  ({usedFrac * 100:0}%)",
             fg: Theme.Text);
         Bar.Draw(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, fg: Theme.Accent);
@@ -162,15 +158,15 @@ internal sealed class MemWidget : Widget
         Sparkline.Draw(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist,
             fg: Theme.Accent, scaleMax: 100f, phase: f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
-            $"avail {LinuxProc.HumanBytes(m.AvailableKb * 1024.0)}"
-            + $"  cache {LinuxProc.HumanBytes(m.CacheKb * 1024.0)}"
-            + $"  free {LinuxProc.HumanBytes(m.FreeKb * 1024.0)}", fg: Theme.Dim);
+            $"avail {Format.HumanBytes(m.AvailableKb * 1024.0)}"
+            + $"  cache {Format.HumanBytes(m.CacheKb * 1024.0)}"
+            + $"  free {Format.HumanBytes(m.FreeKb * 1024.0)}", fg: Theme.Dim);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 6,
             "used = total - available (btop/free convention)", fg: Theme.Faint);
 
         double swapUsed = m.SwapTotalKb - m.SwapFreeKb;
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 7,
-            $"swp {LinuxProc.HumanBytes(swapUsed * 1024.0)} / {LinuxProc.HumanBytes(m.SwapTotalKb * 1024.0)}",
+            $"swp {Format.HumanBytes(swapUsed * 1024.0)} / {Format.HumanBytes(m.SwapTotalKb * 1024.0)}",
             fg: swapUsed > 0 ? Theme.Warning : Theme.Dim);
         if (r.H > 9)
             Bar.Draw(buffer, Clip, r.X + 2, r.Y + 8, r.W - 4,
@@ -180,22 +176,33 @@ internal sealed class MemWidget : Widget
 
 internal sealed class NetWidget : Widget
 {
-    private const double SampleMs = 100;
-
     private readonly RingHistory _rx = new(120);
     private readonly RingHistory _tx = new(120);
+    private readonly SmoothedSampler _rxS;
     private (long Rx, long Tx) _prev;
     private long _lastSampleTs;
-    private double _prevRx, _currRx, _prevTx, _currTx;
+    private double _txRaw, _prevTx, _currTx;
 
-    // Stepped full-scale with hysteresis: the graph scrolls sideways and
-    // only re-scales when traffic crosses a decade (see commit history).
     private static readonly double[] Scales =
         [100 * 1024, 1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024, 1024 * 1024 * 1024];
     private double _scale = Scales[0];
     private int _lowSamples;
 
-    public NetWidget() => Tick(TimeSpan.FromMilliseconds(33)); // 30Hz render
+    public NetWidget()
+    {
+        _rxS = new SmoothedSampler(() =>
+        {
+            var (rx, tx) = LinuxProc.ReadNet();
+            long now = Environment.TickCount64;
+            double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
+            _lastSampleTs = now;
+            double rxNow = Math.Max(0, (rx - _prev.Rx) / dt);
+            _txRaw = Math.Max(0, (tx - _prev.Tx) / dt);
+            _prev = (rx, tx);
+            return rxNow;
+        }, 100, 0.3);
+        Tick(TimeSpan.FromMilliseconds(33));
+    }
 
     public override void Render(CellBuffer buffer)
     {
@@ -204,19 +211,12 @@ internal sealed class NetWidget : Widget
         Panel.Frame(buffer, r, "NETWORK", Theme.Warning, Theme);
 
         long now = Environment.TickCount64;
-        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
+        if (_rxS.Update(now))
         {
-            var (rx, tx) = LinuxProc.ReadNet();
-            double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
-            double rxNow = Math.Max(0, (rx - _prev.Rx) / dt);
-            double txNow = Math.Max(0, (tx - _prev.Tx) / dt);
-            _prev = (rx, tx);
-
-            _prevRx = _currRx; _currRx += (rxNow - _currRx) * 0.3;
-            _prevTx = _currTx; _currTx += (txNow - _currTx) * 0.3;
-            _rx.Push((float)_currRx);
+            _prevTx = _currTx;
+            _currTx += (_txRaw - _currTx) * 0.3;
+            _rx.Push((float)_rxS.Current);
             _tx.Push((float)_currTx);
-            _lastSampleTs = now;
 
             double peak = Math.Max(_rx.Max(0f), _tx.Max(0f));
             if (peak > _scale)
@@ -240,22 +240,22 @@ internal sealed class NetWidget : Widget
             }
         }
 
-        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
-        double rxRate = _prevRx + (_currRx - _prevRx) * f;
+        float f = _rxS.Phase;
+        double rxRate = _rxS.Value;
         double txRate = _prevTx + (_currTx - _prevTx) * f;
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"▼ {LinuxProc.HumanBytes(rxRate)}/s", fg: Theme.Success);
+            $"▼ {Format.HumanBytes(rxRate)}/s", fg: Theme.Success);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 12s", fg: Theme.Faint);
         Sparkline.Draw(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx,
             fg: Theme.Success, scaleMax: (float)_scale);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
-            $"▲ {LinuxProc.HumanBytes(txRate)}/s", fg: Theme.Accent);
+            $"▲ {Format.HumanBytes(txRate)}/s", fg: Theme.Accent);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 12s", fg: Theme.Faint);
         Sparkline.Draw(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx,
             fg: Theme.Accent, scaleMax: (float)_scale);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
-            $"graph full-scale: {LinuxProc.HumanBytes(_scale)}/s", fg: Theme.Faint);
+            $"graph full-scale: {Format.HumanBytes(_scale)}/s", fg: Theme.Faint);
     }
 }
 
@@ -314,7 +314,7 @@ internal sealed class ProcWidget : Widget
 
             buffer.WriteTextClipped(Clip, r.X + 2, y,
                 string.Create(CultureInfo.InvariantCulture,
-                    $"{p.Pid,7} {p.State,1} {p.CpuPercent,5:F1} {Fmt.MemFmt(p.MemKb),7}  "),
+                    $"{p.Pid,7} {p.State,1} {p.CpuPercent,5:F1} {Format.CompactKiB(p.MemKb),7}  "),
                 fg: Theme.Text);
             buffer.WriteTextClipped(Clip, r.X + 28, y, p.Name, fg: cpuColor);
         }
@@ -333,14 +333,3 @@ internal sealed class FooterWidget : Widget
     }
 }
 
-internal static class Fmt
-{
-    /// <summary>btop-style compact memory: 720M, 8.2M, 512K, 1.4G.</summary>
-    public static string MemFmt(long kb) => kb switch
-    {
-        >= 10 * 1024 * 1024 => $"{kb / (1024.0 * 1024.0):F1}G",
-        >= 10 * 1024 => $"{kb / 1024.0:F0}M",
-        >= 1024 => $"{kb / 1024.0:F1}M",
-        _ => $"{kb}K",
-    };
-}
