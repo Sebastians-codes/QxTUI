@@ -99,7 +99,9 @@ public sealed class App : IDisposable
     /// backlog, 4fps drags that look like teleports). When presented fps
     /// collapses below 60% of the effective rate for two windows, drop the
     /// effective rate toward what the terminal can actually show; when it
-    /// keeps up again, climb back toward the user target.
+    /// keeps up again, climb back toward the user target (one doubling per
+    /// two healthy windows — slow enough to avoid saw-toothing into a
+    /// collapse, fast enough that returning to a heavy tab isn't syrup).
     /// </summary>
     internal int AdaptToPresented(double presented)
     {
@@ -128,7 +130,7 @@ public sealed class App : IDisposable
             _pacer.SetTargetFps(_effectiveFps);
             _slowWindows = 0;
         }
-        else if (_recoverWindows >= 4 && _effectiveFps < _userTargetFps)
+        else if (_recoverWindows >= 2 && _effectiveFps < _userTargetFps)
         {
             _effectiveFps = Math.Min(_userTargetFps, _effectiveFps * 2);
             _pacer.SetTargetFps(_effectiveFps);
@@ -351,6 +353,32 @@ public sealed class App : IDisposable
 
     private bool IsOverlay(Widget w) => _overlays.Contains(w);
 
+    private int _cellPixW;
+    private int _cellPixH;
+    private bool _pixelMouse;
+
+    /// <summary>Cell height in pixels (0 = unknown: pixel drag disabled).
+    /// Widgets use it for sub-cell input math (scrollbar drags).</summary>
+    public int CellPixelH => _cellPixH;
+
+    internal void SetCellPixelSize(int w, int h)
+    {
+        _cellPixW = w;
+        _cellPixH = h;
+        _pixelMouse = w > 0 && h > 0;
+    }
+
+    /// <summary>Route coordinates are cells; Px/Py survive for widgets that
+    /// want sub-cell precision. Without a cell-size reply the raw coords
+    /// ARE cells, so px is dropped to keep widgets from mis-scaling.</summary>
+    private Terminal.MouseEvent ToCellCoords(Terminal.MouseEvent ev)
+    {
+        if (_pixelMouse && _cellPixH > 0)
+            return new Terminal.MouseEvent(
+                ev.Px / _cellPixW, ev.Py / _cellPixH, ev.Button, ev.Kind, ev.Px, ev.Py);
+        return new Terminal.MouseEvent(ev.X, ev.Y, ev.Button, ev.Kind);
+    }
+
     private void RouteMouse(MouseEvent ev)
     {
         Widget? target = TopMostAt(ev.X, ev.Y);
@@ -545,8 +573,14 @@ public sealed class App : IDisposable
                 _running = false;
         }
 
+        if (_cellPixH == 0 && _keyParser.CellPixH > 0)
+        {
+            SetCellPixelSize(_keyParser.CellPixW, _keyParser.CellPixH);
+            _terminal.Write("\x1b[?1016h"u8); // reply proved capability
+        }
+
         while (_running && _keyParser.TryReadMouse(out var mouseEvent))
-            RouteMouse(mouseEvent);
+            RouteMouse(ToCellCoords(mouseEvent));
 
         for (int i = 0; i < _rawBatch.Count && _running; i++)
         {

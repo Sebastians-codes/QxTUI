@@ -29,8 +29,9 @@ public class MouseParserTests
         var events = Feed("\x1b[<0;15;7M\x1b[<0;15;7m");
 
         Assert.Equal(2, events.Count);
-        Assert.Equal(new MouseEvent(14, 6, 0, MouseKind.Press), events[0]);
-        Assert.Equal(new MouseEvent(14, 6, 0, MouseKind.Release), events[1]);
+        // parser carries raw coords in Px/Py; App converts/strips them
+        Assert.Equal(new MouseEvent(14, 6, 0, MouseKind.Press, 14, 6), events[0]);
+        Assert.Equal(new MouseEvent(14, 6, 0, MouseKind.Release, 14, 6), events[1]);
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class MouseParserTests
         Assert.True(parser.TryReadKey(out var k1));
         Assert.Equal('a', k1.Char);
         Assert.True(parser.TryReadMouse(out var m));
-        Assert.Equal(new MouseEvent(1, 1, 0, MouseKind.Press), m);
+        Assert.Equal(new MouseEvent(1, 1, 0, MouseKind.Press, 1, 1), m);
         Assert.True(parser.TryReadKey(out var k2));
         Assert.Equal('b', k2.Char);
         Assert.True(parser.TryReadKey(out var k3));

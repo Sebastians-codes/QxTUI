@@ -82,12 +82,17 @@ public sealed class PosixTerminal : ITerminal
         WriteRaw("\x1b[?25l");    // hide cursor
         WriteRaw("\x1b[?1003h"); // mouse press/release + any-motion (hover)
         WriteRaw("\x1b[?1006h"); // SGR encoding (unlimited coordinates)
+        // pixel mode (?1016) is enabled LATER, only once the CSI 16 t reply
+        // proves the terminal can answer it — pixel coords misread as cells
+        // would break all input otherwise
+        WriteRaw("\x1b[16t");    // cell size in px
         WriteRaw("\x1b[2J");      // clear
     }
 
     public void Exit()
     {
         WriteRaw("\x1b[?1003l"); // mouse off
+        WriteRaw("\x1b[?1016l");
         WriteRaw("\x1b[?1006l");
         WriteRaw("\x1b[?25h");    // show cursor
         WriteRaw("\x1b[?1049l");  // leave alternate screen

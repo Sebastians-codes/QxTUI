@@ -27,6 +27,7 @@ public sealed class ListView : Widget
 
     private bool _dragThumb;
     private int _grabDelta;      // cursor offset inside the thumb at grab
+    private int _grabDeltaPx;    // same, in pixels (sub-cell drags)
     private double _target;      // drag stream target (thumb = cursor)
     private long _lastGlideTs;
     private int _lastRenderedOffset; // for hardware-scroll hints
@@ -164,8 +165,12 @@ public sealed class ListView : Widget
                         _grabDelta = thumbH / 2;
                         ScrollTo(ev.Y < thumbY ? Offset - VisibleRows() : Offset + VisibleRows());
                     }
+                    int cellH = App?.CellPixelH ?? 0;
+                    _grabDeltaPx = ev.Py >= 0 && cellH > 0
+                        ? ev.Py - thumbY * cellH
+                        : _grabDelta * cellH;
                     _dragThumb = true;
-                    DragTo(ev.Y, smooth: false); // press lands instantly
+                    DragTo(ev, smooth: false); // press lands instantly
                     return true;
                 }
                 // press on content: select that row
@@ -177,7 +182,7 @@ public sealed class ListView : Widget
             case MouseKind.Motion:
                 if (_dragThumb)
                 {
-                    DragTo(ev.Y, smooth: true); // content glides to target
+                    DragTo(ev, smooth: true); // content glides to target
                     return true;
                 }
                 return false;
@@ -206,15 +211,27 @@ public sealed class ListView : Widget
 
     /// <summary>Maps cursor Y to a scroll target (thumb follows the cursor
     /// 1:1 minus the grab delta). Presses land instantly; motion glides.</summary>
-    private void DragTo(int y, bool smooth)
+    private void DragTo(MouseEvent ev, bool smooth)
     {
         var r = Rect;
         int total = Count();
         int rows = VisibleRows();
         if (total <= rows) return;
 
-        int trackH = Math.Max(1, r.H - ThumbH());
-        double thumbTop = y - r.Y - _grabDelta;
+        // pixel coords when available: one mouse pixel moves a handful of
+        // rows instead of a whole cell's worth (hundreds on big lists)
+        int cellH = App?.CellPixelH ?? 0;
+        double trackH, thumbTop;
+        if (ev.Py >= 0 && cellH > 0)
+        {
+            trackH = Math.Max(1, (r.H - ThumbH()) * cellH);
+            thumbTop = ev.Py - r.Y * cellH - _grabDeltaPx;
+        }
+        else
+        {
+            trackH = Math.Max(1, r.H - ThumbH());
+            thumbTop = ev.Y - r.Y - _grabDelta;
+        }
         double frac = Math.Clamp(thumbTop / trackH, 0, 1);
         int target = Math.Clamp((int)Math.Round(frac * (total - rows)), 0, total - rows);
 

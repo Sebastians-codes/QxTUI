@@ -95,6 +95,8 @@ public sealed class KeyParser
 
                 if (_isMouse)
                     ParseMouse(b);
+                else if (b == (byte)'t' && _param0 == 16)
+                    ParseCellSize();   // CSI 16 ; w ; h t
                 else
                 {
                     var ev = Translate(b, _param0);
@@ -131,6 +133,33 @@ public sealed class KeyParser
     public bool TryReadKey(out KeyEvent ev) => _keys.TryDequeue(out ev);
     public bool TryReadMouse(out MouseEvent ev) => _mouse.TryDequeue(out ev);
 
+    /// <summary>Cell size in pixels (CSI 16 t reply). Enables pixel-precision
+    /// mouse math: 0 until the terminal answers the query.</summary>
+    public int CellPixW { get; private set; }
+    public int CellPixH { get; private set; }
+
+    private void ParseCellSize()
+    {
+        int w = 0, h = 0, field = 0, acc = 0;
+        for (int i = 0; i <= _plen; i++)
+        {
+            if (i < _plen && _params[i] >= '0' && _params[i] <= '9')
+            {
+                acc = acc * 10 + (_params[i] - '0');
+                continue;
+            }
+            if (field == 1) w = acc;
+            else if (field == 2) h = acc;
+            field++;
+            acc = 0;
+        }
+        if (w > 0 && h > 0)
+        {
+            CellPixW = w;
+            CellPixH = h;
+        }
+    }
+
     private void ParseMouse(byte final)
     {
         // params: btn;x;y  (SGR, 1-based coords)
@@ -163,7 +192,7 @@ public sealed class KeyParser
         else
             kind = MouseKind.Press;
 
-        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind));
+        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind, x - 1, y - 1));
     }
 
     private void Ground(byte b)
