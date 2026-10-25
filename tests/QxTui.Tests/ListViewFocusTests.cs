@@ -295,3 +295,33 @@ public class BallStripCollisionTests
         Assert.Equal(9 * 2, ball.SurfacePixelHeight);
     }
 }
+
+public class HalfRowThumbTests
+{
+    [Fact]
+    public void Thumb_RendersAtHalfRowPrecision()
+    {
+        // 1000 rows, 10 visible, track 9 cells: offset 495 = exactly half
+        // way between row positions 4 and 5 -> lower-half + upper-half glyphs
+        var list = new ListView(() => 1000)
+        {
+            RenderRow = (b, c, r, i, sel) =>
+                b.WriteTextClipped(c, r.X, r.Y, $"row {i}", fg: 7),
+        };
+        var root = UI.Column(0, list.Grow(1));
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        list.ScrollTo(495);
+        app.RunFrame();
+
+        Assert.Equal('▄', app.Back[29, 4].Char);
+        Assert.Equal('▀', app.Back[29, 5].Char);
+
+        // whole positions stay whole blocks
+        list.ScrollTo(0);
+        app.RunFrame();
+        Assert.Equal('█', app.Back[29, 0].Char);
+    }
+}
