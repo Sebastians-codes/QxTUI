@@ -209,8 +209,8 @@ public class ListViewMouseTests
         Assert.True(afterPress > 0, $"press on track should jump, got {afterPress}");
 
         Mouse(term, "\x1b[<35;30;2M");   // drag up (still on track col)
-        app.RunFrame();
-        Assert.True(list.Offset < afterPress); // thumb follows cursor 1:1
+        Settle.Run(app);                  // glide completes in ~140ms
+        Assert.True(list.Offset < afterPress); // content reached the target
 
         Mouse(term, "\x1b[<35;5;1M");    // drag OUTSIDE horizontally: capture holds
         app.RunFrame();
@@ -226,6 +226,33 @@ public class ListViewMouseTests
         Mouse(term, "\x1b[<0;5;6M\x1b[<0;5;6m"); // press row y=5
         app.RunFrame();
         Assert.Equal(5, list.Selected);
+    }
+
+    [Fact]
+    public void Drag_ContentGlidesThroughIntermediateOffsets()
+    {
+        var (app, term, list) = Make(); // 1000 rows, 10 visible
+
+        Mouse(term, "\x1b[<0;30;1M");   // grab the thumb at the very top
+        app.RunFrame();
+        Assert.Equal(0, list.Offset);
+
+        Mouse(term, "\x1b[<35;30;8M");  // drag 7 cells down: target ~770
+        app.RunFrame();                  // one frame: NOT teleported yet
+        int early = list.Offset;
+        Assert.True(early < 700, $"content must not teleport, got {early}");
+
+        Thread.Sleep(60);
+        app.RunFrame();
+        int mid = list.Offset;
+        Assert.True(mid > early, $"glide must progress, early={early} mid={mid}");
+
+        Settle.Run(app, 200);
+        app.RunFrame();
+        Assert.True(list.Offset >= 700, $"glide must land on target, got {list.Offset}");
+
+        Mouse(term, "\x1b[<0;30;8m");   // release
+        app.RunFrame();
     }
 }
 

@@ -73,12 +73,69 @@ public sealed class App : IDisposable
     /// mirroring SetTargetFps calls by hand.</summary>
     public Reactive.Signal<int> TargetFpsSignal { get; }
 
+    /// <summary>The user's requested target (the pacer may run below it
+    /// temporarily when the terminal can't keep up — see adaptation).</summary>
+    public int RequestedFps => _userTargetFps;
+    private int _userTargetFps;
+    private int _effectiveFps;
+    private int _slowWindows;
+    private int _recoverWindows;
+
     /// <summary>Retarget the frame rate at runtime (e.g. from a pause menu).
     /// Takes effect from the next frame.</summary>
     public void SetTargetFps(int fps)
     {
+        _userTargetFps = fps;
+        _effectiveFps = fps;
+        _slowWindows = 0;
+        _recoverWindows = 0;
         _pacer.SetTargetFps(fps);
         TargetFpsSignal.Set(fps);
+    }
+
+    /// <summary>
+    /// Backpressure adaptation: flooding a terminal that can only present
+    /// 8fps with 120fps of 10KB diffs makes everything WORSE (emulator
+    /// backlog, 4fps drags that look like teleports). When presented fps
+    /// collapses below 60% of the effective rate for two windows, drop the
+    /// effective rate toward what the terminal can actually show; when it
+    /// keeps up again, climb back toward the user target.
+    /// </summary>
+    internal int AdaptToPresented(double presented)
+    {
+        if (presented <= 0)
+            return _effectiveFps;
+
+        if (presented < _effectiveFps * 0.6)
+        {
+            _slowWindows++;
+            _recoverWindows = 0;
+        }
+        else if (presented >= _effectiveFps * 0.9)
+        {
+            _slowWindows = 0;
+            _recoverWindows++;
+        }
+        else
+        {
+            _slowWindows = 0;
+            _recoverWindows = 0;
+        }
+
+        if (_slowWindows >= 2 && _effectiveFps > 60)
+        {
+            _effectiveFps = Math.Max(60, (int)(presented * 1.5));
+            _pacer.SetTargetFps(_effectiveFps);
+            _slowWindows = 0;
+        }
+        else if (_recoverWindows >= 4 && _effectiveFps < _userTargetFps)
+        {
+            _effectiveFps = Math.Min(_userTargetFps, _effectiveFps * 2);
+            _pacer.SetTargetFps(_effectiveFps);
+            _recoverWindows = 0;
+        }
+
+        return _effectiveFps;
     }
 
     /// <summary>Raw byte callback (legacy/simple apps). Return false to quit.</summary>
@@ -105,6 +162,8 @@ public sealed class App : IDisposable
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _presenter = asyncPresenting ? new FramePresenter(terminal.Write) : null;
+        _userTargetFps = targetFps;
+        _effectiveFps = targetFps;
         TargetFpsSignal = new Reactive.Signal<int>(targetFps);
         RegisterTree(_root); // DSL-composed widgets render without manual AddWidget
         _presentedWindowStart = NowMs() / 1000.0;
@@ -686,6 +745,7 @@ public sealed class App : IDisposable
             Stats.PresentedFps = _presentedWindowFrames / span;
             _presentedWindowFrames = 0;
             _presentedWindowStart = nowS;
+            AdaptToPresented(Stats.PresentedFps);
         }
     }
 

@@ -27,6 +27,10 @@ public sealed class ListView : Widget
 
     private bool _dragThumb;
     private int _grabDelta;      // cursor offset inside the thumb at grab
+    private double _target;      // content glide target (drag)
+    private double _glideFrom;
+    private long _glideStartTs;
+    private const double DragGlideMs = 140; // constant-velocity catch-up
 
     /// <summary>Index of the first visible row.</summary>
     public int Offset { get; private set; }
@@ -40,12 +44,42 @@ public sealed class ListView : Widget
         Focusable = true;
         Clickable = true;
         CapturesMouse = true; // thumb drags survive leaving the widget
+        Tick(TimeSpan.FromMilliseconds(8), _ => Glide());
     }
 
     public void ScrollTo(int index)
     {
         int rows = VisibleRows();
         Offset = Math.Clamp(index, 0, Math.Max(0, Count() - rows));
+        _target = Offset;
+        Invalidate();
+    }
+
+    /// <summary>Constant-velocity catch-up for drags: the terminal mouse
+    /// quantizes to whole cells — one cell is hundreds of rows on a 10k
+    /// list — so the CONTENT glides to the drag target while the thumb
+    /// itself stays glued to the cursor. Linear (not eased): continuous
+    /// drags track without rubber-band lag; discrete jumps animate.</summary>
+    private void Glide()
+    {
+        int target = (int)Math.Round(_target);
+        if (target == Offset) return;
+        long now = Environment.TickCount64;
+        double t = Math.Clamp((now - _glideStartTs) / DragGlideMs, 0, 1);
+        int pos = (int)Math.Round(_glideFrom + (target - _glideFrom) * t);
+        pos = Math.Clamp(pos, 0, Math.Max(0, Count() - VisibleRows()));
+        if (pos != Offset)
+        {
+            Offset = pos;
+            Invalidate();
+        }
+    }
+
+    private void Retarget(double target)
+    {
+        _glideFrom = Offset;
+        _glideStartTs = Environment.TickCount64;
+        _target = Math.Clamp(target, 0, Math.Max(0, Count() - VisibleRows()));
         Invalidate();
     }
 
@@ -85,6 +119,7 @@ public sealed class ListView : Widget
         int rows = VisibleRows();
         if (Selected < Offset) Offset = Selected;
         else if (Selected >= Offset + rows) Offset = Selected - rows + 1;
+        _target = Offset;
         Invalidate();
     }
 
@@ -116,7 +151,7 @@ public sealed class ListView : Widget
                         ScrollTo(ev.Y < thumbY ? Offset - VisibleRows() : Offset + VisibleRows());
                     }
                     _dragThumb = true;
-                    DragTo(ev.Y);
+                    DragTo(ev.Y, smooth: false); // press lands instantly
                     return true;
                 }
                 // press on content: select that row
@@ -128,7 +163,7 @@ public sealed class ListView : Widget
             case MouseKind.Motion:
                 if (_dragThumb)
                 {
-                    DragTo(ev.Y);
+                    DragTo(ev.Y, smooth: true); // content glides to target
                     return true;
                 }
                 return false;
@@ -155,9 +190,9 @@ public sealed class ListView : Widget
         return Rect.Y + Offset * (Rect.H - ThumbH()) / Math.Max(1, total - rows);
     }
 
-    /// <summary>Thumb follows the cursor 1:1 (minus the grab delta), with
-    /// fractional accumulation so slow drags don't quantize to whole rows.</summary>
-    private void DragTo(int y)
+    /// <summary>Maps cursor Y to a scroll target (thumb follows the cursor
+    /// 1:1 minus the grab delta). Presses land instantly; motion glides.</summary>
+    private void DragTo(int y, bool smooth)
     {
         var r = Rect;
         int total = Count();
@@ -167,12 +202,17 @@ public sealed class ListView : Widget
         int trackH = Math.Max(1, r.H - ThumbH());
         double thumbTop = y - r.Y - _grabDelta;
         double frac = Math.Clamp(thumbTop / trackH, 0, 1);
-        // thumb follows the cursor 1:1 — easing here reads as rubber-band
-        // lag; the grab delta already removes the grab-time jump
         int target = Math.Clamp((int)Math.Round(frac * (total - rows)), 0, total - rows);
-        if (target != Offset)
+
+        if (smooth)
+        {
+            if (target != (int)Math.Round(_target))
+                Retarget(target);
+        }
+        else if (target != Offset)
         {
             Offset = target;
+            _target = target;
             Invalidate();
         }
     }
@@ -188,6 +228,7 @@ public sealed class ListView : Widget
         int contentW = Math.Max(1, r.W - trackW);
 
         Offset = Math.Clamp(Offset, 0, Math.Max(0, total - rows));
+        _target = Math.Clamp(_target, 0, Math.Max(0, total - rows));
 
         int last = Math.Min(total, Offset + rows);
         for (int i = Offset; i < last; i++)
@@ -203,7 +244,10 @@ public sealed class ListView : Widget
             buffer.WriteTextClipped(Clip, sx, y, "│", fg: Theme.Get(ThemeRole.Faint));
 
         int thumbH = Math.Max(1, rows * rows / total);
-        int thumbY = r.Y + (int)((long)Offset * (r.H - thumbH) / Math.Max(1, total - rows));
+        // during a drag the thumb tracks the cursor exactly (target-based);
+        // the content glides to catch up — no rubber-band thumb
+        int thumbOff = _dragThumb ? (int)Math.Round(_target) : Offset;
+        int thumbY = r.Y + (int)((long)thumbOff * (r.H - thumbH) / Math.Max(1, total - rows));
         for (int y = thumbY; y < Math.Min(r.Bottom, thumbY + thumbH); y++)
             buffer.WriteTextClipped(Clip, sx, y, "█", fg: Theme.Get(ThemeRole.Accent));
     }

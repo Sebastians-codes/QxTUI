@@ -119,3 +119,50 @@ public class RuntimeFpsControlTests
         Assert.Equal(144, app.TargetFps);
     }
 }
+
+public class AdaptivePacingTests
+{
+    private static App MakeApp(int target)
+    {
+        var term = new FakeTerminal(20, 10);
+        return new App(term, new QxTui.Layout.LayoutNode(), targetFps: target,
+            asyncPresenting: false);
+    }
+
+    [Fact]
+    public void CollapsingPresented_LowersEffectiveRate()
+    {
+        using var app = MakeApp(1000);
+
+        // two slow windows in a row (terminal presenting 8fps)
+        app.AdaptToPresented(8);
+        Assert.Equal(1000, app.TargetFps); // user target untouched
+        int eff1 = app.AdaptToPresented(8);
+
+        Assert.True(eff1 <= 60, $"effective must collapse toward presented, got {eff1}");
+        Assert.True(eff1 >= 12, $"but not below a usable floor, got {eff1}");
+    }
+
+    [Fact]
+    public void HealthyPresented_ClumbsBackToUserTarget()
+    {
+        using var app = MakeApp(240);
+
+        int eff = app.AdaptToPresented(10);
+        eff = app.AdaptToPresented(10); // collapses
+        Assert.True(eff < 240);
+
+        for (int i = 0; i < 12; i++)
+            eff = app.AdaptToPresented(eff); // keeps up → climb
+
+        Assert.Equal(240, eff); // fully recovered to the user target
+    }
+
+    [Fact]
+    public void SteadyTerminal_NeverAdapts()
+    {
+        using var app = MakeApp(120);
+        for (int i = 0; i < 10; i++)
+            Assert.Equal(120, app.AdaptToPresented(118)); // keeping up: no change
+    }
+}

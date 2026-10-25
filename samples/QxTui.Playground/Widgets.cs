@@ -212,7 +212,9 @@ internal sealed class StatsPanelWidget : Widget
         [
             $"bytes/frame: {s.LastBytesWritten.ToString("N0", CultureInfo.InvariantCulture)}",
             $"dirty cells: {s.LastDirtyCells}  rects: {s.LastDamageRects}",
-            $"produced: {s.Fps.ToString("F0", CultureInfo.InvariantCulture)} fps (target-capped)",
+            $"produced: {s.Fps.ToString("F0", CultureInfo.InvariantCulture)} fps"
+            + (App is { } host && s.Fps < host.RequestedFps
+                ? $" (adapted from {host.RequestedFps})" : " (target-capped)"),
             $"presented: {s.PresentedFps.ToString("F0", CultureInfo.InvariantCulture)} fps (terminal-capped)",
             $"dropped: {s.DroppedFrames.ToString("N0", CultureInfo.InvariantCulture)}",
             $"static renders: {_staticPanel.RenderCount}",
