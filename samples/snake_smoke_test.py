@@ -6,6 +6,9 @@ import select
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ansi_replay import emulate
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CMD = ["dotnet", "run", "-c", "Release", "--project", "samples/QxTui.Snake", "--no-build"]
 UP, DOWN, LEFT, RIGHT = b"\x1b[A", b"\x1b[B", b"\x1b[D", b"\x1b[C"
@@ -22,15 +25,15 @@ script = [
     (1.0, RIGHT),
     (2.0, DOWN),
     (3.0, LEFT),   # reversal ignored by rules; snake keeps going down
-    (4.0, None),   # pause
-    (4.0, b" "),
-    (5.0, b" "),   # resume
-    (6.5, None),
-    (6.5, b"q"),
+    (4.0, b" "),   # pause → menu
+    (4.6, b"3"),   # pause menu: set 120fps
+    (5.2, b"f"),   # cycle → 240fps
+    (5.8, b" "),   # resume
+    (7.0, b"q"),
 ]
 si = 0
 try:
-    while time.time() - start < 12:
+    while time.time() - start < 14:
         r, _, _ = select.select([fd], [], [], 0.1)
         if r:
             try:
@@ -67,6 +70,8 @@ checks = {
     "snake pixels":    any(g in text for g in "█▀▄"),
     "food pixel":      "●" in text or any(g in text for g in "▀▄█"),
     "pause overlay":   "PAUSED" in text,
+    "pause menu fps":  "cycle fps" in text,
+    "fps retargeted":  "240fps" in emulate(text, 100, 30),
     "help line":       "arrows/wasd" in text,
     "clean exit":      "\x1b[?1049l" in text,
 }

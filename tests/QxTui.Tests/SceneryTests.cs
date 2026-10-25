@@ -132,3 +132,54 @@ public class SceneryFitsAnyWindowTests
         return n;
     }
 }
+
+public class ShootingStarTests
+{
+    private static readonly Cell Bg3 = new() { Char = ' ', Fg = -1, Bg = 233 };
+
+    private static int BrightPixels(double t)
+    {
+        using var buf = new CellBuffer(102, 22);
+        var s = new HalfBlockSurface(buf, 0, 0, 100, 40, Bg3);
+        new Scenery(5).Paint(s, t);
+        s.Draw();
+
+        int n = 0;
+        for (int y = 0; y < 22; y++)
+            for (int x = 0; x < 102; x++)
+                if (buf[x, y].Fg is 255 or 252) n++;
+        return n;
+    }
+
+    [Fact]
+    public void StreakAppears_InActiveWindow_AndGoneAfter()
+    {
+        int during = BrightPixels(70.5); // mid-streak (cycle 0.5 of 7s)
+        int after = BrightPixels(74.0);  // quiet sky
+        Assert.True(during > after + 5,
+            $"shooting star must add bright pixels ({during} vs {after})");
+    }
+
+    [Fact]
+    public void StreakMoves_FastEnoughToExposeFps()
+    {
+        // 100ms apart the head must have moved visibly — this is the
+        // element that makes 30fps look choppy and 240fps look smooth
+        using var a = new CellBuffer(102, 22);
+        using var b = new CellBuffer(102, 22);
+        var sa = new HalfBlockSurface(a, 0, 0, 100, 40, Bg3);
+        var sb = new HalfBlockSurface(b, 0, 0, 100, 40, Bg3);
+        var scenery = new Scenery(5);
+
+        scenery.Paint(sa, 70.30);
+        sa.Draw();
+        scenery.Paint(sb, 70.40);
+        sb.Draw();
+
+        int diffs = 0;
+        for (int y = 0; y < 22; y++)
+            for (int x = 0; x < 102; x++)
+                if (!a[x, y].Equals(b[x, y])) diffs++;
+        Assert.True(diffs >= 4, $"streak must move between 100ms frames, diffs={diffs}");
+    }
+}

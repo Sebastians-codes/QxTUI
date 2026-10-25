@@ -59,7 +59,11 @@ public sealed class App : IDisposable
     /// <summary>Current back-buffer dimensions (viewport size in cells).</summary>
     public int BackWidth => _back.Width;
     public int BackHeight => _back.Height;
-    public int TargetFps { get; }
+    public int TargetFps => _pacer.TargetFps;
+
+    /// <summary>Retarget the frame rate at runtime (e.g. from a pause menu).
+    /// Takes effect from the next frame.</summary>
+    public void SetTargetFps(int fps) => _pacer.SetTargetFps(fps);
 
     /// <summary>Raw byte callback (legacy/simple apps). Return false to quit.</summary>
     public Func<byte, bool>? OnInput { get; set; }
@@ -80,7 +84,6 @@ public sealed class App : IDisposable
     {
         _terminal = terminal;
         _root = root;
-        TargetFps = targetFps;
         _scheduler = new AnimationScheduler(time);
         _pacer = new FramePacer(targetFps);
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));

@@ -19,6 +19,12 @@ internal sealed class SnakeWidget : Widget
     private long _lastStepTs;
     private HalfBlockSurface? _surface;
     private readonly Scenery _scenery = new();
+
+    // draw-time interpolation: the snake slides between grid cells instead
+    // of teleporting per step — the single biggest smoothness win
+    private List<Point> _prevBody = [];
+    private long _stepTs;
+    private double _stepIntervalMs = 130;
     public bool Paused;
 
     public SnakeWidget(QxTui.Animation.AnimationScheduler scheduler, Signal<int> score, Signal<bool> alive)
@@ -26,7 +32,7 @@ internal sealed class SnakeWidget : Widget
         _model = new SnakeModel(40, 20);
         _score = score;
         _alive = alive;
-        scheduler.Every(TimeSpan.FromMilliseconds(25), _ => Invalidate());
+        scheduler.Every(TimeSpan.FromMilliseconds(10), _ => Invalidate()); // 100Hz render
     }
 
     public SnakeModel Model => _model;
@@ -74,7 +80,7 @@ internal sealed class SnakeWidget : Widget
         _surface ??= new HalfBlockSurface(buffer, r.X + 1, r.Y + 1, pw, ph,
             new Cell { Char = ' ', Fg = -1, Bg = 233 });
 
-        // fixed-step simulation
+        // fixed-step simulation; snapshot the pre-step body for interpolation
         long now = Environment.TickCount64;
         if (!Paused && _model.Alive)
         {
@@ -82,6 +88,9 @@ internal sealed class SnakeWidget : Widget
             while (now - _lastStepTs >= StepIntervalMs)
             {
                 _lastStepTs += (long)StepIntervalMs;
+                _prevBody = [.. _model.Body];
+                _stepTs = now;
+                _stepIntervalMs = StepIntervalMs;
                 bool survived = _model.Step();
                 _score.Set(_model.Score);
                 if (!survived)
@@ -96,6 +105,10 @@ internal sealed class SnakeWidget : Widget
             _lastStepTs = now;
         }
 
+        float prog = _model.Alive && !Paused
+            ? (float)Math.Clamp((now - _stepTs) / _stepIntervalMs, 0, 1)
+            : 1f;
+
         // border
         for (int x = r.X; x < r.Right; x++)
         {
@@ -108,12 +121,19 @@ internal sealed class SnakeWidget : Widget
             buffer[r.Right - 1, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
         }
 
-        // square pixels: scenery first, then food, then snake (head brightest)
+        // square pixels: scenery first, then food, then the interpolated snake
         _surface.Clear();
         _scenery.Paint(_surface, now / 1000.0);
         _surface.SetPixel(_model.Food.X, _model.Food.Y, 196);
+
         for (int i = _model.Body.Count - 1; i >= 0; i--)
-            _surface.SetPixel(_model.Body[i].X, _model.Body[i].Y, i == 0 ? 46 : 42);
+        {
+            var curr = _model.Body[i];
+            var prev = i < _prevBody.Count ? _prevBody[i] : curr;
+            int px = (int)(prev.X + (curr.X - prev.X) * prog + 0.5);
+            int py = (int)(prev.Y + (curr.Y - prev.Y) * prog + 0.5);
+            _surface.SetPixel(px, py, i == 0 ? 46 : 42);
+        }
         _surface.Draw();
 
         // overlays
@@ -126,8 +146,9 @@ internal sealed class SnakeWidget : Widget
         }
         else if (Paused)
         {
-            Center(buffer, r, r.Y + r.H / 2, "PAUSED", 214, bold: true);
-            Center(buffer, r, r.Y + r.H / 2 + 1, "space: resume", 244);
+            Center(buffer, r, r.Y + r.H / 2 - 1, "PAUSED", 214, bold: true);
+            Center(buffer, r, r.Y + r.H / 2, "space: resume", 244);
+            Center(buffer, r, r.Y + r.H / 2 + 1, "f: cycle fps   1-4: 30/60/120/240", 244);
         }
     }
 
@@ -144,15 +165,19 @@ internal sealed class HudWidget : Widget
 {
     private readonly IDisposable _s1;
     private readonly IDisposable _s2;
+    private readonly IDisposable _s3;
     private readonly Signal<int> _score;
     private readonly Signal<bool> _alive;
+    private readonly Signal<int> _fps;
 
-    public HudWidget(Signal<int> score, Signal<bool> alive)
+    public HudWidget(Signal<int> score, Signal<bool> alive, Signal<int> fps)
     {
         _score = score;
         _alive = alive;
+        _fps = fps;
         _s1 = score.Subscribe(_ => Invalidate());
         _s2 = alive.Subscribe(_ => Invalidate());
+        _s3 = fps.Subscribe(_ => Invalidate());
     }
 
     public override void Render(CellBuffer buffer)
@@ -161,13 +186,15 @@ internal sealed class HudWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
         string state = !_alive.Value ? "DEAD" : "ALIVE";
         buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
-            $" qxtui snake │ score {_score.Value} │ {state} ", fg: 255, bg: 236, bold: true);
+            $" qxtui snake │ score {_score.Value} │ {state} │ {_fps.Value}fps ",
+            fg: 255, bg: 236, bold: true);
     }
 
     public override void Dispose()
     {
         _s1.Dispose();
         _s2.Dispose();
+        _s3.Dispose();
     }
 }
 

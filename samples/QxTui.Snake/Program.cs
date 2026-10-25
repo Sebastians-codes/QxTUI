@@ -24,8 +24,9 @@ var app = new App(terminal, new LayoutNode(), targetFps: 165);
 
 var score = new Signal<int>(0);
 var alive = new Signal<bool>(true);
+var fps = new Signal<int>(120);
 
-var hud = new HudWidget(score, alive);
+var hud = new HudWidget(score, alive, fps);
 var game = new SnakeWidget(app.Scheduler, score, alive);
 var help = new HelpWidget();
 
@@ -47,6 +48,30 @@ app.OnKey = ev =>
     {
         game.Turn(d);
         return true;
+    }
+
+    // pause menu: fps control lives here
+    if (game.Paused)
+    {
+        int[] presets = [30, 60, 120, 240];
+        switch (ev.Key)
+        {
+            case Key.Char when ev.Char is 'f' or 'F':
+            {
+                int i = Array.IndexOf(presets, app.TargetFps);
+                int next = presets[(i + 1) % presets.Length];
+                app.SetTargetFps(next);
+                fps.Set(next);
+                return true;
+            }
+            case Key.Char when ev.Char is >= '1' and <= '4':
+            {
+                int next = presets[ev.Char - '1'];
+                app.SetTargetFps(next);
+                fps.Set(next);
+                return true;
+            }
+        }
     }
 
     switch (ev.Key)

@@ -16,12 +16,20 @@ public sealed class FramePacer
     private int _count;
     private long _frameIndex;
     private long _lastFrameTimestamp;
-    private readonly double _frameBudgetTicks;
+    private double _frameBudgetTicks;
 
-    public int TargetFps { get; }
+    public int TargetFps { get; private set; }
     public long FrameCount => _frameIndex;
 
     public FramePacer(int targetFps)
+    {
+        SetTargetFps(targetFps);
+        _lastFrameTimestamp = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>Change the rate at runtime (pause-menu fps control).
+    /// Resets the phase so the next frame starts a clean budget.</summary>
+    public void SetTargetFps(int targetFps)
     {
         if (targetFps <= 0)
             throw new ArgumentOutOfRangeException(nameof(targetFps));

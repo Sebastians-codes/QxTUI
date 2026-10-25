@@ -91,10 +91,43 @@ internal sealed class Scenery(int seed = 7)
                 else if (d <= (moonR + 1) * (moonR + 1)) s.SetPixel(mx + dx, my + dy, 244);
             }
 
+        // shooting star: a FAST element so the fps target is actually
+        // visible — steps at 30fps, smooth streak at 240. One per 7s cycle,
+        // deterministic per cycle index (allocation-free hash, no Random).
+        double cycle = t % 7.0;
+        if (cycle < 1.1)
+        {
+            long idx = (long)(t / 7.0);
+            double sx = 0.2 + Hash(idx, seed, 1) * 0.6;
+            double sy = 0.05 + Hash(idx, seed, 2) * 0.25;
+            double vx = (0.3 + Hash(idx, seed, 3) * 0.5) * (Hash(idx, seed, 4) < 0.5 ? -1 : 1);
+            double vy = 0.15 + Hash(idx, seed, 5) * 0.25;
+
+            double hx = (sx + vx * cycle) * w;
+            double hy = (sy + vy * cycle) * horizon;
+            for (int k = 0; k < 10; k++)
+            {
+                int px = (int)(hx - vx * w * k * 0.012);
+                int py = (int)(hy - vy * horizon * k * 0.012);
+                int c = k == 0 ? 255 : k < 3 ? 252 : k < 6 ? 244 : 236;
+                s.SetPixel(px, py, c);
+            }
+        }
+
         // far ridge (slow parallax), then near ridge (faster, darkest,
         // painted down to the bottom so there is no dead band)
         PaintRidge(s, t * 0.6, horizon, horizon * 22 / 100, 235, ridgeScale, _p1, _p2, horizon + horizon * 22 / 100 / 3);
         PaintRidge(s, t * 1.7, horizon, horizon * 34 / 100, 232, ridgeScale, _p2, _p3, h);
+    }
+
+    /// <summary>Deterministic 0..1 hash — stable scenery without allocations.</summary>
+    private static double Hash(long n, int seed, int salt)
+    {
+        ulong x = (ulong)(n * 6364136223846793005L + (seed * 31 + salt) * 1442695040888963407L);
+        x ^= x >> 33;
+        x *= 0xff51afd7ed558ccdL;
+        x ^= x >> 33;
+        return (x >> 11) / (double)(1UL << 53);
     }
 
     private static int SkyColor(int y, int horizon)

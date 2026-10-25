@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using QxTui.Core;
 using QxTui.Render;
 
 namespace QxTui.Tests;
@@ -73,5 +74,48 @@ public class FramePacerTests
 
         Assert.Equal(1.0, pacer.FrameTimeP50Ms, precision: 3);
         Assert.Equal(50.0, pacer.FrameTimeP99Ms, precision: 3);
+    }
+}
+
+public class RuntimeFpsControlTests
+{
+    [Fact]
+    public void SetTargetFps_ChangesPaceImmediately()
+    {
+        var pacer = new FramePacer(240);
+        Assert.Equal(240, pacer.TargetFps);
+
+        pacer.SetTargetFps(60);
+        Assert.Equal(60, pacer.TargetFps);
+
+        // 30 frames at 60fps ≈ 500ms
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 30; i++)
+            pacer.PaceFrame(0.1);
+        sw.Stop();
+
+        Assert.True(Math.Abs(sw.Elapsed.TotalMilliseconds - 500) <= 75,
+            $"30 frames at retargeted 60fps took {sw.Elapsed.TotalMilliseconds:F0}ms, expected ~500ms");
+    }
+
+    [Fact]
+    public void SetTargetFps_RejectsNonPositive()
+    {
+        var pacer = new FramePacer(60);
+        Assert.Throws<ArgumentOutOfRangeException>(() => pacer.SetTargetFps(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => pacer.SetTargetFps(-5));
+        Assert.Equal(60, pacer.TargetFps); // unchanged
+    }
+
+    [Fact]
+    public void App_ExposesRuntimeRetarget()
+    {
+        var term = new FakeTerminal(20, 10);
+        var root = new QxTui.Layout.LayoutNode();
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        Assert.Equal(60, app.TargetFps);
+        app.SetTargetFps(144);
+        Assert.Equal(144, app.TargetFps);
     }
 }
