@@ -13,6 +13,18 @@ public struct Size(int width, int height) : IEquatable<Size>
     public override readonly string ToString() => $"{Width}x{Height}";
 }
 
+/// <summary>Integer 2D point (cell space).</summary>
+public struct Point(int x, int y) : IEquatable<Point>
+{
+    public int X = x;
+    public int Y = y;
+
+    public readonly bool Equals(Point other) => X == other.X && Y == other.Y;
+    public override readonly bool Equals(object? obj) => obj is Point p && Equals(p);
+    public override readonly int GetHashCode() => HashCode.Combine(X, Y);
+    public override readonly string ToString() => $"({X},{Y})";
+}
+
 /// <summary>Absolute cell-space rectangle (output of layout).</summary>
 public struct Rect(int x, int y, int w, int h) : IEquatable<Rect>
 {

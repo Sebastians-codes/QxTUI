@@ -1,6 +1,7 @@
 using QxTui.Layout;
 using QxTui.Reactive;
 using QxTui.Render;
+using QxTui.Terminal;
 
 namespace QxTui.Core;
 
@@ -21,6 +22,17 @@ namespace QxTui.Core;
 public abstract class Widget
 {
     public LayoutNode Node { get; } = new();
+
+    public Widget()
+    {
+        // lets App.SetRoot discover widgets straight from the layout tree —
+        // composing a widget into the DSL is enough to render it
+        Node.Tag = this;
+    }
+
+    /// <summary>Widgets drop straight into the layout DSL:
+    /// UI.Row(gap: 1, cpuWidget, memWidget) — no .Node needed.</summary>
+    public static implicit operator LayoutNode(Widget widget) => widget.Node;
 
     public bool Dirty { get; private set; } = true;
 
@@ -86,6 +98,22 @@ public abstract class Widget
     /// <summary>Mark for re-render on the next frame. Called by signal
     /// subscriptions, animations, layout changes.</summary>
     public void Invalidate() => Dirty = true;
+
+    // ---- interaction -------------------------------------------------------
+
+    /// <summary>Receive click callbacks (OnMouse release inside Rect).</summary>
+    public bool Clickable { get; set; }
+
+    /// <summary>Raw mouse events hitting this widget's rect. Return true to
+    /// consume (stop routing to widgets below).</summary>
+    public virtual bool OnMouse(MouseEvent ev) => false;
+
+    /// <summary>Click at widget-local coordinates (Clickable must be true).</summary>
+    public virtual void OnClick(Point local) { }
+
+    /// <summary>First chance at key input (overlays use this for modality).
+    /// Return true to consume.</summary>
+    public virtual bool HandleKey(KeyEvent ev) => false;
 
     /// <summary>Called by App exactly when Dirty. Draw within Rect bounds;
     /// CellBuffer clips anything outside.</summary>

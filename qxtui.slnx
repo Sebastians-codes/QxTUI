@@ -3,6 +3,7 @@
     <Project Path="bench/QxTui.Bench/QxTui.Bench.csproj" />
   </Folder>
   <Folder Name="/samples/">
+    <Project Path="samples/QxTui.Playground/QxTui.Playground.csproj" />
     <Project Path="samples/QxTui.PoC/QxTui.PoC.csproj" />
     <Project Path="samples/QxTui.Snake/QxTui.Snake.csproj" />
     <Project Path="samples/QxTui.SysMon/QxTui.SysMon.csproj" />

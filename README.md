@@ -29,9 +29,11 @@ dotnet run -c Release --project bench/QxTui.Bench        # headless fps/bytes pr
 dotnet run -c Release --project samples/QxTui.PoC        # the demo (needs a TTY)
 dotnet run -c Release --project samples/QxTui.SysMon     # qxtop: a real app (needs a TTY)
 dotnet run -c Release --project samples/QxTui.Snake      # snake: a real game (needs a TTY)
+dotnet run -c Release --project samples/QxTui.Playground # playground: every feature, labeled
 python3 samples/pty_smoke_test.py            # demo under a pty, asserts on-screen proof
 python3 samples/sysmon_smoke_test.py         # qxtop under a pty, asserts every panel
 python3 samples/snake_smoke_test.py          # snake under a pty: plays turns, asserts pixels
+python3 samples/playground_smoke_test.py     # playground: themes, fps, popup open/close
 python3 samples/resize_stress_test.py        # rapid shrink/grow stress, asserts no crash
 ```
 

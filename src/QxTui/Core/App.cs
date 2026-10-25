@@ -40,6 +40,7 @@ public sealed class App : IDisposable
     private readonly ITerminal _terminal;
     private LayoutNode _root;
     private readonly List<Widget> _widgets = [];
+    private readonly HashSet<Widget> _registered = [];
     private readonly AnimationScheduler _scheduler;
     private readonly FramePacer _pacer;
     private readonly ArrayBufferWriter<byte> _output = new(1 << 16);
@@ -49,7 +50,9 @@ public sealed class App : IDisposable
     private Renderer _renderer;
     private readonly FramePresenter? _presenter;
     private bool _needsLayout = true;
-    private bool _running;
+    // true by default so RunFrame() works standalone (headless tests);
+    // Quit() flips it, Run() re-arms it
+    private bool _running = true;
     private long _lastPresentedCount;
     private int _presentedWindowFrames;
     private double _presentedWindowStart;
@@ -58,6 +61,9 @@ public sealed class App : IDisposable
 
     /// <summary>Current back-buffer dimensions (viewport size in cells).</summary>
     public int BackWidth => _back.Width;
+
+    /// <summary>The retained back buffer (test introspection).</summary>
+    internal CellBuffer Back => _back;
     public int BackHeight => _back.Height;
     public int TargetFps => _pacer.TargetFps;
 
@@ -89,6 +95,7 @@ public sealed class App : IDisposable
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _presenter = asyncPresenting ? new FramePresenter(terminal.Write) : null;
+        RegisterTree(_root); // DSL-composed widgets render without manual AddWidget
         _presentedWindowStart = NowMs() / 1000.0;
     }
 
@@ -100,9 +107,71 @@ public sealed class App : IDisposable
     /// and signals, and will be disposed with the app.</summary>
     public App AddWidget(Widget widget)
     {
-        widget.Mount(this);
-        _widgets.Add(widget);
+        if (_registered.Add(widget))
+        {
+            widget.Mount(this);
+            _widgets.Add(widget);
+        }
         return this;
+    }
+
+    // ---- overlays (popups/modals) ------------------------------------------
+
+    /// <summary>The modal widget currently on top, if any.</summary>
+    public Widget? Overlay => _overlay;
+    private Widget? _overlay;
+
+    /// <summary>Show a modal on top of everything. It receives keys first
+    /// (HandleKey) and all mouse events; render order puts it last = top.</summary>
+    public void PushOverlay(Widget overlay)
+    {
+        if (_overlay is not null)
+            PopOverlay(); // one modal at a time (v1)
+
+        _overlay = overlay;
+        AddWidget(overlay);
+        overlay.Invalidate();
+    }
+
+    /// <summary>Close the modal and repaint what it covered.</summary>
+    public void PopOverlay()
+    {
+        if (_overlay is null) return;
+
+        var ov = _overlay;
+        _overlay = null;
+        _widgets.Remove(ov);
+        _registered.Remove(ov);
+        ov.Dispose();
+        InvalidateAll();
+    }
+
+    private void RouteMouse(MouseEvent ev)
+    {
+        Widget? target = _overlay;
+        if (target is null)
+        {
+            for (int i = _widgets.Count - 1; i >= 0; i--)
+            {
+                if (_widgets[i].Rect.Contains(ev.X, ev.Y))
+                {
+                    target = _widgets[i];
+                    break;
+                }
+            }
+        }
+
+        if (target is null) return;
+        if (target.OnMouse(ev)) return;
+        if (ev.Kind == MouseKind.Release && target.Clickable)
+            target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+    }
+
+    /// <summary>Mark every widget dirty (theme switch, global style change).</summary>
+    public void InvalidateAll()
+    {
+        for (int i = 0; i < _widgets.Count; i++)
+            _widgets[i].Invalidate();
     }
 
     /// <summary>Install the layout root. Allows building widgets (which need
@@ -111,6 +180,15 @@ public sealed class App : IDisposable
     {
         _root = root;
         _needsLayout = true;
+        RegisterTree(root); // DSL-composed widgets render without manual AddWidget
+    }
+
+    private void RegisterTree(LayoutNode node)
+    {
+        if (node.Tag is Widget w)
+            AddWidget(w);
+        for (int i = 0; i < node.Children.Count; i++)
+            RegisterTree(node.Children[i]);
     }
 
     public void Run()
@@ -188,11 +266,22 @@ public sealed class App : IDisposable
             _rawBatch.Add(b);
         }
 
-        while (_running && _keyParser.TryRead(out var keyEvent))
+        // a lone ESC left pending after the whole batch is a keypress,
+        // not a sequence prefix (arrows arrive in one batch) — release it
+        if (_keyParser.HasPending)
+            _keyParser.Flush();
+
+        while (_running && _keyParser.TryReadKey(out var keyEvent))
         {
+            // modal overlay gets first chance at keys
+            if (_overlay is { } overlayKeys && overlayKeys.HandleKey(keyEvent))
+                continue;
             if (OnKey is { } keyHandler && !keyHandler(keyEvent))
                 _running = false;
         }
+
+        while (_running && _keyParser.TryReadMouse(out var mouseEvent))
+            RouteMouse(mouseEvent);
 
         for (int i = 0; i < _rawBatch.Count && _running; i++)
         {
@@ -218,6 +307,10 @@ public sealed class App : IDisposable
 
         // 3) animations tick → signals → widgets mark themselves dirty
         _scheduler.Tick();
+
+        // overlay covers the viewport; positioned outside the layout tree
+        if (_overlay is { } ov)
+            ov.Node.SetRect(new Rect(0, 0, _back.Width, _back.Height));
 
         // 4) layout pass (pure) when needed; rect-changed widgets go dirty.
         //    Their stale cells at the PREVIOUS rect must be cleared so the
@@ -263,7 +356,7 @@ public sealed class App : IDisposable
         // 6) diff → damage → serialize → ONE submit. Idle wakeups (nothing
         //    rendered, no relayout) skip the diff and put ZERO bytes on the
         //    wire — a monitor between ticks costs nothing (AGENT.md §2).
-        RenderResult result;
+        RenderResult result = default;
         if (anyRendered || relayoutThisFrame)
         {
             _output.Clear();
@@ -272,17 +365,14 @@ public sealed class App : IDisposable
                 presenter.Submit(_output.WrittenSpan);
             else
                 _terminal.Write(_output.WrittenSpan); // synchronous test mode
-        }
-        else
-        {
-            result = default;
+
+            Stats.LastBytesWritten = result.BytesWritten;
+            Stats.LastDirtyCells = result.DirtyCells;
+            Stats.LastDamageRects = result.DamageRects;
         }
 
         // 7) stats + pace
         double workMs = NowMs() - startMs;
-        Stats.LastBytesWritten = result.BytesWritten;
-        Stats.LastDirtyCells = result.DirtyCells;
-        Stats.LastDamageRects = result.DamageRects;
         Stats.Fps = _pacer.Fps;
         Stats.FrameWorkP50Ms = _pacer.FrameTimeP50Ms;
         Stats.FrameWorkP99Ms = _pacer.FrameTimeP99Ms;

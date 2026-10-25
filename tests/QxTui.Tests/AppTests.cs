@@ -156,11 +156,15 @@ public class AppTests
         long firstFrameBytes = app.Stats.LastBytesWritten;
         Assert.True(firstFrameBytes > 100); // real content went out
 
+        int writesAfterFirst = term.WriteCount;
         app.RunFrame(); // idle
         app.RunFrame(); // idle
 
-        Assert.Equal(0, app.Stats.LastDirtyCells);
-        Assert.True(app.Stats.LastBytesWritten <= 16); // sync wrapper only
+        // idle wakeups put ZERO bytes on the wire (not even sync wrappers),
+        // and stats keep describing the last real frame
+        Assert.Equal(writesAfterFirst, term.WriteCount);
+        Assert.True(app.Stats.LastBytesWritten > 100); // untouched by idle
+        Assert.Equal(1, widget.RenderCount); // sync wrapper only
         Assert.Equal(1, widget.RenderCount);
     }
 

@@ -25,18 +25,22 @@ public readonly record struct KeyEvent(Key Key, char Char)
 }
 
 /// <summary>
-/// Incremental ANSI key parser: feed raw tty bytes, drain complete key
-/// events. Handles plain chars, Ctrl-C, CR/LF, and CSI/SS3 escape sequences
-/// for arrows (terminals send \x1b[A .. \x1b[D or \x1bOA .. \x1bOD).
+/// Incremental ANSI input parser: feed raw tty bytes, drain key events and
+/// mouse events from separate queues. Handles plain chars, Ctrl-C, CR/LF,
+/// CSI/SS3 escape sequences for arrows, and SGR mouse reports
+/// (\x1b[&lt;btn;x;y M/m) when the terminal is in mouse mode.
 /// A lone ESC followed by an unrelated byte yields Escape AND re-processes
 /// that byte; Flush() releases a trailing ESC at end of stream.
-/// Allocation-light (one internal queue), stateful: one instance per stream.
 /// </summary>
 public sealed class KeyParser
 {
     private enum State { Ground, Esc, Csi, Ss3 }
 
-    private readonly Queue<KeyEvent> _out = new(4);
+    private readonly Queue<KeyEvent> _keys = new(4);
+    private readonly Queue<MouseEvent> _mouse = new(4);
+    private readonly byte[] _params = new byte[48];
+    private int _plen;
+    private bool _isMouse;
     private State _state = State.Ground;
 
     public void Feed(byte b)
@@ -52,30 +56,54 @@ public sealed class KeyParser
                 {
                     case (byte)'[':
                         _state = State.Csi;
+                        _plen = 0;
+                        _isMouse = false;
                         break;
                     case (byte)'O':
                         _state = State.Ss3;
                         break;
                     default:
-                        // lone ESC: emit it, then re-process this byte fresh
                         _state = State.Ground;
-                        _out.Enqueue(KeyEvent.Of(Key.Escape));
+                        _keys.Enqueue(KeyEvent.Of(Key.Escape));
                         Ground(b);
                         break;
                 }
                 break;
 
             case State.Csi:
-            case State.Ss3:
+                if (b == (byte)'<' && _plen == 0)
+                {
+                    _isMouse = true;
+                    break;
+                }
                 if (b >= 0x30 && b <= 0x3f)
-                    break; // parameter byte (digits, ;, ?)
+                {
+                    if (_plen < _params.Length)
+                        _params[_plen++] = b;
+                    break; // parameter byte
+                }
 
+                _state = State.Ground;
+                if (b is < 0x40 or > 0x7e)
+                    break; // malformed: drop
+
+                if (_isMouse)
+                    ParseMouse(b);
+                else
+                {
+                    var ev = Translate(b);
+                    if (ev.Key != Key.None)
+                        _keys.Enqueue(ev);
+                }
+                break;
+
+            case State.Ss3:
                 _state = State.Ground;
                 if (b is >= 0x40 and <= 0x7e)
                 {
                     var ev = Translate(b);
                     if (ev.Key != Key.None)
-                        _out.Enqueue(ev);
+                        _keys.Enqueue(ev);
                 }
                 break;
         }
@@ -85,11 +113,46 @@ public sealed class KeyParser
     public void Flush()
     {
         if (_state == State.Esc)
-            _out.Enqueue(KeyEvent.Of(Key.Escape));
+            _keys.Enqueue(KeyEvent.Of(Key.Escape));
         _state = State.Ground;
     }
 
-    public bool TryRead(out KeyEvent ev) => _out.TryDequeue(out ev);
+    /// <summary>True when a partial escape sequence is buffered. Apps flush
+    /// at end of frame so a LONE Esc keypress doesn't wait forever for
+    /// sequence bytes that will never come (arrows arrive in one batch).</summary>
+    public bool HasPending => _state != State.Ground;
+
+    public bool TryReadKey(out KeyEvent ev) => _keys.TryDequeue(out ev);
+    public bool TryReadMouse(out MouseEvent ev) => _mouse.TryDequeue(out ev);
+
+    private void ParseMouse(byte final)
+    {
+        // params: btn;x;y  (SGR, 1-based coords)
+        int btn = 0, x = 0, y = 0;
+        int field = 0, acc = 0;
+        for (int i = 0; i <= _plen; i++)
+        {
+            if (i < _plen && _params[i] >= '0' && _params[i] <= '9')
+            {
+                acc = acc * 10 + (_params[i] - '0');
+                continue;
+            }
+            switch (field)
+            {
+                case 0: btn = acc; break;
+                case 1: x = acc; break;
+                case 2: y = acc; break;
+            }
+            field++;
+            acc = 0;
+        }
+
+        var kind = final == (byte)'m'
+            ? MouseKind.Release
+            : (btn & 32) != 0 ? MouseKind.Motion : MouseKind.Press;
+
+        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind));
+    }
 
     private void Ground(byte b)
     {
@@ -100,23 +163,23 @@ public sealed class KeyParser
                 break;
             case 13: // CR
             case 10: // LF
-                _out.Enqueue(KeyEvent.Of(Key.Enter));
+                _keys.Enqueue(KeyEvent.Of(Key.Enter));
                 break;
             case 32:
-                _out.Enqueue(KeyEvent.Of(Key.Space));
+                _keys.Enqueue(KeyEvent.Of(Key.Space));
                 break;
             case 9:
-                _out.Enqueue(KeyEvent.Of(Key.Tab));
+                _keys.Enqueue(KeyEvent.Of(Key.Tab));
                 break;
             case 0x7f:
             case 0x08:
-                _out.Enqueue(KeyEvent.Of(Key.Backspace));
+                _keys.Enqueue(KeyEvent.Of(Key.Backspace));
                 break;
             case 3: // Ctrl-C
-                _out.Enqueue(KeyEvent.OfChar('c'));
+                _keys.Enqueue(KeyEvent.OfChar('c'));
                 break;
             default:
-                _out.Enqueue(KeyEvent.OfChar((char)b));
+                _keys.Enqueue(KeyEvent.OfChar((char)b));
                 break;
         }
     }

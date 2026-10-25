@@ -12,7 +12,7 @@ public class KeyParserTests
         parser.Flush();
 
         var events = new List<KeyEvent>();
-        while (parser.TryRead(out var ev))
+        while (parser.TryReadKey(out var ev))
             events.Add(ev);
         return events;
     }
@@ -53,10 +53,10 @@ public class KeyParserTests
 
         parser.Feed(0x1b);
         parser.Feed((byte)'[');
-        Assert.False(parser.TryRead(out _)); // still incomplete
+        Assert.False(parser.TryReadKey(out _)); // still incomplete
 
         parser.Feed((byte)'C');
-        Assert.True(parser.TryRead(out var ev));
+        Assert.True(parser.TryReadKey(out var ev));
         Assert.Equal(Key.Right, ev.Key);
     }
 

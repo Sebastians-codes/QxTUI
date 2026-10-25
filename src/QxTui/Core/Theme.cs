@@ -7,6 +7,22 @@ namespace QxTui.Core;
 /// arbitrarily (the scenery blue-blob incident) but leave grays alone.
 /// Override per app via <see cref="App.Theme"/>.
 /// </summary>
+/// <summary>Named color roles — widgets reference these, never raw ints,
+/// so a theme switch recolors the whole app.</summary>
+public enum ThemeRole
+{
+    Border,
+    Title,
+    Text,
+    Dim,
+    Faint,
+    Accent,
+    Success,
+    Warning,
+    Danger,
+    PanelBg,
+}
+
 public sealed record Theme(
     int Border,
     int Title,
@@ -46,4 +62,19 @@ public sealed record Theme(
         PanelBg: 233);
 
     public static Theme Default => Night;
+
+    public int Get(ThemeRole role) => role switch
+    {
+        ThemeRole.Border => Border,
+        ThemeRole.Title => Title,
+        ThemeRole.Text => Text,
+        ThemeRole.Dim => Dim,
+        ThemeRole.Faint => Faint,
+        ThemeRole.Accent => Accent,
+        ThemeRole.Success => Success,
+        ThemeRole.Warning => Warning,
+        ThemeRole.Danger => Danger,
+        ThemeRole.PanelBg => PanelBg,
+        _ => Text,
+    };
 }

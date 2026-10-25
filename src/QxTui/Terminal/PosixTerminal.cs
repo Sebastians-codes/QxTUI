@@ -75,11 +75,15 @@ public sealed class PosixTerminal : ITerminal
         Stty("raw -echo");
         WriteRaw("\x1b[?1049h"); // alternate screen
         WriteRaw("\x1b[?25l");    // hide cursor
+        WriteRaw("\x1b[?1000h"); // mouse button press/release reporting
+        WriteRaw("\x1b[?1006h"); // SGR encoding (unlimited coordinates)
         WriteRaw("\x1b[2J");      // clear
     }
 
     public void Exit()
     {
+        WriteRaw("\x1b[?1000l"); // mouse off
+        WriteRaw("\x1b[?1006l");
         WriteRaw("\x1b[?25h");    // show cursor
         WriteRaw("\x1b[?1049l");  // leave alternate screen
         Stty(_savedSttyState);
