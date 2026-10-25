@@ -293,6 +293,14 @@ internal sealed class NetWidget : Widget
     private long _lastSampleTs;
     private double _prevRx, _currRx, _prevTx, _currTx;
 
+    // Stepped full-scale: auto-scaling every sample re-stretched the whole
+    // line vertically each tick ("animating more than sideways"). Decade
+    // steps mean the graph only scrolls sideways until traffic crosses a
+    // step, and the active scale is printed so magnitudes stay readable.
+    private static readonly double[] Scales =
+        [100 * 1024, 1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024, 1024 * 1024 * 1024];
+    private double _scale = Scales[0];
+
     public NetWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
         scheduler.Every(TimeSpan.FromMilliseconds(33), _ => Invalidate()); // 30Hz render
@@ -318,6 +326,10 @@ internal sealed class NetWidget : Widget
             _rx.Push((float)_currRx);
             _tx.Push((float)_currTx);
             _lastSampleTs = now;
+
+            double peak = Math.Max(_rx.Max(0f), _tx.Max(0f));
+            foreach (double candidate in Scales)
+                if (peak <= candidate) { _scale = candidate; break; }
         }
 
         float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
@@ -326,14 +338,16 @@ internal sealed class NetWidget : Widget
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"▼ {LinuxProc.HumanBytes(rxRate)}/s", fg: 42);
-        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 60s", fg: 238);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 12s", fg: 238);
         Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx, 42,
-            autoFloor: 100 * 1024f, phase: f);
+            scaleMax: (float)_scale, phase: f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
             $"▲ {LinuxProc.HumanBytes(txRate)}/s", fg: 141);
-        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 60s", fg: 238);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 12s", fg: 238);
         Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx, 141,
-            autoFloor: 100 * 1024f, phase: f);
+            scaleMax: (float)_scale, phase: f);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
+            $"graph full-scale: {LinuxProc.HumanBytes(_scale)}/s", fg: 238);
     }
 }
 
