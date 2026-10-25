@@ -30,11 +30,11 @@ public sealed class Renderer : IDisposable
     private readonly List<DamageRect> _damage = new(64);
     private readonly bool _synchronizedOutput;
     private bool _resync;
-    /// <summary>Opt-in: emit DECSTBM+SU/SD hardware scrolls from ScrollHint.
-    /// Off by default — SU/SD semantics vary across emulators and a
-    /// mismatch desyncs the front buffer with no self-heal (ghost columns).
-    /// Wire tests enable it explicitly.</summary>
-    public bool HardwareScroll { get; set; }
+    /// <summary>Emit DECSTBM+SU/SD hardware scrolls from ScrollHint: only
+    /// exposed rows serialize, keeping scroll frames ~1KB so terminals
+    /// keep presenting at speed. Disable if an emulator misimplements
+    /// SU/SD (front buffer stays authoritative either way).</summary>
+    public bool HardwareScroll { get; set; } = true;
 
     private Layout.Rect _hintRect;
     private int _hintDelta;
@@ -219,10 +219,26 @@ public sealed class Renderer : IDisposable
     {
         int w = _prev.Width;
         int rows = r.H - Math.Abs(d);
-        int srcRow = d > 0 ? r.Y + d : r.Y;
-        int dstRow = d > 0 ? r.Y : r.Y - d;
-        _prev.Cells.Slice(srcRow * w + r.X, rows * w)
-             .CopyTo(_prev.Cells.Slice(dstRow * w + r.X));
+        // per-row copy: a flat slice smears row boundaries when X > 0
+        if (d > 0)
+            for (int i = 0; i < rows; i++)
+                _prev.Cells.Slice((r.Y + d + i) * w + r.X, r.W)
+                     .CopyTo(_prev.Cells.Slice((r.Y + i) * w + r.X));
+        else
+            for (int i = rows - 1; i >= 0; i--)
+                _prev.Cells.Slice((r.Y + i) * w + r.X, r.W)
+                     .CopyTo(_prev.Cells.Slice((r.Y - d + i) * w + r.X));
+
+        // THE invariant that was missing: SU/SD leaves the exposed rows
+        // BLANK on the terminal, so the front buffer must blank them too.
+        // Leaving old content there makes the diff skip cells identical
+        // between old and new rows (repeating glyphs like a "row "
+        // prefix) — they never repaint over the terminal's blanks and
+        // you get ghost columns with holes punched in them.
+        int n = Math.Abs(d);
+        int blankRow = d > 0 ? r.Bottom - n : r.Y;
+        for (int i = 0; i < n; i++)
+            _prev.Cells.Slice((blankRow + i) * w + r.X, r.W).Fill(Cell.Empty);
     }
 
     private void SerializeRect(CellBuffer back, ref SpanWriter w, in DamageRect rect)

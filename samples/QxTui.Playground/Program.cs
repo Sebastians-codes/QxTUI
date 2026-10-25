@@ -97,6 +97,8 @@ string[] PopupLines() =>
     $"theme:   {themeNames[themeIdx]}",
     $"target:  {app.TargetFps} fps",
     $"bytes/f: {app.Stats.LastBytesWritten:N0}",
+    $"mouse:   {(app.CellPixelH > 0 ? $"pixel {app.CellPixelW}x{app.CellPixelH}" : "cell")}",
+    $"hwscroll: {(app.HardwareScroll ? "on" : "off")} (experimental)",
     "",
     "modals swallow all keys;",
     "esc / [x] / dim click closes.",
@@ -114,6 +116,11 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
         ("480fps", () => SetFps(480)),
         ("1000fps", () => SetFps(1000)),
         ("stack", () => app.PushOverlay(MakeConfirmModal())),
+        ("hwscroll", () =>
+        {
+            app.HardwareScroll = !app.HardwareScroll;
+            app.InvalidateAll();
+        }),
     ]);
 
 // popover-on-popover: confirm modal opens a third level with fps settings
@@ -237,8 +244,9 @@ listPage.Node.Direction = FlexDirection.Column;
 listPage.Node.Gap = 1;
 
 var listHint = new LabelWidget(() =>
-    "10,000 rows — only the visible slice paints. wheel / drag-scroll, " +
-    "click or Tab to focus, then arrows / PgUp / PgDn / Home / End");
+    "10,000 rows — only the visible slice paints. wheel / drag-scroll " +
+    "(thumb is pixel-fine where the terminal reports pixels), click or " +
+    "Tab to focus, then arrows / PgUp / PgDn / Home / End");
 var bigList = new ListView(() => 10_000)
 {
     RenderRow = (buffer, clip, rect, i, selected) =>

@@ -216,6 +216,11 @@ internal sealed class StatsPanelWidget : Widget
             + (App is { } host && s.Fps < host.RequestedFps
                 ? $" (adapted from {host.RequestedFps})" : " (target-capped)"),
             $"presented: {s.PresentedFps.ToString("F0", CultureInfo.InvariantCulture)} fps (terminal-capped)",
+            App is { } m
+                ? $"mouse: {(m.CellPixelH > 0
+                    ? $"pixel {m.CellPixelW}x{m.CellPixelH}px cells (sub-cell drags)"
+                    : "cell (terminal ignored CSI 16 t)")}"
+                : "mouse: -",
             $"dropped: {s.DroppedFrames.ToString("N0", CultureInfo.InvariantCulture)}",
             $"static renders: {_staticPanel.RenderCount}",
             $"ball renders:   {_ball.RenderCount.ToString("N0", CultureInfo.InvariantCulture)}",

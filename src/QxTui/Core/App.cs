@@ -360,6 +360,16 @@ public sealed class App : IDisposable
     /// <summary>Cell height in pixels (0 = unknown: pixel drag disabled).
     /// Widgets use it for sub-cell input math (scrollbar drags).</summary>
     public int CellPixelH => _cellPixH;
+    public int CellPixelW => _cellPixW;
+
+    /// <summary>Opt-in hardware scrolling (DECSTBM+SU/SD): repaints only
+    /// exposed rows on scroll. Off by default — SU/SD semantics vary
+    /// between emulators and a mismatch desyncs the front buffer.</summary>
+    public bool HardwareScroll
+    {
+        get => _renderer.HardwareScroll;
+        set => _renderer.HardwareScroll = value;
+    }
 
     internal void SetCellPixelSize(int w, int h)
     {

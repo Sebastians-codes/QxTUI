@@ -73,6 +73,33 @@ public class HardwareScrollTests
     }
 
     [Fact]
+    public void ExposedRows_AreBlankedInFrontBuffer_RepeatingGlyphsRepaint()
+    {
+        // regression: every row identical, so a naive diff after a shift
+        // sees "no change" and never repaints the terminal's blank
+        // exposed rows -> ghost holes (the bug behind the user screenshot)
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        static CellBuffer Uniform()
+        {
+            var b = new CellBuffer(20, 10);
+            for (int y = 0; y < 10; y++)
+                for (int x = 0; x < 20; x++)
+                    b[x, y] = new Cell { Char = 'x', Fg = 7 };
+            return b;
+        }
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(Uniform(), outp);
+
+        r.ScrollHint(new Rect(0, 0, 20, 10), 2);
+        var out2 = new ArrayBufferWriter<byte>();
+        var res = r.Render(Uniform(), out2); // content "identical" post-shift
+
+        // exposed bottom 2 rows MUST repaint despite identical content
+        Assert.True(res.DirtyCells >= 2 * 20,
+            $"exposed rows must repaint, got {res.DirtyCells} dirty");
+    }
+
+    [Fact]
     public void ScrollHint_PartialRect_LeavesRestUntouched()
     {
         // a static header row outside the rect must not shift or repaint
@@ -94,11 +121,11 @@ public class HardwareScrollTests
 public class HardwareScrollGateTests
 {
     [Fact]
-    public void DisabledByDefault_NoScrollSequences_OnTheWire()
+    public void ExplicitDisable_StaysDiffOnly()
     {
-        // a terminal that misimplements SU/SD must never see them unless
-        // the app explicitly opts in — desyncs have no self-heal
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        // an emulator that misimplements SU/SD can be switched off
+        using var r = new Renderer(20, 10, synchronizedOutput: false)
+            { HardwareScroll = false };
         var outp = new ArrayBufferWriter<byte>();
         r.Render(HardwareScrollTests.MakeBufPublic(20, 10, 0), outp);
 

@@ -29,6 +29,8 @@ script = [
     (3.0, b"t"),        # theme → Amber
     (4.0, b"]"),        # fps 120 → 240
     (5.0, b"o"),        # open floating popup
+    (5.4, b"8"),        # popup action 8: hwscroll on
+    (5.6, b"8"),        # ...and off again (opt-in feature exercised)
     (6.0, b"7"),        # modal action 7: stack confirm modal
     (6.6, b"1"),        # confirm action 1: stack fps modal (3rd level)
     (7.2, b"3"),        # fps modal action 3: 240fps
@@ -109,6 +111,8 @@ checks = {
     "unicode wrap":     "日本語" in text,
     "default 1x":       "speed 1.0x" in text,
     "help line":        "t: theme" in text,
+    "hwscroll line":    "hwscroll:" in text,
+    "mouse mode line":  "mouse:" in text,
     "tab bar":          " widgets " in text and " ball " in text,
     "virtual list":     "row     0" in text or "row     1" in text,
     "popup opens":      "modals swallow" in text,
