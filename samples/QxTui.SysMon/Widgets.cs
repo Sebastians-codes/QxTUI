@@ -33,8 +33,11 @@ internal static class Panel
     /// <summary>8-level single-row sparkline from a ring buffer, right-aligned.</summary>
     /// <param name="scaleMax">Fixed full-scale value (e.g. 100 for percent).
     /// 0 = auto-scale to history max with <paramref name="autoFloor"/>.</param>
+    /// <param name="phase">0..1 sub-cell scroll offset: 0 right after a new
+    /// sample, approaching 1 just before the next — makes history flow
+    /// instead of stepping one column per sample.</param>
     public static void Sparkline(CellBuffer buf, RenderClip clip, int x, int y, int width,
-        RingHistory history, int fg, float scaleMax = 0f, float autoFloor = 1f)
+        RingHistory history, int fg, float scaleMax = 0f, float autoFloor = 1f, float phase = 0f)
     {
         const string Levels = "▁▂▃▄▅▆▇█";
         int n = Math.Min(width, history.Count);
@@ -45,8 +48,9 @@ internal static class Panel
 
         for (int i = 0; i < n; i++)
         {
-            float v = history[history.Count - n + i];
-            int level = Math.Clamp((int)(v / max * 7.999f), 0, 7);
+            float idx = history.Count - n + i + phase;
+            float v = history.AtInterp(Math.Min(idx, history.Count - 1));
+            int level = Math.Clamp((int)(v / max * Levels.Length), 0, Levels.Length - 1);
             buf.WriteTextClipped(clip, start + i, y, Levels.AsSpan(level, 1), fg: fg);
         }
     }
@@ -83,6 +87,18 @@ internal sealed class RingHistory(int capacity)
 
     public float this[int i] => _data[(_head - Count + i + capacity * 2) % capacity];
 
+    /// <summary>Linear-interpolated read at a fractional index — lets
+    /// sparklines scroll sub-cell smoothly between samples.</summary>
+    public float AtInterp(float idx)
+    {
+        if (Count == 0) return 0f;
+        if (idx <= 0f) return this[0];
+        if (idx >= Count - 1) return this[Count - 1];
+        int i = (int)idx;
+        float t = idx - i;
+        return this[i] * (1f - t) + this[i + 1] * t;
+    }
+
     public float Max(float floor)
     {
         float m = floor;
@@ -115,22 +131,24 @@ internal sealed class HeaderWidget : Widget
 
 internal sealed class CpuWidget : Widget
 {
-    // Kernel cpu ticks are 10ms-granular: a 50ms sample window quantizes each
-    // core to 0%/20%/40%... which reads as blinking. 200ms window (20 ticks)
-    // plus exponential smoothing gives readable, btop-like bars.
+    // Sample the kernel at 5Hz (200ms windows: enough ticks for resolution),
+    // but RENDER at 30Hz interpolating between samples — sampling and
+    // rendering at the same low rate is what made everything look choppy.
     private const double SampleMs = 200;
     private const double Alpha = 0.35;
 
     private readonly RingHistory _hist = new(180);
     private LinuxProc.CpuSample _prevAgg;
     private List<LinuxProc.CpuSample> _prevCores = [];
-    private double _aggSmooth;
-    private readonly double[] _coreSmooth = new double[256];
+    private double _prevAggSmooth, _currAggSmooth;
+    private readonly double[] _prevCore = new double[256];
+    private readonly double[] _currCore = new double[256];
     private int _coreCount;
+    private long _lastSampleTs;
 
     public CpuWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
-        scheduler.Every(TimeSpan.FromMilliseconds(SampleMs), _ => Invalidate());
+        scheduler.Every(TimeSpan.FromMilliseconds(33), _ => Invalidate()); // 30Hz render
     }
 
     public override void Render(CellBuffer buffer)
@@ -138,33 +156,44 @@ internal sealed class CpuWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
 
-        var (agg, cores) = LinuxProc.ReadCpu();
-        double aggPct = LinuxProc.Utilization(_prevAgg, agg);
-        _prevAgg = agg;
-
-        _coreCount = Math.Min(cores.Count, _coreSmooth.Length);
-        for (int i = 0; i < _coreCount; i++)
+        long now = Environment.TickCount64;
+        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
         {
-            double pct = i < _prevCores.Count
-                ? LinuxProc.Utilization(_prevCores[i], cores[i])
-                : 0;
-            _coreSmooth[i] += (pct - _coreSmooth[i]) * Alpha;
-        }
-        _prevCores = cores;
+            var (aggSample, cores) = LinuxProc.ReadCpu();
+            double aggPct = LinuxProc.Utilization(_prevAgg, aggSample);
+            _prevAgg = aggSample;
 
-        _aggSmooth += (aggPct - _aggSmooth) * Alpha;
-        _hist.Push((float)_aggSmooth);
+            _prevAggSmooth = _currAggSmooth;
+            _currAggSmooth += (aggPct - _currAggSmooth) * Alpha;
+
+            _coreCount = Math.Min(cores.Count, _currCore.Length);
+            for (int i = 0; i < _coreCount; i++)
+            {
+                double pct = i < _prevCores.Count
+                    ? LinuxProc.Utilization(_prevCores[i], cores[i])
+                    : 0;
+                _prevCore[i] = _currCore[i];
+                _currCore[i] += (pct - _currCore[i]) * Alpha;
+            }
+            _prevCores = cores;
+
+            _hist.Push((float)_currAggSmooth);
+            _lastSampleTs = now;
+        }
+
+        // interpolation fraction between the last two smoothed samples
+        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
+        double agg = _prevAggSmooth + (_currAggSmooth - _prevAggSmooth) * f;
 
         Panel.Frame(buffer, r, $"CPU ({_coreCount})", 42);
 
-        // aggregate line + sparkline
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"all {_aggSmooth.ToString("F0", CultureInfo.InvariantCulture),3}%",
-            fg: Panel.LoadColor(_aggSmooth), bold: true);
-        buffer.WriteTextClipped(Clip, r.X + 11, r.Y + 1, "36s", fg: 238);
-        Panel.Sparkline(buffer, Clip, r.X + 15, r.Y + 1, Math.Max(0, r.W - 17), _hist, 42, scaleMax: 100f);
+            $"all {agg.ToString("F0", CultureInfo.InvariantCulture),3}%",
+            fg: Panel.LoadColor(agg), bold: true);
+        buffer.WriteTextClipped(Clip, r.X + 11, r.Y + 1, "last 36s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 19, r.Y + 1, Math.Max(0, r.W - 21), _hist, 42,
+            scaleMax: 100f, phase: f);
 
-        // per-core bars, two columns when narrow
         int rows = r.H - 3;
         int cols = _coreCount > rows ? 2 : 1;
         int perCol = (_coreCount + cols - 1) / cols;
@@ -178,7 +207,7 @@ internal sealed class CpuWidget : Widget
 
             int x = r.X + 2 + col * colW;
             int y = r.Y + 2 + row;
-            double pct = _coreSmooth[i];
+            double pct = _prevCore[i] + (_currCore[i] - _prevCore[i]) * f;
 
             buffer.WriteTextClipped(Clip, x, y,
                 i.ToString("D2", CultureInfo.InvariantCulture), fg: 244);
@@ -191,11 +220,16 @@ internal sealed class CpuWidget : Widget
 
 internal sealed class MemWidget : Widget
 {
+    private const double SampleMs = 250;
+
     private readonly RingHistory _hist = new(120);
+    private double _prevFrac, _currFrac;
+    private LinuxProc.MemInfo _last = new(0, 0, 0, 0, 0, 0);
+    private long _lastSampleTs;
 
     public MemWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
-        scheduler.Every(TimeSpan.FromMilliseconds(250), _ => Invalidate()); // 4Hz
+        scheduler.Every(TimeSpan.FromMilliseconds(100), _ => Invalidate()); // 10Hz render
     }
 
     public override void Render(CellBuffer buffer)
@@ -204,9 +238,22 @@ internal sealed class MemWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
         Panel.Frame(buffer, r, "MEMORY", 39);
 
-        var m = LinuxProc.ReadMem();
-        double usedFrac = m.TotalKb > 0 ? (m.TotalKb - m.AvailableKb) / (double)m.TotalKb : 0;
-        _hist.Push((float)(usedFrac * 100));
+        long now = Environment.TickCount64;
+        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
+        {
+            _last = LinuxProc.ReadMem();
+            double frac = _last.TotalKb > 0
+                ? (_last.TotalKb - _last.AvailableKb) / (double)_last.TotalKb
+                : 0;
+            _prevFrac = _currFrac;
+            _currFrac = frac;
+            _hist.Push((float)(frac * 100));
+            _lastSampleTs = now;
+        }
+
+        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
+        double usedFrac = _prevFrac + (_currFrac - _prevFrac) * f;
+        var m = _last;
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"{LinuxProc.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {LinuxProc.HumanBytes(m.TotalKb * 1024.0)}"
@@ -214,7 +261,8 @@ internal sealed class MemWidget : Widget
             fg: 250);
         Panel.HBar(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, 39);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3, "used% over last 30s:", fg: 238);
-        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist, 39, scaleMax: 100f);
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist, 39,
+            scaleMax: 100f, phase: f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
             $"avail {LinuxProc.HumanBytes(m.AvailableKb * 1024.0)}"
             + $"  cache {LinuxProc.HumanBytes(m.CacheKb * 1024.0)}"
@@ -234,15 +282,20 @@ internal sealed class MemWidget : Widget
 
 internal sealed class NetWidget : Widget
 {
+    // 500ms sample windows: at 100ms, background chatter (ACKs, keepalives)
+    // made the history zig-zag and the smooth scroll turned that jitter into
+    // a weird animated wave. Longer averages = calm, meaningful shape.
+    private const double SampleMs = 500;
+
     private readonly RingHistory _rx = new(120);
     private readonly RingHistory _tx = new(120);
     private (long Rx, long Tx) _prev;
-    private long _lastTs = Environment.TickCount64;
-    private double _rxRate, _txRate;
+    private long _lastSampleTs;
+    private double _prevRx, _currRx, _prevTx, _currTx;
 
     public NetWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
-        scheduler.Every(TimeSpan.FromMilliseconds(100), _ => Invalidate()); // 10Hz
+        scheduler.Every(TimeSpan.FromMilliseconds(33), _ => Invalidate()); // 30Hz render
     }
 
     public override void Render(CellBuffer buffer)
@@ -251,29 +304,36 @@ internal sealed class NetWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
         Panel.Frame(buffer, r, "NETWORK", 141);
 
-        var (rx, tx) = LinuxProc.ReadNet();
         long now = Environment.TickCount64;
-        double dt = Math.Max(1, now - _lastTs) / 1000.0;
-        double rxNow = Math.Max(0, (rx - _prev.Rx) / dt);
-        double txNow = Math.Max(0, (tx - _prev.Tx) / dt);
-        _prev = (rx, tx);
-        _lastTs = now;
+        if (now - _lastSampleTs >= SampleMs || _lastSampleTs == 0)
+        {
+            var (rx, tx) = LinuxProc.ReadNet();
+            double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
+            double rxNow = Math.Max(0, (rx - _prev.Rx) / dt);
+            double txNow = Math.Max(0, (tx - _prev.Tx) / dt);
+            _prev = (rx, tx);
 
-        // exponential smoothing: 100ms deltas are bursty
-        _rxRate += (rxNow - _rxRate) * 0.3;
-        _txRate += (txNow - _txRate) * 0.3;
+            _prevRx = _currRx; _currRx += (rxNow - _currRx) * 0.3;
+            _prevTx = _currTx; _currTx += (txNow - _currTx) * 0.3;
+            _rx.Push((float)_currRx);
+            _tx.Push((float)_currTx);
+            _lastSampleTs = now;
+        }
 
-        _rx.Push((float)_rxRate);
-        _tx.Push((float)_txRate);
+        float f = (float)Math.Clamp((now - _lastSampleTs) / SampleMs, 0, 1);
+        double rxRate = _prevRx + (_currRx - _prevRx) * f;
+        double txRate = _prevTx + (_currTx - _prevTx) * f;
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"▼ {LinuxProc.HumanBytes(_rxRate)}/s", fg: 42);
-        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "12s", fg: 238);
-        Panel.Sparkline(buffer, Clip, r.X + 19, r.Y + 1, Math.Max(0, r.W - 21), _rx, 42, autoFloor: 100 * 1024f);
+            $"▼ {LinuxProc.HumanBytes(rxRate)}/s", fg: 42);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 60s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx, 42,
+            autoFloor: 100 * 1024f, phase: f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
-            $"▲ {LinuxProc.HumanBytes(_txRate)}/s", fg: 141);
-        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "12s", fg: 238);
-        Panel.Sparkline(buffer, Clip, r.X + 19, r.Y + 2, Math.Max(0, r.W - 21), _tx, 141, autoFloor: 100 * 1024f);
+            $"▲ {LinuxProc.HumanBytes(txRate)}/s", fg: 141);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 60s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx, 141,
+            autoFloor: 100 * 1024f, phase: f);
     }
 }
 
@@ -334,7 +394,7 @@ internal sealed class ProcWidget : Widget
         {
             var p = _rows[i];
             int y = r.Y + 2 + i;
-            int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent));
+            int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent * Environment.ProcessorCount));
 
             buffer.WriteTextClipped(Clip, r.X + 2, y,
                 string.Create(CultureInfo.InvariantCulture,
@@ -342,6 +402,18 @@ internal sealed class ProcWidget : Widget
                 fg: 250);
             buffer.WriteTextClipped(Clip, r.X + 28, y, p.Name, fg: cpuColor);
         }
+    }
+}
+
+internal sealed class FooterWidget : Widget
+{
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
+        buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
+            " q: quit   p: pause processes   graphs render 30fps interpolated from 5-10Hz samples - procs 1Hz ",
+            fg: 250, bg: 236);
     }
 }
 
@@ -357,14 +429,3 @@ internal static class Fmt
     };
 }
 
-internal sealed class FooterWidget : Widget
-{
-    public override void Render(CellBuffer buffer)
-    {
-        var r = Rect;
-        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
-        buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
-            " q: quit   p: pause processes   cpu 5Hz smoothed - net 10Hz - mem/load 4Hz - procs 1Hz - clock 1Hz ",
-            fg: 250, bg: 236);
-    }
-}
