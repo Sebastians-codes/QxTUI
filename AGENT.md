@@ -123,8 +123,9 @@ writer thread      → the ONLY place a blocking tty write may happen
      cell and the new char; total bytes < 64`.
   3. `Anim signal write → only subscribing widget dirty` (dirty tracking
      observable in tests).
-  4. `Resize with unchanged child rect → that child NOT re-rendered`
-     (render counter on the widget).
+  4. `Resize is a cold full repaint` (no preserve: preserving freezes
+     cross-widget contamination from drag frames). Layout RectChanged
+     tracking still reports exactly which nodes moved.
   5. `Grow distribution remainder is deterministic`.
 - Benchmark project (`bench/`) tracks frame-time p50/p99 and bytes/frame
   for the standard scenes (1 animating cell on full screen; 500 particles).

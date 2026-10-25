@@ -117,8 +117,12 @@ public class AppTests
         app.RunFrame();
 
         Assert.Equal(1, app.Stats.Relayouts);
-        Assert.Equal(1, top.RenderCount);    // cached cells kept — NOT re-rendered
-        Assert.Equal(2, bottom.RenderCount); // grew → re-rendered
+        // resize is a cold full repaint: everything renders again...
+        Assert.Equal(2, top.RenderCount);
+        Assert.Equal(2, bottom.RenderCount);
+        // ...but layout TRACKING still knows who actually moved
+        Assert.False(top.Node.RectChanged);
+        Assert.True(bottom.Node.RectChanged);
     }
 
     [Fact]
@@ -138,8 +142,9 @@ public class AppTests
         term.SimulateResize(50, 20); // wider: left stays 10 wide at (0,0)
         app.RunFrame();
 
-        Assert.Equal(1, left.RenderCount); // fixed size, same position
-        Assert.Equal(2, right.RenderCount); // grew wider
+        // full repaint on resize; RectChanged tells the real story
+        Assert.False(left.Node.RectChanged);
+        Assert.True(right.Node.RectChanged);
     }
 
     [Fact]
@@ -191,14 +196,16 @@ public class AppTests
         term.SimulateResize(20, 4); // top 3 + gap 1 + bottom 0
         app.RunFrame();
 
-        Assert.Equal(1, top.RenderCount); // (0,0,20,3) unchanged → cached
-        Assert.Equal(2, bottom.RenderCount); // collapsed → re-rendered (no-op draw)
+        Assert.False(top.Node.RectChanged);    // (0,0,20,3) unchanged
+        Assert.Equal(2, top.RenderCount);      // but resize repaints everything
+        Assert.Equal(2, bottom.RenderCount);   // collapsed → re-rendered (no-op draw)
 
-        // The erase happened in the resize frame; an idle frame must now be
-        // perfectly clean (no stale pixels left to discover later).
+        // The erase happened in the resize frame; an idle frame must submit
+        // nothing at all (stats keep describing the last real frame).
+        int writesAfterResize = term.WriteCount;
         app.RunFrame();
-        Assert.Equal(0, app.Stats.LastDirtyCells);
-        Assert.True(app.Stats.LastBytesWritten <= 16);
+        Assert.Equal(writesAfterResize, term.WriteCount);
+        Assert.True(app.Stats.LastDirtyCells > 0); // the resize repaint itself
     }
 
     [Fact]

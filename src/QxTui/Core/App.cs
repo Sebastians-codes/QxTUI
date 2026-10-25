@@ -441,14 +441,15 @@ public sealed class App : IDisposable
         {
             int w = Math.Max(1, _terminal.Width);
             int h = Math.Max(1, _terminal.Height);
-            _back.Resize(w, h, preserve: true);
-            _renderer.ResizeToContent(_back); // prev = what the terminal shows
 
-            // NOW erase the overlay's OLD rect: back differs from prev here,
-            // so the diff emits real erase bytes. (Clearing before the
-            // prev-sync hid the change from the diff → ghost popups.)
-            if (_overlay is { } ghost)
-                _back.FillRect(ghost.Rect.X, ghost.Rect.Y, ghost.Rect.W, ghost.Rect.H, Cell.Empty);
+            // RESIZE IS A COLD PATH: full clear + full repaint. Content-
+            // preserving resizes freeze cross-contamination from frames
+            // where moving widgets briefly painted over neighbours (ghost
+            // panels, stale HUD fragments during window drags). One full
+            // repaint per resize event is cheap; ghost chains are not.
+            _back.Resize(w, h, preserve: false);
+            _renderer.Resize(w, h); // fresh empty prev → diff = whole screen
+            InvalidateAll();
             _needsLayout = true;
             relayoutThisFrame = true;
             Stats.Relayouts++;
