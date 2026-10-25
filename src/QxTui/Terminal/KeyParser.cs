@@ -125,18 +125,26 @@ public sealed class KeyParser
         }
     }
 
-    /// <summary>End of stream: release any pending lone ESC.</summary>
+    /// <summary>End of frame: release a pending lone ESC. A half-received
+    /// sequence stays buffered instead — its bytes arrive microseconds
+    /// later with the next drain, and flushing it would type its
+    /// coordinates as keypresses.</summary>
     public void Flush()
     {
         if (_state == State.Esc)
             _keys.Enqueue(KeyEvent.Of(Key.Escape));
+        else if (_state != State.Ground)
+            return; // mid-sequence: keep state, wait for the rest
         _state = State.Ground;
     }
 
-    /// <summary>True when a partial escape sequence is buffered. Apps flush
-    /// at end of frame so a LONE Esc keypress doesn't wait forever for
-    /// sequence bytes that will never come (arrows arrive in one batch).</summary>
-    public bool HasPending => _state != State.Ground;
+    /// <summary>True when a LONE Esc is buffered. Apps flush at end of frame
+    /// so an Esc keypress doesn't wait for sequence bytes that will never
+    /// come. Mid-SEQUENCE pending (Csi/Sgr mouse) must NOT be flushed:
+    /// resetting there leaks the sequence's remaining bytes as ground
+    /// keys — wheel coordinates typed as digits literally switched tabs
+    /// ('3' in a y coordinate = ball tab).</summary>
+    public bool HasPending => _state == State.Esc;
 
     public bool TryReadKey(out KeyEvent ev) => _keys.TryDequeue(out ev);
     public bool TryReadMouse(out MouseEvent ev) => _mouse.TryDequeue(out ev);

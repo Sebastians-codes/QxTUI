@@ -115,3 +115,41 @@ public class CellSizeFallbackTests
         Assert.Equal(20, app.CellPixelW);
     }
 }
+
+public class SplitSequenceFlushTests
+{
+    [Fact]
+    public void WheelSequence_SplitAcrossFrameEnd_DoesNotLeakDigitsAsKeys()
+    {
+        // the tab-teleport bug: end-of-frame flush reset the parser
+        // mid-mouse-sequence; the remainder (";60;32M") typed its digits
+        // as keypresses — a '3' in the coordinates switched tabs
+        var p = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<65;60;3"))
+            p.Feed(b);
+        Assert.False(p.HasPending); // mid-sequence is not flushable
+        p.Flush();                  // frame ends here
+
+        Assert.False(p.TryReadKey(out _), "no phantom Escape, no leaked digits");
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("2M"))
+            p.Feed(b);              // rest arrives with the next drain
+
+        Assert.True(p.TryReadMouse(out var ev));
+        Assert.Equal(MouseKind.WheelDown, ev.Kind);
+        Assert.Equal(59, ev.X);
+        Assert.Equal(31, ev.Y);
+        Assert.False(p.TryReadKey(out _), "sequence bytes must never become keys");
+    }
+
+    [Fact]
+    public void LoneEscape_StillFlushesAtFrameEnd()
+    {
+        var p = new KeyParser();
+        p.Feed(0x1b);
+        Assert.True(p.HasPending);
+        p.Flush();
+        Assert.True(p.TryReadKey(out var ev));
+        Assert.Equal(Key.Escape, ev.Key);
+    }
+}
