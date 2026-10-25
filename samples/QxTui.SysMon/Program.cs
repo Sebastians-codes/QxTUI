@@ -25,11 +25,11 @@ var terminal = new PosixTerminal();
 // tree references widget nodes (SetRoot exists for exactly this).
 var app = new App(terminal, new LayoutNode(), targetFps: 60);
 
-var header = new HeaderWidget(app.Scheduler);
-var cpu = new CpuWidget(app.Scheduler);
-var mem = new MemWidget(app.Scheduler);
-var net = new NetWidget(app.Scheduler);
-var procs = new ProcWidget(app.Scheduler);
+var header = new HeaderWidget();
+var cpu = new CpuWidget();
+var mem = new MemWidget();
+var net = new NetWidget();
+var procs = new ProcWidget();
 var footer = new FooterWidget();
 
 // ---- flexbox layout ---------------------------------------------------------

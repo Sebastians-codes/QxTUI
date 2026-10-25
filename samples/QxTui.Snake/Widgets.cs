@@ -27,12 +27,12 @@ internal sealed class SnakeWidget : Widget
     private double _stepIntervalMs = 130;
     public bool Paused;
 
-    public SnakeWidget(QxTui.Animation.AnimationScheduler scheduler, Signal<int> score, Signal<bool> alive)
+    public SnakeWidget(Signal<int> score, Signal<bool> alive)
     {
         _model = new SnakeModel(40, 20);
         _score = score;
         _alive = alive;
-        scheduler.Every(TimeSpan.FromMilliseconds(10), _ => Invalidate()); // 100Hz render
+        Tick(TimeSpan.FromMilliseconds(10)); // 100Hz render
     }
 
     public SnakeModel Model => _model;
@@ -154,9 +154,6 @@ internal sealed class SnakeWidget : Widget
 /// alive-state actually changes — the isolation demo, again.</summary>
 internal sealed class HudWidget : Widget
 {
-    private readonly IDisposable _s1;
-    private readonly IDisposable _s2;
-    private readonly IDisposable _s3;
     private readonly Signal<int> _score;
     private readonly Signal<bool> _alive;
     private readonly Signal<int> _fps;
@@ -166,9 +163,9 @@ internal sealed class HudWidget : Widget
         _score = score;
         _alive = alive;
         _fps = fps;
-        _s1 = score.Subscribe(_ => Invalidate());
-        _s2 = alive.Subscribe(_ => Invalidate());
-        _s3 = fps.Subscribe(_ => Invalidate());
+        OnSignal(score);
+        OnSignal(alive);
+        OnSignal(fps);
     }
 
     public override void Render(CellBuffer buffer)
@@ -181,12 +178,6 @@ internal sealed class HudWidget : Widget
             fg: 255, bg: 236, bold: true);
     }
 
-    public override void Dispose()
-    {
-        _s1.Dispose();
-        _s2.Dispose();
-        _s3.Dispose();
-    }
 }
 
 internal sealed class HelpWidget : Widget

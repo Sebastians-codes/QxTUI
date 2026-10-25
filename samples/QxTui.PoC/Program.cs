@@ -93,11 +93,6 @@ using (app)
     app.Scheduler.Animate(particles.Clock, 1f,
         new Transition(TimeSpan.FromHours(1), Easing.Linear, RepeatMode.Loop));
 
-    // Stats refresh at ~4Hz — deliberately NOT per frame, so the stats panel
-    // doesn't become its own biggest damage source.
-    app.Scheduler.Animate(stats.Ticker, 1f,
-        new Transition(TimeSpan.FromMilliseconds(250), Easing.Linear, RepeatMode.Loop));
-
     app.Run();
 }
 
@@ -113,20 +108,19 @@ file static class Box
         => QxTui.Render.Box.Draw(buf, r.X, r.Y, r.W, r.H, BoxStyles.Single, fg, title, 39);
 }
 
-file sealed class SpinnerWidget() : Widget
+file sealed class SpinnerWidget : Widget
 {
     private static readonly char[] Frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
     public Signal<float> Angle { get; } = new(0f);
-    private IDisposable? _angleSub;
+
+    public SpinnerWidget() => OnSignal(Angle);
 
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
         Box.Draw(buffer, r, "SPINNER", fg: 39);
-
-        _angleSub ??= Angle.Subscribe(_ => Invalidate());
 
         int frame = (int)(Angle.Value * Frames.Length) % Frames.Length;
         if (r.H >= 4 && r.W >= 4)
@@ -138,7 +132,6 @@ file sealed class SpinnerWidget() : Widget
         }
     }
 
-    public override void Dispose() => _angleSub?.Dispose();
 }
 
 file sealed class StaticPanelWidget(string? title, params string[] lines) : Widget
@@ -164,14 +157,14 @@ file sealed class LabelWidget(string text) : Widget
     }
 }
 
-file sealed class ProgressBarWidget() : Widget
+file sealed class ProgressBarWidget : Widget
 {
     public Signal<float> Progress { get; } = new(0f);
-    private IDisposable? _sub;
+
+    public ProgressBarWidget() => OnSignal(Progress);
 
     public override void Render(CellBuffer buffer)
     {
-        _sub ??= Progress.Subscribe(_ => Invalidate());
 
         var r = Rect;
         if (r.W < 1 || r.H < 1) return;
@@ -187,24 +180,31 @@ file sealed class ProgressBarWidget() : Widget
             buffer.WriteTextClipped(Clip, r.X + 2, r.Y, label, fg: 232, bg: 42, bold: true);
     }
 
-    public override void Dispose() => _sub?.Dispose();
 }
 
-file sealed class ParticlesWidget(int count) : Widget
+file sealed class ParticlesWidget : Widget
 {
     public Signal<float> Clock { get; } = new(0f);
 
-    private readonly float[] _px = new float[count], _py = new float[count];
-    private readonly float[] _vx = new float[count], _vy = new float[count];
-    private readonly int[] _color = new int[count];
+    private readonly int _count;
+    private readonly float[] _px, _py, _vx, _vy;
+    private readonly int[] _color;
     private readonly Random _rng = new(42); // deterministic demo
     private long _lastTs = Stopwatch.GetTimestamp();
     private bool _initialized;
-    private IDisposable? _sub;
+
+    public ParticlesWidget(int count)
+    {
+        _count = count;
+        _px = new float[count]; _py = new float[count];
+        _vx = new float[count]; _vy = new float[count];
+        _color = new int[count];
+        OnSignal(Clock);
+    }
 
     private void Init()
     {
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < _count; i++)
         {
             _px[i] = (float)_rng.NextDouble();
             _py[i] = (float)_rng.NextDouble();
@@ -219,7 +219,6 @@ file sealed class ParticlesWidget(int count) : Widget
 
     public override void Render(CellBuffer buffer)
     {
-        _sub ??= Clock.Subscribe(_ => Invalidate());
         if (!_initialized) Init();
 
         var r = Rect;
@@ -232,7 +231,7 @@ file sealed class ParticlesWidget(int count) : Widget
 
         buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = -1, Bg = 232 });
 
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < _count; i++)
         {
             _px[i] += _vx[i] * (float)dt;
             _py[i] += _vy[i] * (float)dt;
@@ -246,21 +245,18 @@ file sealed class ParticlesWidget(int count) : Widget
         }
     }
 
-    public override void Dispose() => _sub?.Dispose();
 }
 
-file sealed class StatsWidget() : Widget
+file sealed class StatsWidget : Widget
 {
-    public Signal<float> Ticker { get; } = new(0f);
-
     private App? _app;
-    private IDisposable? _sub;
+
+    public StatsWidget() => Tick(TimeSpan.FromMilliseconds(250)); // ~4Hz
 
     public void Attach(App app) => _app = app;
 
     public override void Render(CellBuffer buffer)
     {
-        _sub ??= Ticker.Subscribe(_ => Invalidate());
 
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
@@ -287,5 +283,4 @@ file sealed class StatsWidget() : Widget
             buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1 + i, lines[i], fg: 250);
     }
 
-    public override void Dispose() => _sub?.Dispose();
 }
