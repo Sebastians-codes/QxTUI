@@ -63,7 +63,11 @@ var stats = new StatsPanelWidget(staticPanel, ball);
 
 ThemeRole filledRole = ThemeRole.Accent;
 
-var speedLabel = new LabelWidget(speed, v => $"speed {0.2 + v * 2.8:F1}x");
+var speedLabel = new LabelWidget(speed, v =>
+{
+    float m = BallWidget.MultFor(v);
+    return $"speed {(m < 10 ? m.ToString("F1") : m.ToString("F0"))}x";
+});
 var speedSlider = new SliderWidget(speed, ThemeRole.Warning);
 
 var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);
@@ -147,11 +151,9 @@ app.SetRoot(UI.Column(1,
             new LabelWidget(() => "random walk · auto scale").Height(1),
             walkSpark.Height(2))
         .Grow(2),
-        UI.Column(1,
-            ball.Grow(1),
-            UI.Row(1, speedLabel.Width(14), speedSlider.Grow(1)).Height(1))
-        .Grow(3))
+        ball.Grow(3))
     .Grow(1),
+    UI.Row(1, speedLabel.Width(16), speedSlider.Grow(1)).Height(1), // full-width: fine control
     UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
         UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
     .Height(11), // three 3-row buttons + gaps: below this they'd crush

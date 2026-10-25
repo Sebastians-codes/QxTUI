@@ -1,5 +1,6 @@
 using System.Globalization;
 using QxTui.Core;
+using QxTui.Layout;
 using QxTui.Reactive;
 using QxTui.Render;
 
@@ -81,8 +82,10 @@ internal sealed class BallWidget : Widget
         Tick(TimeSpan.FromMilliseconds(10)); // 100Hz
     }
 
-    /// <summary>0..1 slider value → 0.2x..3.0x ball speed.</summary>
-    private float Mult => 0.2f + _speed.Value * 2.8f;
+    /// <summary>0..1 slider → 0.2x..100x, exponential so low speeds stay
+    /// controllable (linear would cram 0.2-3x into 3% of the track).</summary>
+    public static float MultFor(float v) => 0.2f * MathF.Pow(500f, v);
+    private float Mult => MultFor(_speed.Value);
 
     public override void Render(CellBuffer buffer)
     {
@@ -106,11 +109,19 @@ internal sealed class BallWidget : Widget
         double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);
         _lastTs = now;
 
+        // substep at high multipliers: without this, 100x moves ~1 screen
+        // per frame and the ball tunnels through walls instead of bouncing
         float m = Mult;
-        _px += _vx * m * (float)dt;
-        _py += _vy * m * (float)dt;
-        if (_px is < 0 or > 1) { _vx = -_vx; _px = Math.Clamp(_px, 0, 1); }
-        if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
+        double travel = 0.8 * m * dt;                 // worst-case fraction this frame
+        int steps = Math.Clamp((int)Math.Ceiling(travel / 0.02), 1, 128);
+        double sdt = m * dt / steps;
+        for (int sub = 0; sub < steps; sub++)
+        {
+            _px += _vx * (float)sdt;
+            _py += _vy * (float)sdt;
+            if (_px is < 0 or > 1) { _vx = -_vx; _px = Math.Clamp(_px, 0, 1); }
+            if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
+        }
 
         int bx = (int)(_px * (pw - 1));
         int by = (int)(_py * (ph - 1));

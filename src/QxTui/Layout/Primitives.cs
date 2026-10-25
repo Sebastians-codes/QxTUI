@@ -11,6 +11,8 @@ public struct Size(int width, int height) : IEquatable<Size>
     public override readonly bool Equals(object? obj) => obj is Size s && Equals(s);
     public override readonly int GetHashCode() => HashCode.Combine(Width, Height);
     public override readonly string ToString() => $"{Width}x{Height}";
+    public static bool operator ==(Size a, Size b) => a.Equals(b);
+    public static bool operator !=(Size a, Size b) => !a.Equals(b);
 }
 
 /// <summary>Integer 2D point (cell space).</summary>
@@ -23,6 +25,8 @@ public struct Point(int x, int y) : IEquatable<Point>
     public override readonly bool Equals(object? obj) => obj is Point p && Equals(p);
     public override readonly int GetHashCode() => HashCode.Combine(X, Y);
     public override readonly string ToString() => $"({X},{Y})";
+    public static bool operator ==(Point a, Point b) => a.Equals(b);
+    public static bool operator !=(Point a, Point b) => !a.Equals(b);
 }
 
 /// <summary>Absolute cell-space rectangle (output of layout).</summary>
@@ -43,4 +47,6 @@ public struct Rect(int x, int y, int w, int h) : IEquatable<Rect>
     public override readonly bool Equals(object? obj) => obj is Rect r && Equals(r);
     public override readonly int GetHashCode() => HashCode.Combine(X, Y, W, H);
     public override readonly string ToString() => $"({X},{Y}) {W}x{H}";
+    public static bool operator ==(Rect a, Rect b) => a.Equals(b);
+    public static bool operator !=(Rect a, Rect b) => !a.Equals(b);
 }
