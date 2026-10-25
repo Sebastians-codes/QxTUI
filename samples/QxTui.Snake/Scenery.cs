@@ -23,6 +23,8 @@ internal sealed class Scenery(int seed = 7)
         public readonly double Phase = phase;
     }
 
+    // Fixed pool in proportional coords; the COUNT used scales with the
+    // surface area (stable subset → resizing never reshuffles the sky).
     private readonly Star[] _stars = MakeStars(seed);
     private readonly double _p1 = new Random(seed).NextDouble() * Math.PI * 2;
     private readonly double _p2 = new Random(seed + 1).NextDouble() * Math.PI * 2;
@@ -50,6 +52,9 @@ internal sealed class Scenery(int seed = 7)
         if (w < 8 || h < 8) return;
 
         int horizon = h * 62 / 100;
+        int starCount = Math.Clamp(w * h / 120, 12, _stars.Length);
+        double ridgeScale = 14.0 / w;   // ridge wavelength ∝ width
+        int moonR = Math.Clamp(Math.Min(w, h) / 30, 1, 3);
 
         // sky gradient: deep space → dusk purple at the horizon
         for (int y = 0; y < horizon; y++)
@@ -65,7 +70,7 @@ internal sealed class Scenery(int seed = 7)
                 s.SetPixel(x, y, 16);
 
         // stars: drift + twinkle
-        for (int i = 0; i < _stars.Length; i++)
+        for (int i = 0; i < starCount; i++)
         {
             ref readonly var st = ref _stars[i];
             double fx = (st.X + t * st.Speed) % 1.0;
@@ -76,19 +81,19 @@ internal sealed class Scenery(int seed = 7)
             s.SetPixel(sx, sy, c);
         }
 
-        // moon with a soft glow
-        int mx = w * 78 / 100, my = Math.Max(2, horizon * 28 / 100);
-        for (int dy = -2; dy <= 2; dy++)
-            for (int dx = -2; dx <= 2; dx++)
+        // moon with a soft glow, sized to the window
+        int mx = w * 78 / 100, my = Math.Max(moonR + 1, horizon * 28 / 100);
+        for (int dy = -moonR - 1; dy <= moonR + 1; dy++)
+            for (int dx = -moonR - 1; dx <= moonR + 1; dx++)
             {
                 int d = dx * dx + dy * dy;
-                if (d <= 1) s.SetPixel(mx + dx, my + dy, 230);
-                else if (d <= 4) s.SetPixel(mx + dx, my + dy, 95); // glow
+                if (d <= moonR * moonR) s.SetPixel(mx + dx, my + dy, 230);
+                else if (d <= (moonR + 1) * (moonR + 1)) s.SetPixel(mx + dx, my + dy, 95);
             }
 
         // far ridge (slow parallax), then near ridge (faster, darker)
-        PaintRidge(s, t * 0.6, horizon, horizon * 22 / 100, 18, _p1, _p2);
-        PaintRidge(s, t * 1.7, horizon, horizon * 34 / 100, 0, _p2, _p3);
+        PaintRidge(s, t * 0.6, horizon, horizon * 22 / 100, 18, ridgeScale, _p1, _p2);
+        PaintRidge(s, t * 1.7, horizon, horizon * 34 / 100, 0, ridgeScale, _p2, _p3);
     }
 
     private static int SkyColor(int y, int horizon)
@@ -102,12 +107,12 @@ internal sealed class Scenery(int seed = 7)
     }
 
     private static void PaintRidge(HalfBlockSurface s, double scroll, int horizon,
-        int amplitude, int color, double pa, double pb)
+        int amplitude, int color, double ridgeScale, double pa, double pb)
     {
         int w = s.PixelWidth;
         for (int x = 0; x < w; x++)
         {
-            double u = (x + scroll * 12.0) * 0.09;
+            double u = (x + scroll * 12.0) * ridgeScale;
             double hgt = 0.55 + 0.30 * Math.Sin(u + pa) + 0.15 * Math.Sin(u * 2.7 + pb);
             int top = horizon - (int)(hgt * amplitude);
             for (int y = Math.Max(0, top); y < horizon + amplitude / 3; y++)

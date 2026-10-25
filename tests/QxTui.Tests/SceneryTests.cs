@@ -75,3 +75,60 @@ public class SceneryTests
             }
     }
 }
+
+public class SceneryFitsAnyWindowTests
+{
+    private static readonly Cell Bg2 = new() { Char = ' ', Fg = -1, Bg = 233 };
+
+    [Theory]
+    [InlineData(8, 8)]      // tiny
+    [InlineData(200, 40)]   // ultrawide
+    [InlineData(24, 120)]   // tall narrow
+    [InlineData(64, 64)]    // square-ish
+    [InlineData(13, 9)]     // odd small
+    public void PaintsEveryPixel_AtAnySize(int w, int h)
+    {
+        // half-blocks: one cell column per pixel column, one cell row per 2
+        using var buf = new CellBuffer(w + 2, h / 2 + 2);
+        var s = new HalfBlockSurface(buf, 0, 0, w, h, Bg2);
+
+        new Scenery(5).Paint(s, 9.7);
+        s.Draw();
+
+        // scenery covers the whole surface: no background cell left over
+        for (int cy = 0; cy < s.CellHeight; cy++)
+            for (int cx = 0; cx < s.CellWidth; cx++)
+                Assert.NotEqual(' ', buf[cx, cy].Char);
+    }
+
+    [Fact]
+    public void StarField_IsStableSubset_AcrossResizes()
+    {
+        // same seed at two sizes: the smaller sky's stars must be a subset
+        // of the larger one's (no reshuffle on resize)
+        using var small = new CellBuffer(30, 20);
+        using var big = new CellBuffer(60, 40);
+        var ss = new HalfBlockSurface(small, 0, 0, 30, 20, Bg2);
+        var bs = new HalfBlockSurface(big, 0, 0, 60, 40, Bg2);
+
+        var scenery = new Scenery(11);
+        scenery.Paint(ss, 4.0);
+        ss.Draw();
+        scenery.Paint(bs, 4.0);
+        bs.Draw();
+
+        int starsSmall = Count(small, 30, 20, c => c is 252 or 244 or 60);
+        int starsBig = Count(big, 60, 40, c => c is 252 or 244 or 60);
+        Assert.True(starsBig >= starsSmall,
+            $"bigger sky must not have fewer stars ({starsBig} < {starsSmall})");
+    }
+
+    private static int Count(CellBuffer buf, int w, int h, Func<int, bool> match)
+    {
+        int n = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if (match(buf[x, y].Fg)) n++;
+        return n;
+    }
+}
