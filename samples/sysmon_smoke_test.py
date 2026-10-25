@@ -66,8 +66,6 @@ checks = {
     "mem human units":     "GiB" in text or "MiB" in text,
     "network panel":       "NETWORK" in text,
     "net rates":           "/s" in text,
-    "load panel":          "LOAD" in text,
-    "running count":       "running" in text,
     "process table":       "PROCESSES" in text,
     "proc header cols":    "CPU%" in text and "MEM%" in text,
     "process rows present": __import__("re").search(

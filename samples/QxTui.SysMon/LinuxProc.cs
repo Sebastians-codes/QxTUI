@@ -76,18 +76,6 @@ internal static class LinuxProc
         return p.Length >= 2 ? long.Parse(p[1], CultureInfo.InvariantCulture) : 0;
     }
 
-    public static (double One, double Five, double Fifteen, int Running, int Total) ReadLoad()
-    {
-        var p = File.ReadAllText("/proc/loadavg").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var procs = p[3].Split('/');
-        return (
-            double.Parse(p[0], CultureInfo.InvariantCulture),
-            double.Parse(p[1], CultureInfo.InvariantCulture),
-            double.Parse(p[2], CultureInfo.InvariantCulture),
-            int.Parse(procs[0], CultureInfo.InvariantCulture),
-            int.Parse(procs[1], CultureInfo.InvariantCulture));
-    }
-
     public static TimeSpan ReadUptime() =>
         TimeSpan.FromSeconds(double.Parse(
             File.ReadAllText("/proc/uptime").Split(' ')[0], CultureInfo.InvariantCulture));

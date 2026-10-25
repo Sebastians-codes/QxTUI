@@ -7,7 +7,7 @@ using QxTui.Terminal;
 // qxtop — a btop-style system monitor built on qxtui.
 //
 // Not a benchmark: a real application. Every panel samples /proc at its own
-// rate (cpu 20Hz, net 10Hz, mem/load 4Hz, procs 2Hz, clock 1Hz) via the
+// rate (cpu 5Hz, net 10Hz, mem 4Hz, procs 1Hz, clock 1Hz) via the
 // single AnimationScheduler clock, and each panel invalidates ONLY itself —
 // the damage-isolation architecture doing actual work. Resize freely; the
 // flexbox tree reflows and untouched panels keep their cached cells.
@@ -29,7 +29,6 @@ var header = new HeaderWidget(app.Scheduler);
 var cpu = new CpuWidget(app.Scheduler);
 var mem = new MemWidget(app.Scheduler);
 var net = new NetWidget(app.Scheduler);
-var load = new LoadWidget(app.Scheduler);
 var procs = new ProcWidget(app.Scheduler);
 var footer = new FooterWidget();
 
@@ -41,19 +40,14 @@ rowTop.Add(mem.Node);
 cpu.Node.Grow = 3f;
 mem.Node.Grow = 2f;
 
-var rowMid = new LayoutNode { Direction = FlexDirection.Row, Height = 9, Gap = 1 };
-rowMid.Add(net.Node);
-rowMid.Add(load.Node);
-net.Node.Grow = 1f;
-load.Node.Grow = 1f;
-
 var root = new LayoutNode { Direction = FlexDirection.Column, Gap = 1 };
 root.Add(header.Node);
 root.Add(rowTop);
-root.Add(rowMid);
+root.Add(net.Node);
 root.Add(procs.Node);
 root.Add(footer.Node);
 header.Node.Height = 1;
+net.Node.Height = 5;
 procs.Node.Grow = 1f;
 procs.Node.Basis = 8; // minimum presence on short terminals (shrinks others first)
 footer.Node.Height = 1;
@@ -63,7 +57,6 @@ app.AddWidget(header)
    .AddWidget(cpu)
    .AddWidget(mem)
    .AddWidget(net)
-   .AddWidget(load)
    .AddWidget(procs)
    .AddWidget(footer);
 

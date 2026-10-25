@@ -277,43 +277,6 @@ internal sealed class NetWidget : Widget
     }
 }
 
-internal sealed class LoadWidget : Widget
-{
-    private readonly RingHistory _hist = new(120);
-
-    public LoadWidget(QxTui.Animation.AnimationScheduler scheduler)
-    {
-        scheduler.Every(TimeSpan.FromMilliseconds(250), _ => Invalidate()); // 4Hz
-    }
-
-    public override void Render(CellBuffer buffer)
-    {
-        var r = Rect;
-        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        int cores = Environment.ProcessorCount;
-        Panel.Frame(buffer, r, $"LOAD ({cores} cores)", 214);
-
-        var (l1, l5, l15, running, total) = LinuxProc.ReadLoad();
-        _hist.Push((float)l1);
-
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            string.Create(CultureInfo.InvariantCulture,
-                $"now {l1:F2}   5m {l5:F2}   15m {l15:F2}"), fg: 250, bold: true);
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
-            "procs wanting CPU, averaged.", fg: 240);
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
-            $"1.0/core busy, {cores} = all queued.", fg: 240);
-        // bar = load1 relative to core count: full bar == all cores saturated
-        Panel.HBar(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4,
-            Math.Clamp(l1 / cores, 0, 1), Panel.LoadColor(l1 / cores * 100));
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
-            string.Create(CultureInfo.InvariantCulture,
-                $"{l1 / cores * 100:F0}% of capacity   {running}/{total} running"), fg: 240);
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 6, "30s", fg: 238);
-        Panel.Sparkline(buffer, Clip, r.X + 6, r.Y + 6, Math.Max(0, r.W - 8), _hist, 214, scaleMax: cores);
-    }
-}
-
 internal sealed class ProcWidget : Widget
 {
     private readonly Dictionary<int, long> _prevTicks = new(256);
