@@ -265,3 +265,17 @@ public class WrittenIdTests
         Assert.Equal(1, p.DroppedCount);
     }
 }
+
+public class SnapshotSlotTests
+{
+    [Fact]
+    public void UseSlotA_ProtectsTheWrittenSnapshot()
+    {
+        // the written frame's slot must never be recycled, or drop-repair
+        // loses the terminal's true base and freezes holes
+        Assert.False(App.UseSlotA(5, 6, 5)); // A is on screen -> write B
+        Assert.True(App.UseSlotA(5, 6, 6));  // B is on screen -> write A
+        Assert.True(App.UseSlotA(5, 6, 9));  // neither -> recycle older (A)
+        Assert.False(App.UseSlotA(8, 6, 9)); // neither -> recycle older (B)
+    }
+}

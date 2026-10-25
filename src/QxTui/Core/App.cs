@@ -817,9 +817,14 @@ public sealed class App : IDisposable
 
             if (_back.Width == _snapW && _back.Height == _snapH)
             {
-                // two-slot ring keyed by submit id: the frame the writer
-                // last wrote is always one of these two snapshots
-                if (frameId % 2 == 0)
+                // two-slot ring: {the written frame, the latest frame}.
+                // The written slot is PROTECTED — overwriting it would
+                // leave the drop-repair without the terminal's true base
+                // and freeze holes again (the id%2 version did exactly
+                // that once submits outran writes).
+                bool useA = UseSlotA(_snapIdA, _snapIdB,
+                                     _presenter?.WrittenId ?? long.MinValue);
+                if (useA)
                 {
                     _snapA ??= new CellBuffer(_back.Width, _back.Height);
                     _back.Cells.CopyTo(_snapA.Cells);
@@ -890,6 +895,15 @@ public sealed class App : IDisposable
         _traceRendered.Clear();
         _traceUncovered = 0;
         _traceFrame++;
+    }
+
+    /// <summary>Slot choice for the next snapshot: never overwrite the
+    /// snapshot the terminal is actually showing; otherwise the older one.</summary>
+    internal static bool UseSlotA(long idA, long idB, long written)
+    {
+        if (idA == written) return false;
+        if (idB == written) return true;
+        return idA <= idB; // neither protected: recycle the older slot
     }
 
     private bool BackContains(string text)
