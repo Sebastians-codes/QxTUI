@@ -138,3 +138,34 @@ public class ChildRepaintTests
         Assert.True(child.RenderCount >= 5, "child must repaint with its parent");
     }
 }
+
+public class PageSwitchCleanupTests
+{
+    [Fact]
+    public void SwitchingPages_ErasesOldPagePixels()
+    {
+        var a = new PageWidget("aaaa"); // fills its whole rect with 'a'
+        var b = new ContainerWidget();  // paints nothing
+        var bChild = new LabelWidget(() => "top");
+        b.AddChild(bChild);
+        bChild.Node.Height = 1;
+
+        var router = new Router();
+        router.Register("a", () => a).Register("b", () => b);
+        router.Switch("a");
+
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, UI.Column(0, router.Grow(1)),
+            targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Assert.Equal('a', app.Back[10, 8].Char);
+
+        router.Switch("b");
+        app.RunFrame();
+
+        // the region page A owned must be cleared, not ghosted
+        Assert.Equal(' ', app.Back[10, 8].Char);
+        Assert.Equal(-1, app.Back[10, 8].Bg);
+        Assert.Equal('t', app.Back[1, 0].Char); // new page's child painted
+    }
+}

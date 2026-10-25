@@ -139,6 +139,18 @@ public sealed class App : IDisposable
 
     internal void DetachSubtree(Widget child, bool dispose = true)
     {
+        // remember what the subtree painted BEFORE unregistering: those
+        // pixels must be erased from the back buffer or they ghost forever
+        // (new pages only paint their own rects; containers paint nothing)
+        var rects = new List<Layout.Rect>();
+        void Collect(Widget w)
+        {
+            rects.Add(w.Rect);
+            for (int i = 0; i < w.Children.Count; i++)
+                Collect(w.Children[i]);
+        }
+        Collect(child);
+
         void Un(Widget w)
         {
             _registered.Remove(w);
@@ -151,6 +163,12 @@ public sealed class App : IDisposable
         Un(child);
         RebuildFlat();
         _needsLayout = true;
+
+        for (int i = 0; i < rects.Count; i++)
+        {
+            var r = rects[i];
+            _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+        }
     }
 
     private void RebuildFlat()
