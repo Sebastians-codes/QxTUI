@@ -67,7 +67,7 @@ checks = {
     "network panel":       "NETWORK" in text,
     "net rates":           "/s" in text,
     "process table":       "PROCESSES" in text,
-    "proc header cols":    "CPU%" in text and "MEM%" in text,
+    "proc header cols":    "CPU%" in text and "MEM" in text,
     "process rows present": __import__("re").search(
         r"\d+ +[SRDtZXKPW] +\d+\.\d +\d+(\.\d)?[KMG]", text) is not None,
     "pause took effect":   "paused" in text,

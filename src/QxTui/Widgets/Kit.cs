@@ -125,11 +125,20 @@ public sealed class ModalWidget : Widget
 {
     private readonly string _title;
     private readonly Func<string[]> _lines;
+    private readonly bool _dim;
+    private readonly (string Label, Action Act)[] _actions;
 
-    public ModalWidget(string title, Func<string[]> lines)
+    /// <param name="dim">Dim everything behind the box (classic modal).
+    /// false = floating popup over live content.</param>
+    /// <param name="actions">Button row inside the box: clickable AND
+    /// bound to keys 1..n while the modal is open.</param>
+    public ModalWidget(string title, Func<string[]> lines, bool dim = true,
+        (string Label, Action Act)[]? actions = null)
     {
         _title = title;
         _lines = lines;
+        _dim = dim;
+        _actions = actions ?? [];
         Clickable = true;
     }
 
@@ -140,6 +149,13 @@ public sealed class ModalWidget : Widget
             App?.PopOverlay();
             return true;
         }
+        if (ev.Key == Key.Char && ev.Char >= '1' && ev.Char <= '9')
+        {
+            int idx = ev.Char - '1';
+            if (idx < _actions.Length)
+                _actions[idx].Act();
+            return true;
+        }
         return true; // modal: swallow everything else
     }
 
@@ -148,16 +164,46 @@ public sealed class ModalWidget : Widget
         var lines = _lines();
         int w = Math.Min(screen.W - 4, Math.Max(24, _title.Length + 8));
         foreach (var l in lines) w = Math.Min(screen.W - 4, Math.Max(w, l.Length + 4));
-        int h = Math.Min(screen.H - 2, lines.Length + 4);
+        int actionsWidth = 0;
+        for (int i = 0; i < _actions.Length; i++)
+            actionsWidth += _actions[i].Label.Length + 7; // " 1:label "
+        w = Math.Min(screen.W - 4, Math.Max(w, actionsWidth + 4));
+        int h = Math.Min(screen.H - 2, lines.Length + 4 + (_actions.Length > 0 ? 2 : 0));
         return new Rect((screen.W - w) / 2, (screen.H - h) / 2, w, h);
+    }
+
+    /// <summary>Screen rects of the action buttons, in order.</summary>
+    private List<(Rect Rect, Action Act)> ActionRects(Rect box)
+    {
+        var result = new List<(Rect, Action)>(_actions.Length);
+        int x = box.X + 2;
+        int y = box.Bottom - 2;
+        for (int i = 0; i < _actions.Length; i++)
+        {
+            string label = $" {i + 1}:{_actions[i].Label} ";
+            result.Add((new Rect(x, y, label.Length, 1), _actions[i].Act));
+            x += label.Length + 1;
+        }
+        return result;
     }
 
     public override void OnClick(Point local)
     {
         var box = BoxRect(Rect);
+
+        // action buttons first
+        foreach (var (r, act) in ActionRects(box))
+        {
+            if (local.X >= r.X && local.X < r.Right && local.Y == r.Y)
+            {
+                act();
+                return;
+            }
+        }
+
         bool insideBox = local.X >= box.X && local.X < box.Right &&
                          local.Y >= box.Y && local.Y < box.Bottom;
-        // [x] button sits at the box top-right; dim area = outside the box
+        // [x] button sits at the box top-right; outside the box closes
         bool closeBtn = local.X >= box.Right - 4 && local.X < box.Right - 1 && local.Y == box.Y;
         if (!insideBox || closeBtn)
             App?.PopOverlay();
@@ -166,8 +212,8 @@ public sealed class ModalWidget : Widget
     public override void Render(CellBuffer buffer)
     {
         var screen = Rect;
-        // dim everything
-        buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
+        if (_dim)
+            buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
 
         var box = BoxRect(screen);
         buffer.FillRect(box.X, box.Y, box.W, box.H,
@@ -180,5 +226,16 @@ public sealed class ModalWidget : Widget
         for (int i = 0; i < lines.Length && box.Y + 2 + i < box.Bottom - 1; i++)
             buffer.WriteTextClipped(Clip, box.X + 2, box.Y + 2 + i, lines[i],
                 fg: Theme.Get(ThemeRole.Text), bg: Theme.Get(ThemeRole.PanelBg));
+
+        // action button row
+        int ax = box.X + 2;
+        int ay = box.Bottom - 2;
+        for (int i = 0; i < _actions.Length; i++)
+        {
+            string label = $" {i + 1}:{_actions[i].Label} ";
+            buffer.WriteTextClipped(Clip, ax, ay, label,
+                fg: Theme.Get(ThemeRole.Title), bg: Theme.Get(ThemeRole.PanelBg), bold: true);
+            ax += label.Length + 1;
+        }
     }
 }

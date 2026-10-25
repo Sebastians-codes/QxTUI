@@ -212,7 +212,7 @@ public class ModalSemanticsTests
         var baseWidget = new FillWidget('T');
         // trailing empty row = region no widget ever paints (uncovered)
         var root = UI.Column(1, baseWidget.Grow(1), new LayoutNode { Height = 1 });
-        var (app, _) = MakeApp(root);
+        var (app, term) = MakeApp(root);
 
         app.RunFrame();
         Assert.Equal('T', app.Back[15, 0].Char);
@@ -227,6 +227,27 @@ public class ModalSemanticsTests
         Assert.Equal(-1, app.Back[15, 0].Bg);   // dim gone everywhere
         Assert.Equal(' ', app.Back[0, 11].Char); // uncovered gap restored too
         Assert.Equal('T', app.Back[15, 5].Char);
+
+        // the TERMINAL must have been told to erase the uncovered gap row:
+        // the pop frame's byte stream contains a cursor move to row 12
+        var wire = System.Text.Encoding.Latin1.GetString(term.LastFrame!);
+        Assert.Contains("\x1b[12;1H", wire);
+    }
+
+    [Fact]
+    public void ModalWithoutDim_LeavesBackgroundLive()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var (app, _) = MakeApp(root);
+
+        app.RunFrame();
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.RunFrame();
+
+        // outside the box the base content is untouched (floating popup)
+        Assert.Equal('T', app.Back[0, 0].Char);
+        Assert.Equal(-1, app.Back[0, 0].Bg);
     }
 
     [Fact]
@@ -254,5 +275,54 @@ public class ModalSemanticsTests
         Motion(15, 5);
         Assert.False(a.Hovered);
         Assert.True(b.Hovered);
+    }
+}
+
+public class ModalActionTests
+{
+    [Fact]
+    public void ActionKey_TriggersWithoutClosing()
+    {
+        int hits = 0;
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false,
+            actions: [("go", () => hits++)]));
+
+        term.QueueInput((byte)'1');
+        app.RunFrame();
+        Assert.Equal(1, hits);
+        Assert.NotNull(app.Overlay); // still open
+
+        term.QueueInput((byte)'2'); // no second action: swallowed, no crash
+        app.RunFrame();
+        Assert.Equal(1, hits);
+    }
+
+    [Fact]
+    public void ActionClick_TriggersAndStaysOpen()
+    {
+        int hits = 0;
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var modal = new ModalWidget("t", () => ["x"], dim: false,
+            actions: [("go", () => hits++)]);
+        app.PushOverlay(modal);
+        app.RunFrame();
+
+        // action row sits at box.Bottom-2; box is centered: compute like the widget
+        // screen 40x12 → box w = max(24, len("x")+4, len(" 1:go ")+4) = 24; h = 1+4+2 = 7
+        // box = ((40-24)/2, (12-7)/2) = (8, 2); action row y = 2+7-2 = 7; x = 8+2 = 10
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;11;8M\x1b[<0;11;8m"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.Equal(1, hits);
+        Assert.NotNull(app.Overlay);
     }
 }

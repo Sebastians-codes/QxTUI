@@ -146,10 +146,13 @@ public sealed class App : IDisposable
         ov.Dispose();
         ResetHover();
 
-        // the dim covered gaps/uncovered regions no widget repaints:
-        // full clear + full repaint is the only correct restore
+        // The dim covered gaps/uncovered regions no widget repaints. Clear
+        // the back buffer but KEEP the renderer's prev frame holding the
+        // dim: the diff then emits erases for every uncovered cell plus
+        // repaints for widget rects. (Syncing prev to the cleared back —
+        // the previous attempt — told the diff "nothing changed" and left
+        // dim pixels on the terminal forever.)
         _back.Clear();
-        _renderer.ResizeToContent(_back); // prev = cleared → next diff = full repaint
         InvalidateAll();
     }
 

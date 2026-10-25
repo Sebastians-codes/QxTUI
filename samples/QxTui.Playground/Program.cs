@@ -70,20 +70,35 @@ var feederWired = new FeederWidget(sineHist, walkHist, onChanged: () =>
 });
 
 var help = new LabelWidget(() =>
-    " t: theme   [ ]: fps   o/click: popup   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+    " t: theme   [ ]: fps   o/click: popup (1-4 fps inside)   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+
+string[] PopupLines() =>
+[
+    $"theme:   {themeNames[themeIdx]}",
+    $"target:  {app.TargetFps} fps",
+    $"bytes/f: {app.Stats.LastBytesWritten:N0}",
+    "",
+    "modals swallow all keys;",
+    "esc / [x] / dim click closes.",
+];
+
+void SetFps(int v)
+{
+    app.SetTargetFps(v);
+    fpsSig.Set(v);
+}
+
+ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
+    actions:
+    [
+        ("30fps", () => SetFps(30)),
+        ("60fps", () => SetFps(60)),
+        ("120fps", () => SetFps(120)),
+        ("240fps", () => SetFps(240)),
+    ]);
 
 ButtonWidget? openBtn = null;
-openBtn = new ButtonWidget(() => " open popup ", () => app.PushOverlay(new ModalWidget(
-    "popup",
-    () =>
-    [
-        $"theme:   {themeNames[themeIdx]}",
-        $"target:  {app.TargetFps} fps",
-        $"bytes/f: {app.Stats.LastBytesWritten:N0}",
-        "",
-        "modals swallow all keys;",
-        "esc / [x] / dim click closes.",
-    ])));
+openBtn = new ButtonWidget(() => " open popup ", () => app.PushOverlay(MakePopup()));
 
 // ---- the whole layout as ONE expression (the DSL showcase) ------------------
 
@@ -143,7 +158,7 @@ app.OnKey = ev =>
         }
 
         case Key.Char when ev.Char is 'o' or 'O':
-            openBtn!.OnClick(new QxTui.Layout.Point(0, 0));
+            app.PushOverlay(MakePopup()); // floating, no dim
             return true;
 
         case Key.Char when ev.Char is 'q':

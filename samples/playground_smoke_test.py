@@ -24,9 +24,10 @@ script = [
     (2.0, b"t"),        # theme → Mono
     (3.0, b"t"),        # theme → Amber
     (4.0, b"]"),        # fps 120 → 240
-    (5.0, b"o"),        # open modal popup
-    (6.5, b"\x1b"),    # esc closes it
-    (8.0, b"q"),
+    (5.0, b"o"),        # open floating popup
+    (6.0, b"4"),        # modal action 4: 240fps
+    (7.5, b"\x1b"),    # esc closes it
+    (9.0, b"q"),
 ]
 si = 0
 try:
@@ -71,6 +72,7 @@ checks = {
     "stats panel":      "static renders: 1" in screen or "static renders:" in text,
     "help line":        "t: theme" in text,
     "popup opens":      "modals swallow" in text,
+    "popup fps buttons": "4:240fps" in text,
     "popup closes":     "modals swallow" not in screen,
     "clean exit":       "\x1b[?1049l" in text,
 }
