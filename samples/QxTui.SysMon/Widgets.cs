@@ -113,40 +113,52 @@ internal sealed class HeaderWidget : Widget
 
 internal sealed class CpuWidget : Widget
 {
+    // Kernel cpu ticks are 10ms-granular: a 50ms sample window quantizes each
+    // core to 0%/20%/40%... which reads as blinking. 200ms window (20 ticks)
+    // plus exponential smoothing gives readable, btop-like bars.
+    private const double SampleMs = 200;
+    private const double Alpha = 0.35;
+
     private readonly RingHistory _hist = new(180);
     private LinuxProc.CpuSample _prevAgg;
     private List<LinuxProc.CpuSample> _prevCores = [];
-    private double _aggPct;
-    private readonly double[] _corePct = new double[64];
+    private double _aggSmooth;
+    private readonly double[] _coreSmooth = new double[256];
     private int _coreCount;
 
     public CpuWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
-        scheduler.Every(TimeSpan.FromMilliseconds(50), _ => Invalidate()); // 20Hz
+        scheduler.Every(TimeSpan.FromMilliseconds(SampleMs), _ => Invalidate());
     }
 
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Panel.Frame(buffer, r, "CPU", 42);
 
         var (agg, cores) = LinuxProc.ReadCpu();
-        _aggPct = LinuxProc.Utilization(_prevAgg, agg);
+        double aggPct = LinuxProc.Utilization(_prevAgg, agg);
         _prevAgg = agg;
 
-        _coreCount = Math.Min(cores.Count, _corePct.Length);
+        _coreCount = Math.Min(cores.Count, _coreSmooth.Length);
         for (int i = 0; i < _coreCount; i++)
-            _corePct[i] = i < _prevCores.Count
+        {
+            double pct = i < _prevCores.Count
                 ? LinuxProc.Utilization(_prevCores[i], cores[i])
                 : 0;
+            _coreSmooth[i] += (pct - _coreSmooth[i]) * Alpha;
+        }
         _prevCores = cores;
 
-        _hist.Push((float)_aggPct);
+        _aggSmooth += (aggPct - _aggSmooth) * Alpha;
+        _hist.Push((float)_aggSmooth);
+
+        Panel.Frame(buffer, r, $"CPU ({_coreCount})", 42);
 
         // aggregate line + sparkline
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"all {_aggPct.ToString("F0", CultureInfo.InvariantCulture),3}%", fg: Panel.LoadColor(_aggPct), bold: true);
+            $"all {_aggSmooth.ToString("F0", CultureInfo.InvariantCulture),3}%",
+            fg: Panel.LoadColor(_aggSmooth), bold: true);
         Panel.Sparkline(buffer, Clip, r.X + 10, r.Y + 1, Math.Max(0, r.W - 12), _hist, 42);
 
         // per-core bars, two columns when narrow
@@ -163,7 +175,7 @@ internal sealed class CpuWidget : Widget
 
             int x = r.X + 2 + col * colW;
             int y = r.Y + 2 + row;
-            double pct = _corePct[i];
+            double pct = _coreSmooth[i];
 
             buffer.WriteTextClipped(Clip, x, y,
                 i.ToString("D2", CultureInfo.InvariantCulture), fg: 244);
@@ -231,10 +243,14 @@ internal sealed class NetWidget : Widget
         var (rx, tx) = LinuxProc.ReadNet();
         long now = Environment.TickCount64;
         double dt = Math.Max(1, now - _lastTs) / 1000.0;
-        _rxRate = Math.Max(0, (rx - _prev.Rx) / dt);
-        _txRate = Math.Max(0, (tx - _prev.Tx) / dt);
+        double rxNow = Math.Max(0, (rx - _prev.Rx) / dt);
+        double txNow = Math.Max(0, (tx - _prev.Tx) / dt);
         _prev = (rx, tx);
         _lastTs = now;
+
+        // exponential smoothing: 100ms deltas are bursty
+        _rxRate += (rxNow - _rxRate) * 0.3;
+        _txRate += (txNow - _txRate) * 0.3;
 
         _rx.Push((float)_rxRate);
         _tx.Push((float)_txRate);
@@ -329,7 +345,7 @@ internal sealed class FooterWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
         buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
-            " q: quit   p: pause processes   panels refresh at 1-20Hz, each invalidating only itself ",
+            " q: quit   p: pause processes   cpu 5Hz smoothed - net 10Hz - mem/load 4Hz - procs 2Hz - clock 1Hz ",
             fg: 250, bg: 236);
     }
 }

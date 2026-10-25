@@ -70,6 +70,8 @@ checks = {
     "running count":       "running" in text,
     "process table":       "PROCESSES" in text,
     "proc header cols":    "CPU%" in text and "MEM%" in text,
+    "process rows present": __import__("re").search(
+        r"\d+ +[SRDtZXKPW] +\d+\.\d +\d+\.\d", text) is not None,
     "pause took effect":   "paused" in text,
     "clean exit":          "\x1b[?1049l" in text,
 }

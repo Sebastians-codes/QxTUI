@@ -121,7 +121,9 @@ internal static class LinuxProc
 
         foreach (var dir in Directory.EnumerateDirectories("/proc"))
         {
-            var name = dir.AsSpan(5);
+            // "/proc/" is SIX chars — off-by-one here made TryParse fail for
+            // every pid and silently emptied the table (regression!).
+            var name = dir.AsSpan(6);
             if (!int.TryParse(name, out int pid))
                 continue;
 
