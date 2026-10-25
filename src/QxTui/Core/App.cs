@@ -196,7 +196,12 @@ public sealed class App : IDisposable
         if (target is null) return;
         if (target.OnMouse(ev)) return;
         if (ev.Kind == MouseKind.Release && target.Clickable)
+        {
             target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+            // a click almost always mutates rendered state: repaint the
+            // clicked widget immediately, don't wait for hover to change
+            target.Invalidate();
+        }
     }
 
     /// <summary>Mark every widget dirty (theme switch, global style change).</summary>
@@ -331,7 +336,13 @@ public sealed class App : IDisposable
             int w = Math.Max(1, _terminal.Width);
             int h = Math.Max(1, _terminal.Height);
             _back.Resize(w, h, preserve: true);
-            _renderer.ResizeToContent(_back);
+            _renderer.ResizeToContent(_back); // prev = what the terminal shows
+
+            // NOW erase the overlay's OLD rect: back differs from prev here,
+            // so the diff emits real erase bytes. (Clearing before the
+            // prev-sync hid the change from the diff → ghost popups.)
+            if (_overlay is { } ghost)
+                _back.FillRect(ghost.Rect.X, ghost.Rect.Y, ghost.Rect.W, ghost.Rect.H, Cell.Empty);
             _needsLayout = true;
             relayoutThisFrame = true;
             Stats.Relayouts++;
@@ -454,7 +465,9 @@ public sealed class App : IDisposable
                 bool covered = false;
                 for (int i = 0; i < _widgets.Count; i++)
                 {
-                    if (_widgets[i].Rect.Contains(x, y))
+                    var w2 = _widgets[i];
+                    if (ReferenceEquals(w2, _overlay)) continue; // full-screen: would hide gaps
+                    if (w2.Rect.Contains(x, y))
                     {
                         covered = true;
                         break;

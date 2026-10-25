@@ -413,3 +413,143 @@ public class OverlayZOrderTests
         Assert.Equal(233, app.Back[15, 5].Bg); // modal panel bg wins
     }
 }
+
+public class ButtonStyleTests
+{
+    private static CellBuffer RenderButton(ButtonStyle style, bool hovered, out ButtonWidget btn)
+    {
+        var buf = new CellBuffer(20, 5);
+        btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+        var root = UI.Column(0, btn.Grow(1));
+        var term = new FakeTerminal(20, 5);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        if (hovered)
+        {
+            btn.Hovered = true;
+            btn.Invalidate();
+            app.RunFrame();
+        }
+        return buf; // note: assertions read app.Back via caller instead
+    }
+
+    [Fact]
+    public void Filled_SolidBackground_Outline_And_Rounded_Differ()
+    {
+        foreach (var style in new[] { ButtonStyle.Filled, ButtonStyle.Outline, ButtonStyle.Rounded })
+        {
+            var term = new FakeTerminal(20, 5);
+            var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+            var root = UI.Column(0, btn.Grow(1));
+            using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+            app.RunFrame();
+
+            var back = app.Back;
+            switch (style)
+            {
+                case ButtonStyle.Filled:
+                    Assert.Equal(Theme.Night.Accent, back[10, 2].Bg); // solid fill
+                    break;
+                case ButtonStyle.Outline:
+                    Assert.Equal('┌', back[0, 0].Char);
+                    Assert.Equal(-1, back[10, 2].Bg); // hollow inside
+                    break;
+                case ButtonStyle.Rounded:
+                    Assert.Equal('╭', back[0, 0].Char);
+                    Assert.Equal(-1, back[10, 2].Bg);
+                    break;
+            }
+        }
+    }
+
+    [Fact]
+    public void Hover_BrightensEveryStyle()
+    {
+        foreach (var style in new[] { ButtonStyle.Filled, ButtonStyle.Outline, ButtonStyle.Rounded })
+        {
+            var term = new FakeTerminal(20, 5);
+            var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+            var root = UI.Column(0, btn.Grow(1));
+            using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+            app.RunFrame();
+            int cold = style == ButtonStyle.Filled ? app.Back[10, 2].Bg : app.Back[0, 0].Fg;
+
+            btn.Hovered = true;
+            btn.Invalidate();
+            app.RunFrame();
+            int hot = style == ButtonStyle.Filled ? app.Back[10, 2].Bg : app.Back[0, 0].Fg;
+
+            Assert.NotEqual(cold, hot);
+            Assert.Equal(Theme.Night.Title, hot);
+        }
+    }
+
+    [Fact]
+    public void Resize_WithOpenOverlay_LeavesNoGhost()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.RunFrame();
+
+        // modal panel bg present at old box center
+        Assert.Equal(233, app.Back[20, 5].Bg);
+
+        term.SimulateResize(70, 20);
+        app.RunFrame();
+        app.RunFrame();
+
+        // no modal-bg cell may survive outside the NEW box (35-24/2=.. compute:
+        // new box w=24,h=5 at ((70-24)/2, (20-5)/2) = (23,7)..(47,12)
+        for (int y = 0; y < 20; y++)
+            for (int x = 0; x < 70; x++)
+            {
+                bool insideNewBox = x >= 23 && x < 47 && y >= 7 && y < 12;
+                if (!insideNewBox)
+                    Assert.True(app.Back[x, y].Bg != 233,
+                        $"ghost modal pixel at ({x},{y}) after resize");
+            }
+    }
+}
+
+public class ClickInvalidationTests
+{
+    private sealed class ToggleButton : Widget
+    {
+        public bool On;
+        public ToggleButton() => Clickable = true;
+        public override void OnClick(Point local) => On = !On;
+        public override void Render(CellBuffer buffer)
+        {
+            var r = Rect;
+            buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+            buffer.WriteTextClipped(Clip, r.X, r.Y, On ? "ON " : "OFF", fg: 7);
+        }
+    }
+
+    [Fact]
+    public void Click_RepaintsTarget_WithoutMouseMotion()
+    {
+        var btn = new ToggleButton();
+        var root = UI.Column(0, btn.Height(1));
+        var term = new FakeTerminal(20, 6);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        Assert.Equal('O', app.Back[0, 0].Char);
+        Assert.Equal('F', app.Back[2, 0].Char); // "OFF"
+
+        // press+release on the button, no motion afterwards
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;3;1M\x1b[<0;3;1m"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.True(btn.On);
+        Assert.Equal('N', app.Back[1, 0].Char); // "ON " painted immediately
+        Assert.Equal(' ', app.Back[2, 0].Char);
+    }
+}

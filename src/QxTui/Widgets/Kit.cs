@@ -32,8 +32,10 @@ public sealed class LabelWidget : Widget
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
-        if (_bg is { } role)
-            buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(role) });
+        // always clear our rect: a moved/resized widget must not leave
+        // stale text behind (only writing text ghosts on reflow)
+        buffer.FillRect(r.X, r.Y, r.W, r.H,
+            new Cell { Char = ' ', Fg = -1, Bg = _bg is { } r3 ? Theme.Get(r3) : -1 });
         buffer.WriteTextClipped(Clip, r.X + 1, r.Y, _text(), fg: Theme.Get(_fg),
             bg: _bg is { } r2 ? Theme.Get(r2) : -1);
     }
@@ -77,24 +79,40 @@ public sealed class SparklineWidget(
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty); // no stale trail on reflow
         Sparkline.Draw(buffer, Clip, r.X, r.Y, r.W, history,
             fg: Theme.Get(fg), scaleMax: scaleMax, autoFloor: autoFloor,
             phase: phase?.Invoke() ?? 0f);
     }
 }
 
-/// <summary>Clickable labeled button. The click target is its whole rect.</summary>
+public enum ButtonStyle
+{
+    /// <summary>Solid fill, dark bold label.</summary>
+    Filled,
+    /// <summary>Single-line box outline.</summary>
+    Outline,
+    /// <summary>Rounded-corner outline.</summary>
+    Rounded,
+}
+
+/// <summary>Clickable labeled button in three styles, all hover-reactive:
+/// the pointer brightens border/fill/label — the "this is clickable"
+/// affordance. Click target is the whole rect.</summary>
 public sealed class ButtonWidget : Widget
 {
     private readonly Func<string> _label;
     private readonly Action _onClick;
     private readonly ThemeRole _fg;
+    private readonly ButtonStyle _style;
 
-    public ButtonWidget(Func<string> label, Action onClick, ThemeRole fg = ThemeRole.Accent)
+    public ButtonWidget(Func<string> label, Action onClick,
+        ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
     {
         _label = label;
         _onClick = onClick;
         _fg = fg;
+        _style = style;
         Clickable = true;
     }
 
@@ -105,15 +123,30 @@ public sealed class ButtonWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
 
-        // hover-reactive: border AND label brighten under the pointer —
-        // the affordance that says "this is clickable"
-        int edge = Theme.Get(Hovered ? ThemeRole.Title : _fg);
-        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, edge);
-
+        int hot = Theme.Get(Hovered ? ThemeRole.Title : _fg);
         var label = _label();
         int lx = r.X + Math.Max(1, (r.W - label.Length) / 2);
-        buffer.WriteTextClipped(Clip, lx, r.Y + r.H / 2, label,
-            fg: Theme.Get(Hovered ? ThemeRole.Title : _fg), bold: true);
+        int ly = r.Y + r.H / 2;
+
+        switch (_style)
+        {
+            case ButtonStyle.Filled:
+                for (int y = r.Y; y < r.Bottom; y++)
+                    for (int x = r.X; x < r.Right; x++)
+                        buffer.WriteTextClipped(Clip, x, y, " ", fg: 232, bg: hot);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: 232, bg: hot, bold: true);
+                break;
+
+            case ButtonStyle.Outline:
+                Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, hot);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
+                break;
+
+            default:
+                Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, hot);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
+                break;
+        }
     }
 }
 

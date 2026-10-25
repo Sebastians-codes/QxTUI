@@ -59,6 +59,8 @@ var ball = new BallWidget();
 var staticPanel = new StaticPanelWidget();
 var stats = new StatsPanelWidget(staticPanel, ball);
 
+ThemeRole filledRole = ThemeRole.Accent;
+
 var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);
 var walkSpark = new SparklineWidget(walkHist, ThemeRole.Success, autoFloor: 10f);
 
@@ -68,6 +70,13 @@ var feederWired = new FeederWidget(sineHist, walkHist, onChanged: () =>
     sineSpark.Invalidate();
     walkSpark.Invalidate();
 });
+
+bool filledOn = false;
+var filledDemo = new ButtonWidget(
+    () => filledOn ? " filled: on " : " filled: off ",
+    () => filledOn = !filledOn,
+    fg: ThemeRole.Warning,
+    style: ButtonStyle.Filled);
 
 var help = new LabelWidget(() =>
     " t: theme   [ ]: fps   o/click: popup (1-4 fps inside)   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
@@ -98,7 +107,17 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
     ]);
 
 ButtonWidget? openBtn = null;
-openBtn = new ButtonWidget(() => " open popup ", () => app.PushOverlay(MakePopup()));
+openBtn = new ButtonWidget(() => " open popup ", () => app.PushOverlay(MakePopup()),
+    style: ButtonStyle.Rounded);
+
+var themeBtn = new ButtonWidget(() => " theme ", () =>
+{
+    themeIdx = (themeIdx + 1) % themes.Length;
+    app.Theme = themes[themeIdx];
+    app.InvalidateAll();
+}, style: ButtonStyle.Outline);
+
+
 
 // ---- the whole layout as ONE expression (the DSL showcase) ------------------
 
@@ -121,7 +140,9 @@ app.SetRoot(UI.Column(1,
         .Grow(2),
         ball.Grow(3))
     .Grow(1),
-    UI.Row(1, staticPanel.Grow(1), stats.Grow(1), openBtn.Width(16)).Height(9),
+    UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
+        UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
+    .Height(11), // three 3-row buttons + gaps: below this they'd crush
     help.Height(1)));
 
 app.AddWidget(hud)

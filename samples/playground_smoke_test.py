@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """pty smoke test for the qxtui playground sample."""
+import fcntl
 import os
 import pty
 import select
+import struct
 import sys
 import time
 
@@ -18,6 +20,8 @@ if pid == 0:
     os.chdir(REPO)
     os.environ["TERM"] = "xterm-256color"
     os.execvp(CMD[0], CMD)
+
+fcntl.ioctl(fd, 0x5414, struct.pack("HHHH", 40, 120, 0, 0))
 
 start = time.time()
 script = [
