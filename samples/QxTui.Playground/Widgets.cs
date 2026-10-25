@@ -85,6 +85,7 @@ internal sealed class BallWidget : Widget
     public BallWidget(Signal<float> speed)
     {
         _speed = speed;
+        Node.ChildInset = 1; // frame ring; children (slider row) live inside
         TickPerFrame(); // refresh follows the app's fps target, whatever it is
     }
 
@@ -103,7 +104,9 @@ internal sealed class BallWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
         if (r.W < 6 || r.H < 4) return;
 
-        int pw = r.W - 2, ph = (r.H - 2) * 2;
+        // surface fills the inset area ABOVE the child row (last inner row
+        // belongs to children, e.g. the slider)
+        int pw = r.W - 2, ph = Math.Max(2, r.H - 3) * 2;
         // ANY rect change (size OR position) needs a new surface: a stale
         // origin paints the ball into the wrong place, and stale trail
         // points from the old coordinate space show up as lone specks

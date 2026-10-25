@@ -94,7 +94,7 @@ var filledDemo = new ButtonWidget(
 };
 
 var help = new LabelWidget(() =>
-    " t: theme   [ ]: fps   o/click: popup   drag slider: ball speed   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+    " t: theme   [ ]: fps   1/2/3 or click tabs: pages   o/click: popup   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
 string[] PopupLines() =>
 [
@@ -155,26 +155,60 @@ speedLabel.Node.Width = 16;
 sliderRow.AddChild(speedSlider);
 speedSlider.Node.Grow = 1f;
 
+// ---- SPA-style pages behind a Router ---------------------------------------
+
+var widgetsPage = new ContainerWidget();
+widgetsPage.Node.Direction = FlexDirection.Row;
+widgetsPage.Node.Gap = 1;
+
+var barCol = new ContainerWidget();
+barCol.Node.Direction = FlexDirection.Column;
+barCol.Node.Gap = 1;
+widgetsPage.AddChild(barCol);
+barCol.Node.Grow = 2f;
+void AddBar(LabelWidget l, BarWidget b)
+{
+    barCol.AddChild(l); l.Node.Height = 1;
+    barCol.AddChild(b); b.Node.Height = 1;
+}
+AddBar(new LabelWidget(linear, v => $"linear · 3s · {v:F2}"), new BarWidget(linear, ThemeRole.Accent));
+AddBar(new LabelWidget(cubic, v => $"out-cubic · 2s · {v:F2}"), new BarWidget(cubic, ThemeRole.Success));
+AddBar(new LabelWidget(back, v => $"out-back · 2.5s · {v:F2} (clamps)"), new BarWidget(back, ThemeRole.Warning));
+
+var sparkCol = new ContainerWidget();
+sparkCol.Node.Direction = FlexDirection.Column;
+sparkCol.Node.Gap = 1;
+widgetsPage.AddChild(sparkCol);
+sparkCol.Node.Grow = 2f;
+var sineLabel = new LabelWidget(() => "sine · 20Hz feed · fixed scale");
+var walkLabel = new LabelWidget(() => "random walk · auto scale");
+sparkCol.AddChild(sineLabel); sineLabel.Node.Height = 1;
+sparkCol.AddChild(sineSpark); sineSpark.Node.Height = 2;
+sparkCol.AddChild(walkLabel); walkLabel.Node.Height = 1;
+sparkCol.AddChild(walkSpark); walkSpark.Node.Height = 2;
+
+var textPage = new ContainerWidget();
+textPage.Node.Direction = FlexDirection.Column;
+textPage.Node.Gap = 1;
+var textTitle = new LabelWidget(() => "text wrapping + unicode widths");
+var ellipDemo = new LabelWidget(
+    () => "ellipsize: the quick brown fox jumps over the lazy dog and keeps going…");
+textPage.AddChild(textTitle); textTitle.Node.Height = 1;
+textPage.AddChild(wrapDemo); wrapDemo.Node.Grow = 1f;
+textPage.AddChild(ellipDemo); ellipDemo.Node.Height = 1;
+
+var router = new Router();
+router.Register("widgets", () => widgetsPage)
+      .Register("text", () => textPage)
+      .Register("ball", () => ball);
+router.Switch("widgets");
+
+var tabBar = new TabBarWidget(router, ["widgets", "text", "ball"]);
+
 app.SetRoot(UI.Column(1,
     hud.Height(1),
-    UI.Row(1,
-        UI.Column(1,
-            new LabelWidget(linear, v => $"linear · 3s · {v:F2}").Height(1),
-            new BarWidget(linear, ThemeRole.Accent).Height(1),
-            new LabelWidget(cubic, v => $"out-cubic · 2s · {v:F2}").Height(1),
-            new BarWidget(cubic, ThemeRole.Success).Height(1),
-            new LabelWidget(back, v => $"out-back · 2.5s · {v:F2} (clamps)").Height(1),
-            new BarWidget(back, ThemeRole.Warning).Height(1))
-        .Grow(2),
-        UI.Column(1,
-            new LabelWidget(() => "sine · 20Hz feed · fixed scale").Height(1),
-            sineSpark.Height(2),
-            new LabelWidget(() => "random walk · auto scale").Height(1),
-            walkSpark.Height(2),
-            wrapDemo.Grow(1))
-        .Grow(2),
-        ball.Grow(3))
-    .Grow(1),
+    tabBar.Height(1),
+    router.Grow(1),
     UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
         UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
     .Height(11), // three 3-row buttons + gaps: below this they'd crush
@@ -207,6 +241,16 @@ app.OnKey = ev =>
             fpsSig.Set(fpsPresets[i]);
             return true;
         }
+
+        case Key.Char when ev.Char is '1':
+            router.Switch("widgets");
+            return true;
+        case Key.Char when ev.Char is '2':
+            router.Switch("text");
+            return true;
+        case Key.Char when ev.Char is '3':
+            router.Switch("ball");
+            return true;
 
         case Key.Char when ev.Char is 'o' or 'O':
             app.PushOverlay(MakePopup()); // floating, no dim

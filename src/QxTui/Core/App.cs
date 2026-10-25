@@ -134,20 +134,23 @@ public sealed class App : IDisposable
         for (int i = 0; i < child.Children.Count; i++)
             AttachSubtree(child.Children[i]);
         RebuildFlat();
+        _needsLayout = true; // new nodes need rects before they can paint
     }
 
-    internal void DetachSubtree(Widget child)
+    internal void DetachSubtree(Widget child, bool dispose = true)
     {
         void Un(Widget w)
         {
             _registered.Remove(w);
             for (int i = 0; i < w.Children.Count; i++)
                 Un(w.Children[i]);
-            w.Dispose();
+            if (dispose)
+                w.Dispose();
         }
 
         Un(child);
         RebuildFlat();
+        _needsLayout = true;
     }
 
     private void RebuildFlat()
@@ -498,6 +501,12 @@ public sealed class App : IDisposable
             {
                 widget.RenderTracked(_back);
                 anyRendered = true;
+
+                // a parent repainting its full rect erases its children's
+                // pixels: children must repaint in the same frame (they come
+                // later in pre-order), or they'd blink/vanish
+                for (int c = 0; c < widget.Children.Count; c++)
+                    widget.Children[c].Invalidate();
             }
         }
 

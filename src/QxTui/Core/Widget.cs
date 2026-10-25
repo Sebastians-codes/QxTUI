@@ -79,15 +79,16 @@ public abstract class Widget
         return child;
     }
 
-    /// <summary>Detach and dispose a subtree.</summary>
-    public bool RemoveChild(Widget child)
+    /// <summary>Detach a subtree. dispose:false keeps it alive for
+    /// re-attachment (router pages cache their state).</summary>
+    public bool RemoveChild(Widget child, bool dispose = true)
     {
         if (_children is null || !_children.Remove(child))
             return false;
 
         child.Parent = null;
         Node.Remove(child.Node);
-        App?.DetachSubtree(child);
+        App?.DetachSubtree(child, dispose);
         return true;
     }
 

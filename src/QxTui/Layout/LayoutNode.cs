@@ -52,6 +52,10 @@ public sealed class LayoutNode
     public AlignItems Align { get; set; } = AlignItems.Start;
     public int Gap { get; set; }
 
+    /// <summary>Reserve a border ring: children are laid out inside the
+    /// rect shrunk by this inset on every side (panels with frames).</summary>
+    public int ChildInset { get; set; }
+
     private List<LayoutNode>? _children;
     public IReadOnlyList<LayoutNode> Children => _children ??= [];
 
@@ -142,8 +146,13 @@ public sealed class LayoutNode
             return;
 
         bool row = Direction == FlexDirection.Row;
-        int availableMain = row ? Rect.W : Rect.H;
-        int availableCross = row ? Rect.H : Rect.W;
+        int inset = ChildInset;
+        int innerX = Rect.X + inset;
+        int innerY = Rect.Y + inset;
+        int innerW = Math.Max(0, Rect.W - 2 * inset);
+        int innerH = Math.Max(0, Rect.H - 2 * inset);
+        int availableMain = row ? innerW : innerH;
+        int availableCross = row ? innerH : innerW;
         int n = _children.Count;
 
         Span<int> mainSizes = n <= 64 ? stackalloc int[64] : new int[n]; // cold-path alloc OK for huge n
@@ -261,8 +270,8 @@ public sealed class LayoutNode
             // parent — widgets may trust their rect is in-viewport.
             int posMain = Math.Min(offsetMain, Math.Max(0, availableMain));
 
-            int cx = row ? Rect.X + posMain : Rect.X + crossOffset;
-            int cy = row ? Rect.Y + crossOffset : Rect.Y + posMain;
+            int cx = row ? innerX + posMain : innerX + crossOffset;
+            int cy = row ? innerY + crossOffset : innerY + posMain;
             int cw = row ? main : cross;
             int ch = row ? cross : main;
 

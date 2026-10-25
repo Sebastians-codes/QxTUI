@@ -31,7 +31,10 @@ script = [
     (5.0, b"o"),        # open floating popup
     (6.0, b"4"),        # modal action 4: 240fps
     (7.5, b"\x1b"),    # esc closes it
-    (9.0, b"q"),
+    (8.5, b"2"),        # tab: text page (unicode wrap)
+    (9.5, b"3"),        # tab: ball page (slider + speed label)
+    (10.5, b"1"),       # back to widgets
+    (12.0, b"q"),
 ]
 si = 0
 try:
@@ -58,6 +61,20 @@ finally:
         _, status = os.waitpid(pid, 0)
     except ChildProcessError:
         status = 0
+    # drain whatever the app wrote between our last read and its exit —
+    # the alt-screen-leave sequence lives in those final bytes
+    try:
+        os.set_blocking(fd, False)
+        while True:
+            try:
+                d = os.read(fd, 65536)
+            except (BlockingIOError, OSError):
+                break
+            if not d:
+                break
+            captured += d
+    except Exception:
+        pass
     os.close(fd)
 
 text = captured.decode("utf-8", errors="replace")
@@ -77,6 +94,7 @@ checks = {
     "unicode wrap":     "日本語" in text,
     "default 1x":       "speed 1.0x" in text,
     "help line":        "t: theme" in text,
+    "tab bar":          " widgets " in text and " ball " in text,
     "popup opens":      "modals swallow" in text,
     "popup fps buttons": "240fps" in text,
     "popup closes":     "modals swallow" not in screen,
