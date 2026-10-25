@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/bench/">
+    <Project Path="bench/QxTui.Bench/QxTui.Bench.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/QxTui.PoC/QxTui.PoC.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/QxTui/QxTui.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/QxTui.Tests/QxTui.Tests.csproj" />
+  </Folder>
+</Solution>

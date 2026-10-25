@@ -1,0 +1,15 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+*.nupkg
+
+## OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,144 @@
+using System.Buffers;
+
+namespace QxTui.Render;
+
+/// <summary>
+/// Persistent grid of cells — the retained back buffer of the scene
+/// (AGENT.md §2 rendering pipeline). Backed by an ArrayPool-rented buffer;
+/// resize is a cold path and may re-rent.
+/// </summary>
+public sealed class CellBuffer : IDisposable
+{
+    private Cell[] _cells;
+    private bool _rented;
+
+    public int Width { get; private set; }
+    public int Height { get; private set; }
+
+    public CellBuffer(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width), "Buffer dimensions must be positive.");
+
+        Width = width;
+        Height = height;
+        _cells = ArrayPool<Cell>.Shared.Rent(width * height);
+        _rented = true;
+        Array.Fill(_cells, Cell.Empty, 0, Width * Height);
+    }
+
+    public int CellCount => Width * Height;
+
+    public ref Cell this[int x, int y]
+    {
+        get
+        {
+            if ((uint)x >= (uint)Width || (uint)y >= (uint)Height)
+                throw new IndexOutOfRangeException($"({x},{y}) outside {Width}x{Height}");
+            return ref _cells[y * Width + x];
+        }
+    }
+
+    public ref Cell AtUnchecked(int index) => ref _cells[index];
+
+    /// <summary>Live cell span (length == Width*Height). Used by the renderer
+    /// to copy back → prev each frame.</summary>
+    public Span<Cell> Cells => _cells.AsSpan(0, Width * Height);
+
+    public bool InBounds(int x, int y) => (uint)x < (uint)Width && (uint)y < (uint)Height;
+
+    public void Clear() => Array.Fill(_cells, Cell.Empty, 0, Width * Height);
+
+    /// <summary>Fill a rect (clipped to bounds) with a value. Used by widgets.
+    /// Clamping is two-sided: after a shrink, stale rects may start beyond
+    /// the new buffer edge and must degenerate to a no-op, not throw.</summary>
+    public void FillRect(int x, int y, int w, int h, Cell cell)
+    {
+        int x0 = Math.Max(0, x), y0 = Math.Max(0, y);
+        int x1 = Math.Max(x0, Math.Min(Width, x + w));
+        int y1 = Math.Max(y0, Math.Min(Height, y + h));
+
+        // Stale rects from a larger layout can start entirely beyond the
+        // shrunk buffer: degenerate to a no-op (AsSpan would throw even for
+        // a zero-length span whose start exceeds the array).
+        if (x1 <= x0 || y1 <= y0 || x0 >= Width || y0 >= Height)
+            return;
+
+        for (int row = y0; row < y1; row++)
+        {
+            var span = _cells.AsSpan(row * Width + x0, x1 - x0);
+            span.Fill(cell);
+        }
+    }
+
+    /// <summary>Write text at (x,y) with attributes, clipped to bounds. Returns cells written.</summary>
+    public int WriteText(int x, int y, ReadOnlySpan<char> text, int fg = -1, int bg = -1, bool bold = false)
+        => WriteTextClipped(new RenderClip(0, 0, Width, Height), x, y, text, fg, bg, bold);
+
+    /// <summary>
+    /// Write text clipped to BOTH the buffer bounds and <paramref name="clip"/>
+    /// (a widget's rect). Widgets must never paint outside their own region.
+    /// </summary>
+    public int WriteTextClipped(RenderClip clip, int x, int y, ReadOnlySpan<char> text,
+        int fg = -1, int bg = -1, bool bold = false)
+    {
+        if ((uint)y >= (uint)Height || y < clip.Y || y >= clip.Bottom)
+            return 0;
+
+        int written = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            int cx = x + i;
+            if (cx < 0 || cx < clip.X) continue;
+            if (cx >= Width || cx >= clip.Right) break;
+
+            ref var cell = ref _cells[y * Width + cx];
+            cell.Char = text[i];
+            cell.Fg = fg;
+            cell.Bg = bg;
+            cell.Bold = bold;
+            written++;
+        }
+        return written;
+    }
+
+    /// <summary>Resize. With preserve:true, overlapping content is kept —
+    /// this is what makes partial repaint on terminal resize possible
+    /// (AGENT.md §2: content invalidation ≠ layout invalidation).</summary>
+    public void Resize(int width, int height, bool preserve = false)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        var old = _cells;
+        int oldW = Width, oldH = Height;
+
+        Width = width;
+        Height = height;
+        _cells = ArrayPool<Cell>.Shared.Rent(width * height);
+        Array.Fill(_cells, Cell.Empty, 0, Width * Height);
+
+        if (preserve)
+        {
+            int copyW = Math.Min(oldW, width);
+            int copyH = Math.Min(oldH, height);
+            for (int y = 0; y < copyH; y++)
+                old.AsSpan(y * oldW, copyW).CopyTo(_cells.AsSpan(y * Width, copyW));
+        }
+
+        if (_rented)
+            ArrayPool<Cell>.Shared.Return(old);
+        _rented = true;
+    }
+
+    private void ReturnBuffer()
+    {
+        if (_rented)
+        {
+            ArrayPool<Cell>.Shared.Return(_cells);
+            _rented = false;
+        }
+    }
+
+    public void Dispose() => ReturnBuffer();
+}
