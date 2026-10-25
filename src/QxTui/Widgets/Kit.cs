@@ -106,6 +106,10 @@ public sealed class ButtonWidget : Widget
     private readonly ThemeRole _fg;
     private readonly ButtonStyle _style;
 
+    /// <summary>Optional persistent state color (e.g. a toggle: green when
+    /// on, warning when off). Overrides <c>fg</c> while provided.</summary>
+    public Func<ThemeRole>? RoleProvider { get; set; }
+
     public ButtonWidget(Func<string> label, Action onClick,
         ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
     {
@@ -123,7 +127,15 @@ public sealed class ButtonWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
 
-        int hot = Theme.Get(Hovered ? ThemeRole.Title : _fg);
+        // three reactive states: idle → hovered (brighter) → pressed (inverted)
+        ThemeRole role = RoleProvider?.Invoke() ?? _fg;
+        int baseCol = Theme.Get(role);
+        int hot = Theme.Get(Hovered ? ThemeRole.Title : role);
+        int fill = Pressed ? Theme.Get(ThemeRole.Faint)
+                 : Hovered ? Theme.Get(ThemeRole.Title)
+                 : baseCol;
+        int textOnFill = Pressed ? hot : 232;
+
         var label = _label();
         int lx = r.X + Math.Max(1, (r.W - label.Length) / 2);
         int ly = r.Y + r.H / 2;
@@ -133,18 +145,24 @@ public sealed class ButtonWidget : Widget
             case ButtonStyle.Filled:
                 for (int y = r.Y; y < r.Bottom; y++)
                     for (int x = r.X; x < r.Right; x++)
-                        buffer.WriteTextClipped(Clip, x, y, " ", fg: 232, bg: hot);
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: 232, bg: hot, bold: true);
+                        buffer.WriteTextClipped(Clip, x, y, " ", fg: textOnFill, bg: fill);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: textOnFill, bg: fill, bold: true);
                 break;
 
             case ButtonStyle.Outline:
                 Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, hot);
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
+                if (Pressed)
+                    buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
+                        new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: Pressed ? Theme.Get(ThemeRole.Title) : hot, bold: true);
                 break;
 
             default:
                 Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, hot);
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
+                if (Pressed)
+                    buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
+                        new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: Pressed ? Theme.Get(ThemeRole.Title) : hot, bold: true);
                 break;
         }
     }

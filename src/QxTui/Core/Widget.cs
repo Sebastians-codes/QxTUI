@@ -108,6 +108,10 @@ public abstract class Widget
     /// must be enabled; the App maintains this and invalidates on change).</summary>
     public bool Hovered { get; internal set; }
 
+    /// <summary>True between mouse press and release on this widget —
+    /// the momentary "pushed down" state. Maintained by the App.</summary>
+    public bool Pressed { get; internal set; }
+
     /// <summary>While this widget is the open overlay: freeze base paints
     /// (dimmed modals need it to keep the dim clean). Floating popups set
     /// false so the background stays live behind them.</summary>

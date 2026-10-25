@@ -75,8 +75,12 @@ bool filledOn = false;
 var filledDemo = new ButtonWidget(
     () => filledOn ? " filled: on " : " filled: off ",
     () => filledOn = !filledOn,
-    fg: ThemeRole.Warning,
-    style: ButtonStyle.Filled);
+    style: ButtonStyle.Filled)
+{
+    // persistent state color: green when on, amber when off —
+    // on top of the momentary pressed inversion
+    RoleProvider = () => filledOn ? ThemeRole.Success : ThemeRole.Warning,
+};
 
 var help = new LabelWidget(() =>
     " t: theme   [ ]: fps   o/click: popup (1-4 fps inside)   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);

@@ -193,14 +193,45 @@ public sealed class App : IDisposable
             }
         }
 
-        if (target is null) return;
-        if (target.OnMouse(ev)) return;
-        if (ev.Kind == MouseKind.Release && target.Clickable)
+        if (target is null)
         {
-            target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
-            // a click almost always mutates rendered state: repaint the
-            // clicked widget immediately, don't wait for hover to change
+            ReleasePressed();
+            return;
+        }
+        if (target.OnMouse(ev)) return;
+
+        if (ev.Kind == MouseKind.Press && target.Clickable)
+        {
+            ReleasePressed();
+            _pressed = target;
+            target.Pressed = true;
             target.Invalidate();
+            return;
+        }
+
+        if (ev.Kind == MouseKind.Release)
+        {
+            var clicked = _pressed;
+            ReleasePressed();
+            if (target.Clickable && ReferenceEquals(clicked, target))
+            {
+                target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+                // a click almost always mutates rendered state: repaint the
+                // clicked widget immediately, don't wait for hover to change
+                target.Invalidate();
+            }
+        }
+    }
+
+    private Widget? _pressed;
+
+    private void ReleasePressed()
+    {
+        if (_pressed is { } p)
+        {
+            p.Pressed = false;
+            p.Invalidate();
+            _pressed = null;
         }
     }
 

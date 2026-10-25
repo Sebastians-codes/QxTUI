@@ -553,3 +553,33 @@ public class ClickInvalidationTests
         Assert.Equal(' ', app.Back[2, 0].Char);
     }
 }
+
+public class PressedStateTests
+{
+    [Fact]
+    public void Press_SetsPressedUntilRelease_AndLooksDifferent()
+    {
+        var term = new FakeTerminal(20, 5);
+        var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
+        var root = UI.Column(0, btn.Grow(1));
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        app.RunFrame();
+        int idleBg = app.Back[10, 2].Bg;
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;11;3M")) // press only
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.True(btn.Pressed);
+        int pressedBg = app.Back[10, 2].Bg;
+        Assert.NotEqual(idleBg, pressedBg); // visible push-down
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;11;3m")) // release
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.False(btn.Pressed);
+        Assert.Equal(idleBg, app.Back[10, 2].Bg); // back to idle
+    }
+}
