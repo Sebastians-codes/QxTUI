@@ -55,9 +55,16 @@ public sealed class FramePacer
         if (budgetMs > SpinOnlyBudgetMs && remainingMs > SpinMarginMs + 1.0)
             Thread.Sleep((int)(remainingMs - SpinMarginMs));
 
+        // TRUE spin to the deadline. Do NOT use SpinWait.SpinUntil here:
+        // after a short spin it degenerates into Thread.Sleep(1) internally,
+        // and that 1-4ms overshoot is precisely what capped 240fps at ~208.
         long deadline = _lastFrameTimestamp + (long)_frameBudgetTicks;
-        if (deadline > Stopwatch.GetTimestamp())
-            SpinWait.SpinUntil(() => Stopwatch.GetTimestamp() >= deadline);
+        long now = Stopwatch.GetTimestamp();
+        while (now < deadline)
+        {
+            Thread.SpinWait(1);
+            now = Stopwatch.GetTimestamp();
+        }
 
         _lastFrameTimestamp = Stopwatch.GetTimestamp();
     }
