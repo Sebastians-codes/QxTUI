@@ -41,7 +41,7 @@ rowTop.Add(mem.Node);
 cpu.Node.Grow = 3f;
 mem.Node.Grow = 2f;
 
-var rowMid = new LayoutNode { Direction = FlexDirection.Row, Height = 7, Gap = 1 };
+var rowMid = new LayoutNode { Direction = FlexDirection.Row, Height = 9, Gap = 1 };
 rowMid.Add(net.Node);
 rowMid.Add(load.Node);
 net.Node.Grow = 1f;

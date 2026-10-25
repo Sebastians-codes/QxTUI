@@ -113,7 +113,7 @@ internal static class LinuxProc
         return (rx, tx);
     }
 
-    public readonly record struct ProcRow(int Pid, char State, double CpuPercent, double MemPercent, string Name);
+    public readonly record struct ProcRow(int Pid, char State, double CpuPercent, long MemKb, string Name);
 
     /// <summary>Per-process cpu% (delta of utime+stime between calls) and rss%.</summary>
     public static List<ProcRow> ReadProcesses(
@@ -168,13 +168,13 @@ internal static class LinuxProc
             prevCpuTicks[pid] = ticks;
 
             // rss is in pages (proc(5)); convert with the REAL page size.
-            // (A hardcoded 4K/1024 fudge made every MEM% read 0.0.)
+            // Absolute KiB, not % of RAM: percentages are a bad unit for
+            // per-process memory (btop shows bytes too).
             double kbPerPage = Environment.SystemPageSize / 1024.0;
-            double memPct = memTotalKb > 0
-                ? rssPages * kbPerPage / memTotalKb * 100.0
-                : 0;
+            long memKb = (long)(rssPages * kbPerPage);
+            _ = memTotalKb;
 
-            rows.Add(new ProcRow(pid, state, cpuPct, memPct, comm));
+            rows.Add(new ProcRow(pid, state, cpuPct, memKb, comm));
         }
 
         // drop exited pids from the delta map occasionally

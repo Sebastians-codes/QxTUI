@@ -161,7 +161,8 @@ internal sealed class CpuWidget : Widget
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"all {_aggSmooth.ToString("F0", CultureInfo.InvariantCulture),3}%",
             fg: Panel.LoadColor(_aggSmooth), bold: true);
-        Panel.Sparkline(buffer, Clip, r.X + 10, r.Y + 1, Math.Max(0, r.W - 12), _hist, 42, scaleMax: 100f);
+        buffer.WriteTextClipped(Clip, r.X + 11, r.Y + 1, "36s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 15, r.Y + 1, Math.Max(0, r.W - 17), _hist, 42, scaleMax: 100f);
 
         // per-core bars, two columns when narrow
         int rows = r.H - 3;
@@ -212,20 +213,21 @@ internal sealed class MemWidget : Widget
             + $"  ({usedFrac * 100:0}%)",
             fg: 250);
         Panel.HBar(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, 39);
-        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 3, r.W - 4, _hist, 39, scaleMax: 100f);
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 4,
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3, "used% over last 30s:", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist, 39, scaleMax: 100f);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
             $"avail {LinuxProc.HumanBytes(m.AvailableKb * 1024.0)}"
             + $"  cache {LinuxProc.HumanBytes(m.CacheKb * 1024.0)}"
             + $"  free {LinuxProc.HumanBytes(m.FreeKb * 1024.0)}", fg: 240);
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 6,
             "used = total - available (btop/free convention)", fg: 238);
 
         double swapUsed = m.SwapTotalKb - m.SwapFreeKb;
-        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 7,
             $"swp {LinuxProc.HumanBytes(swapUsed * 1024.0)} / {LinuxProc.HumanBytes(m.SwapTotalKb * 1024.0)}",
             fg: swapUsed > 0 ? 214 : 240);
-        if (r.H > 7)
-            Panel.HBar(buffer, Clip, r.X + 2, r.Y + 6, r.W - 4,
+        if (r.H > 9)
+            Panel.HBar(buffer, Clip, r.X + 2, r.Y + 8, r.W - 4,
                 m.SwapTotalKb > 0 ? swapUsed / m.SwapTotalKb : 0, 214);
     }
 }
@@ -266,10 +268,12 @@ internal sealed class NetWidget : Widget
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"▼ {LinuxProc.HumanBytes(_rxRate)}/s", fg: 42);
-        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 1, Math.Max(0, r.W - 18), _rx, 42, autoFloor: 100 * 1024f);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "12s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 19, r.Y + 1, Math.Max(0, r.W - 21), _rx, 42, autoFloor: 100 * 1024f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
             $"▲ {LinuxProc.HumanBytes(_txRate)}/s", fg: 141);
-        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 2, Math.Max(0, r.W - 18), _tx, 141, autoFloor: 100 * 1024f);
+        buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "12s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 19, r.Y + 2, Math.Max(0, r.W - 21), _tx, 141, autoFloor: 100 * 1024f);
     }
 }
 
@@ -293,15 +297,20 @@ internal sealed class LoadWidget : Widget
         _hist.Push((float)l1);
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            string.Create(CultureInfo.InvariantCulture, $"{l1:F2}  {l5:F2}  {l15:F2}"), fg: 250, bold: true);
+            string.Create(CultureInfo.InvariantCulture,
+                $"now {l1:F2}   5m {l5:F2}   15m {l15:F2}"), fg: 250, bold: true);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
-            "avg runnable tasks 1/5/15m", fg: 240);
+            "procs wanting CPU, averaged.", fg: 240);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
-            $"{running}/{total} running now", fg: 240);
+            $"1.0/core busy, {cores} = all queued.", fg: 240);
         // bar = load1 relative to core count: full bar == all cores saturated
         Panel.HBar(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4,
             Math.Clamp(l1 / cores, 0, 1), Panel.LoadColor(l1 / cores * 100));
-        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 5, r.W - 4, _hist, 214, scaleMax: cores);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
+            string.Create(CultureInfo.InvariantCulture,
+                $"{l1 / cores * 100:F0}% of capacity   {running}/{total} running"), fg: 240);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 6, "30s", fg: 238);
+        Panel.Sparkline(buffer, Clip, r.X + 6, r.Y + 6, Math.Max(0, r.W - 8), _hist, 214, scaleMax: cores);
     }
 }
 
@@ -355,7 +364,7 @@ internal sealed class ProcWidget : Widget
 
         // header
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"{"PID",6} {"S",1} {"CPU%",6} {"MEM%",6}  NAME", fg: 244, bold: true);
+            $"{"PID",7} {"S",1} {"CPU%",5} {"MEM",7}  NAME", fg: 244, bold: true);
 
         int maxRows = r.H - 4;
         for (int i = 0; i < _rows.Count && i < maxRows; i++)
@@ -366,11 +375,23 @@ internal sealed class ProcWidget : Widget
 
             buffer.WriteTextClipped(Clip, r.X + 2, y,
                 string.Create(CultureInfo.InvariantCulture,
-                    $"{p.Pid,6} {p.State,1} {p.CpuPercent,5:F1} {p.MemPercent,5:F1}  "),
+                    $"{p.Pid,7} {p.State,1} {p.CpuPercent,5:F1} {Fmt.MemFmt(p.MemKb),7}  "),
                 fg: 250);
             buffer.WriteTextClipped(Clip, r.X + 28, y, p.Name, fg: cpuColor);
         }
     }
+}
+
+internal static class Fmt
+{
+    /// <summary>btop-style compact memory: 720M, 8.2M, 512K, 1.4G.</summary>
+    public static string MemFmt(long kb) => kb switch
+    {
+        >= 10 * 1024 * 1024 => $"{kb / (1024.0 * 1024.0):F1}G",
+        >= 10 * 1024 => $"{kb / 1024.0:F0}M",
+        >= 1024 => $"{kb / 1024.0:F1}M",
+        _ => $"{kb}K",
+    };
 }
 
 internal sealed class FooterWidget : Widget
