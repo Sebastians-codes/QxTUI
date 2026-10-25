@@ -24,12 +24,22 @@ the UI costs zero bytes and zero CPU per frame.
 ## Proof, not promises
 
 ```bash
-dotnet test                                  # 71 tests, incl. the invariants below
+dotnet test                                  # 77 tests, incl. the invariants below
 dotnet run -c Release --project bench/QxTui.Bench        # headless fps/bytes proof
 dotnet run -c Release --project samples/QxTui.PoC        # the demo (needs a TTY)
+dotnet run -c Release --project samples/QxTui.SysMon     # qxtop: a real app (needs a TTY)
 python3 samples/pty_smoke_test.py            # demo under a pty, asserts on-screen proof
+python3 samples/sysmon_smoke_test.py         # qxtop under a pty, asserts every panel
 python3 samples/resize_stress_test.py        # rapid shrink/grow stress, asserts no crash
 ```
+
+### qxtop — the framework eating its own dogfood
+
+A btop-style system monitor: per-core CPU bars + sparklines, memory/swap,
+network rx/tx rates, load average, live process table. Each panel samples
+`/proc` at its own rate (20/10/4/2/1 Hz) off the single scheduler clock and
+invalidates only itself — damage isolation doing real work, not demo work.
+Keys: `q` quit, `p` pause the process table.
 
 The demo shows the proof live on screen: bytes/frame vs. full-repaint cost,
 dirty cells/damage rects, fps vs. target, frame-work p50/p99, relayout

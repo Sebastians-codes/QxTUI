@@ -61,7 +61,7 @@ help.Node.Height = 1;
 
 // ---- app ---------------------------------------------------------------------
 
-var app = new App(terminal, root, targetFps: 240)
+var app = new App(terminal, root, targetFps: 100000)
     .AddWidget(spinner)
     .AddWidget(staticPanel)
     .AddWidget(progress)

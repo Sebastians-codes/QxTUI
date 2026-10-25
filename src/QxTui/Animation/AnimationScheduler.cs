@@ -71,6 +71,30 @@ public sealed class AnimationScheduler(ITimeSource? time = null)
     }
 
     /// <summary>
+    /// Declarative periodic timer on the single scheduler clock: invokes
+    /// <paramref name="onTick"/> with the cycle count once per
+    /// <paramref name="interval"/>. Same clock as transitions, virtual-time
+    /// testable, no per-component timers (AGENT.md §2).
+    /// </summary>
+    public IAnimationHandle Every(TimeSpan interval, Action<long> onTick)
+    {
+        var run = new Running
+        {
+            From = 0f,
+            To = 1f,
+            Duration = interval,
+            Delay = TimeSpan.Zero,
+            Easing = Easing.Linear,
+            Repeat = RepeatMode.Loop,
+            Start = _time.Now,
+            Write = v => onTick((long)v),
+            Discrete = true,
+        };
+        _running.Add(run);
+        return run;
+    }
+
+    /// <summary>
     /// Advance all active animations to the current clock. Returns the number
     /// of animations that produced a write this tick. Allocation-free.
     /// </summary>
@@ -96,6 +120,18 @@ public sealed class AnimationScheduler(ITimeSource? time = null)
             double total = run.Duration.TotalSeconds;
             if (total <= 0)
                 total = double.Epsilon;
+
+            if (run.Discrete)
+            {
+                long cycles = (long)(elapsed.TotalSeconds / total);
+                if (cycles > run.LastCycle)
+                {
+                    run.LastCycle = cycles;
+                    run.Write(cycles);
+                    writes++;
+                }
+                continue;
+            }
 
             double t = elapsed.TotalSeconds / total;
 
@@ -152,6 +188,8 @@ public sealed class AnimationScheduler(ITimeSource? time = null)
 
         public bool Cancelled;
         public bool Completed;
+        public bool Discrete;
+        public long LastCycle;
         public bool IsCompleted => Completed || Cancelled;
 
         public void Dispose() => Cancelled = true;

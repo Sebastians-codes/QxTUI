@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/QxTui.PoC/QxTui.PoC.csproj" />
+    <Project Path="samples/QxTui.SysMon/QxTui.SysMon.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/QxTui/QxTui.csproj" />

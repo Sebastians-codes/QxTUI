@@ -140,6 +140,48 @@ public class AnimationSchedulerTests
     }
 
     [Fact]
+    public void Every_FiresOncePerInterval_OnSingleClock()
+    {
+        var (sched, clock) = MakeScheduler();
+        long last = -1;
+        int calls = 0;
+
+        sched.Every(TimeSpan.FromMilliseconds(100), c => { last = c; calls++; });
+
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        sched.Tick();
+        Assert.Equal(0, calls); // not yet
+
+        clock.Advance(TimeSpan.FromMilliseconds(60)); // 110ms → cycle 1
+        sched.Tick();
+        Assert.Equal(1, calls);
+        Assert.Equal(1, last);
+
+        clock.Advance(TimeSpan.FromMilliseconds(250)); // 360ms → cycle 3
+        sched.Tick();
+        Assert.Equal(2, calls); // one call per tick, catching up to latest cycle
+        Assert.Equal(3, last);
+    }
+
+    [Fact]
+    public void Every_CancelStopsTicks()
+    {
+        var (sched, clock) = MakeScheduler();
+        int calls = 0;
+        var handle = sched.Every(TimeSpan.FromMilliseconds(10), _ => calls++);
+
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        sched.Tick();
+        Assert.True(calls >= 1);
+
+        handle.Dispose();
+        int before = calls;
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        sched.Tick();
+        Assert.Equal(before, calls);
+    }
+
+    [Fact]
     public void Cancel_StopsWrites()
     {
         var (sched, clock) = MakeScheduler();

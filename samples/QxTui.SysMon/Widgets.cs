@@ -1,0 +1,335 @@
+using System.Globalization;
+using QxTui.Core;
+using QxTui.Layout;
+using QxTui.Render;
+
+namespace QxTui.SysMon;
+
+internal static class Panel
+{
+    public static void Frame(CellBuffer buf, Rect r, string title, int accent)
+    {
+        if (r.W < 2 || r.H < 2) return;
+
+        for (int x = r.X; x < r.Right; x++)
+        {
+            buf[x, r.Y] = new Cell { Char = '─', Fg = 238, Bg = -1 };
+            buf[x, r.Bottom - 1] = new Cell { Char = '─', Fg = 238, Bg = -1 };
+        }
+        for (int y = r.Y; y < r.Bottom; y++)
+        {
+            buf[r.X, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
+            buf[r.Right - 1, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
+        }
+        buf[r.X, r.Y] = new Cell { Char = '┌', Fg = 238, Bg = -1 };
+        buf[r.Right - 1, r.Y] = new Cell { Char = '┐', Fg = 238, Bg = -1 };
+        buf[r.X, r.Bottom - 1] = new Cell { Char = '└', Fg = 238, Bg = -1 };
+        buf[r.Right - 1, r.Bottom - 1] = new Cell { Char = '┘', Fg = 238, Bg = -1 };
+
+        buf.WriteTextClipped(new RenderClip(r.X, r.Y, r.W, 1), r.X + 2, r.Y,
+            $" {title} ", fg: accent, bg: -1, bold: true);
+    }
+
+    /// <summary>8-level single-row sparkline from a ring buffer, right-aligned.</summary>
+    public static void Sparkline(CellBuffer buf, RenderClip clip, int x, int y, int width,
+        RingHistory history, int fg)
+    {
+        const string Levels = "▁▂▃▄▅▆▇█";
+        int n = Math.Min(width, history.Count);
+        if (n <= 0) return;
+
+        float max = history.Max(1f);
+        int start = x + width - n;
+
+        for (int i = 0; i < n; i++)
+        {
+            float v = history[history.Count - n + i];
+            int level = Math.Clamp((int)(v / max * 7.999f), 0, 7);
+            buf.WriteTextClipped(clip, start + i, y, Levels.AsSpan(level, 1), fg: fg);
+        }
+    }
+
+    public static int LoadColor(double pct) => pct switch
+    {
+        < 50 => 42,
+        < 80 => 214,
+        _ => 196,
+    };
+
+    public static void HBar(CellBuffer buf, RenderClip clip, int x, int y, int width,
+        double fraction, int fg)
+    {
+        int filled = Math.Clamp((int)(fraction * width), 0, width);
+        for (int i = 0; i < width; i++)
+            buf.WriteTextClipped(clip, x + i, y, i < filled ? "█" : "░", fg: i < filled ? fg : 236);
+    }
+}
+
+/// <summary>Fixed-capacity float ring for sparklines.</summary>
+internal sealed class RingHistory(int capacity)
+{
+    private readonly float[] _data = new float[capacity];
+    private int _head;
+    public int Count { get; private set; }
+
+    public void Push(float value)
+    {
+        _data[_head] = value;
+        _head = (_head + 1) % capacity;
+        if (Count < capacity) Count++;
+    }
+
+    public float this[int i] => _data[(_head - Count + i + capacity * 2) % capacity];
+
+    public float Max(float floor)
+    {
+        float m = floor;
+        for (int i = 0; i < Count; i++)
+            m = Math.Max(m, this[i]);
+        return m;
+    }
+
+    public void Clear() => Count = 0;
+}
+
+internal sealed class HeaderWidget : Widget
+{
+    private readonly string _host = Environment.MachineName;
+
+    public HeaderWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromSeconds(1), _ => Invalidate());
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        var up = LinuxProc.ReadUptime();
+        var text = $" qxtop │ {_host} │ up {LinuxProc.HumanDuration(up)} │ {DateTime.Now:HH:mm:ss} ";
+        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
+        buffer.WriteTextClipped(Clip, r.X, r.Y, text, fg: 255, bg: 236, bold: true);
+    }
+}
+
+internal sealed class CpuWidget : Widget
+{
+    private readonly RingHistory _hist = new(180);
+    private LinuxProc.CpuSample _prevAgg;
+    private List<LinuxProc.CpuSample> _prevCores = [];
+    private double _aggPct;
+    private readonly double[] _corePct = new double[64];
+    private int _coreCount;
+
+    public CpuWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromMilliseconds(50), _ => Invalidate()); // 20Hz
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        Panel.Frame(buffer, r, "CPU", 42);
+
+        var (agg, cores) = LinuxProc.ReadCpu();
+        _aggPct = LinuxProc.Utilization(_prevAgg, agg);
+        _prevAgg = agg;
+
+        _coreCount = Math.Min(cores.Count, _corePct.Length);
+        for (int i = 0; i < _coreCount; i++)
+            _corePct[i] = i < _prevCores.Count
+                ? LinuxProc.Utilization(_prevCores[i], cores[i])
+                : 0;
+        _prevCores = cores;
+
+        _hist.Push((float)_aggPct);
+
+        // aggregate line + sparkline
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
+            $"all {_aggPct.ToString("F0", CultureInfo.InvariantCulture),3}%", fg: Panel.LoadColor(_aggPct), bold: true);
+        Panel.Sparkline(buffer, Clip, r.X + 10, r.Y + 1, Math.Max(0, r.W - 12), _hist, 42);
+
+        // per-core bars, two columns when narrow
+        int rows = r.H - 3;
+        int cols = _coreCount > rows ? 2 : 1;
+        int perCol = (_coreCount + cols - 1) / cols;
+        int colW = (r.W - 4) / cols;
+
+        for (int i = 0; i < _coreCount; i++)
+        {
+            int col = i / perCol;
+            int row = i % perCol;
+            if (row >= rows) break;
+
+            int x = r.X + 2 + col * colW;
+            int y = r.Y + 2 + row;
+            double pct = _corePct[i];
+
+            buffer.WriteTextClipped(Clip, x, y,
+                i.ToString("D2", CultureInfo.InvariantCulture), fg: 244);
+            Panel.HBar(buffer, Clip, x + 3, y, Math.Max(4, colW - 9), pct / 100.0, Panel.LoadColor(pct));
+            buffer.WriteTextClipped(Clip, x + colW - 5, y,
+                $"{pct.ToString("F0", CultureInfo.InvariantCulture),3}%", fg: 244);
+        }
+    }
+}
+
+internal sealed class MemWidget : Widget
+{
+    private readonly RingHistory _hist = new(120);
+
+    public MemWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromMilliseconds(250), _ => Invalidate()); // 4Hz
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        Panel.Frame(buffer, r, "MEMORY", 39);
+
+        var m = LinuxProc.ReadMem();
+        double usedFrac = m.TotalKb > 0 ? (m.TotalKb - m.AvailableKb) / (double)m.TotalKb : 0;
+        _hist.Push((float)(usedFrac * 100));
+
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
+            $"{LinuxProc.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {LinuxProc.HumanBytes(m.TotalKb * 1024.0)}",
+            fg: 250);
+        Panel.HBar(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, 39);
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 3, r.W - 4, _hist, 39);
+
+        double swapUsed = m.SwapTotalKb - m.SwapFreeKb;
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
+            $"swp {LinuxProc.HumanBytes(swapUsed * 1024.0)} / {LinuxProc.HumanBytes(m.SwapTotalKb * 1024.0)}",
+            fg: swapUsed > 0 ? 214 : 240);
+        if (r.H > 7)
+            Panel.HBar(buffer, Clip, r.X + 2, r.Y + 6, r.W - 4,
+                m.SwapTotalKb > 0 ? swapUsed / m.SwapTotalKb : 0, 214);
+    }
+}
+
+internal sealed class NetWidget : Widget
+{
+    private readonly RingHistory _rx = new(120);
+    private readonly RingHistory _tx = new(120);
+    private (long Rx, long Tx) _prev;
+    private long _lastTs = Environment.TickCount64;
+    private double _rxRate, _txRate;
+
+    public NetWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromMilliseconds(100), _ => Invalidate()); // 10Hz
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        Panel.Frame(buffer, r, "NETWORK", 141);
+
+        var (rx, tx) = LinuxProc.ReadNet();
+        long now = Environment.TickCount64;
+        double dt = Math.Max(1, now - _lastTs) / 1000.0;
+        _rxRate = Math.Max(0, (rx - _prev.Rx) / dt);
+        _txRate = Math.Max(0, (tx - _prev.Tx) / dt);
+        _prev = (rx, tx);
+        _lastTs = now;
+
+        _rx.Push((float)_rxRate);
+        _tx.Push((float)_txRate);
+
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
+            $"▼ {LinuxProc.HumanBytes(_rxRate)}/s", fg: 42);
+        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 1, Math.Max(0, r.W - 18), _rx, 42);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
+            $"▲ {LinuxProc.HumanBytes(_txRate)}/s", fg: 141);
+        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 2, Math.Max(0, r.W - 18), _tx, 141);
+    }
+}
+
+internal sealed class LoadWidget : Widget
+{
+    private readonly RingHistory _hist = new(120);
+
+    public LoadWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromMilliseconds(250), _ => Invalidate()); // 4Hz
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        Panel.Frame(buffer, r, "LOAD", 214);
+
+        var (l1, l5, l15, running, total) = LinuxProc.ReadLoad();
+        _hist.Push((float)l1);
+
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
+            string.Create(CultureInfo.InvariantCulture, $"{l1:F2}  {l5:F2}  {l15:F2}"), fg: 250, bold: true);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
+            $"{running}/{total} running", fg: 240);
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist, 214);
+    }
+}
+
+internal sealed class ProcWidget : Widget
+{
+    private readonly Dictionary<int, long> _prevTicks = new(256);
+    private List<LinuxProc.ProcRow> _rows = [];
+    private long _lastSampleTs;
+    public bool Paused;
+
+    public ProcWidget(QxTui.Animation.AnimationScheduler scheduler)
+    {
+        scheduler.Every(TimeSpan.FromMilliseconds(500), _ => Invalidate()); // 2Hz
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        Panel.Frame(buffer, r, Paused ? "PROCESSES (paused)" : "PROCESSES", 45);
+
+        long now = Environment.TickCount64;
+        double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
+        _lastSampleTs = now;
+
+        if (!Paused)
+        {
+            var mem = LinuxProc.ReadMem();
+            _rows = LinuxProc.ReadProcesses(_prevTicks, dt, mem.TotalKb);
+        }
+
+        // header
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
+            $"{"PID",6} {"S",1} {"CPU%",6} {"MEM%",6}  NAME", fg: 244, bold: true);
+
+        int maxRows = r.H - 4;
+        for (int i = 0; i < _rows.Count && i < maxRows; i++)
+        {
+            var p = _rows[i];
+            int y = r.Y + 2 + i;
+            int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent));
+
+            buffer.WriteTextClipped(Clip, r.X + 2, y,
+                string.Create(CultureInfo.InvariantCulture,
+                    $"{p.Pid,6} {p.State,1} {p.CpuPercent,5:F1} {p.MemPercent,5:F1}  "),
+                fg: 250);
+            buffer.WriteTextClipped(Clip, r.X + 28, y, p.Name, fg: cpuColor);
+        }
+    }
+}
+
+internal sealed class FooterWidget : Widget
+{
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
+        buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
+            " q: quit   p: pause processes   panels refresh at 1-20Hz, each invalidating only itself ",
+            fg: 250, bg: 236);
+    }
+}

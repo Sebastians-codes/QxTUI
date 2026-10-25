@@ -38,7 +38,7 @@ public sealed class FrameStats
 public sealed class App : IDisposable
 {
     private readonly ITerminal _terminal;
-    private readonly LayoutNode _root;
+    private LayoutNode _root;
     private readonly List<Widget> _widgets = [];
     private readonly AnimationScheduler _scheduler;
     private readonly FramePacer _pacer;
@@ -87,6 +87,14 @@ public sealed class App : IDisposable
     {
         _widgets.Add(widget);
         return this;
+    }
+
+    /// <summary>Install the layout root. Allows building widgets (which need
+    /// the scheduler) before the tree that references their nodes exists.</summary>
+    public void SetRoot(LayoutNode root)
+    {
+        _root = root;
+        _needsLayout = true;
     }
 
     public void Run()
