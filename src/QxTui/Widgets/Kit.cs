@@ -152,20 +152,18 @@ public sealed class ButtonWidget : Widget
 
             case ButtonStyle.Outline:
             default:
+                Box.Draw(buffer, r.X, r.Y, r.W, r.H,
+                    _style == ButtonStyle.Outline ? BoxStyles.Single : BoxStyles.Rounded, hot);
                 if (down)
                 {
-                    // pressed reads as a momentary filled chip in every
-                    // style — one consistent push-down language, no
-                    // interior-wash flicker inside bordered buttons
-                    for (int y = r.Y; y < r.Bottom; y++)
-                        for (int x = r.X; x < r.Right; x++)
-                            buffer.WriteTextClipped(Clip, x, y, " ", fg: hot, bg: Theme.Get(ThemeRole.Faint));
-                    buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bg: Theme.Get(ThemeRole.Faint), bold: true);
+                    // pressed indicator: invert the LABEL only (dark text on
+                    // a bright chip) while the border brightens — a crisp
+                    // push-down, not a gray wash over the whole button
+                    buffer.WriteTextClipped(Clip, lx, ly, label,
+                        fg: 232, bg: hot, bold: true);
                 }
                 else
                 {
-                    Box.Draw(buffer, r.X, r.Y, r.W, r.H,
-                        _style == ButtonStyle.Outline ? BoxStyles.Single : BoxStyles.Rounded, hot);
                     buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
                 }
                 break;
