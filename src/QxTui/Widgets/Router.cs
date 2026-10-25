@@ -36,6 +36,18 @@ public sealed class Router : Widget
         if (key == _current || !_factories.ContainsKey(key))
             return;
 
+        if (Core.App.Trace)
+        {
+            string? caller = null;
+            try
+            {
+                caller = new System.Diagnostics.StackTrace(2, false)
+                    .GetFrame(0)?.GetMethod()?.DeclaringType?.Name;
+            }
+            catch { }
+            Core.App.TraceLine($"switch {key} from {caller}");
+        }
+
         if (_cache.TryGetValue(_current, out var old))
             RemoveChild(old, dispose: false); // cache: keep state alive
 

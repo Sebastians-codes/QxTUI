@@ -387,3 +387,37 @@ public class TrackPressTests
         app.RunFrame();
     }
 }
+
+public class FocusDetachTests
+{
+    [Fact]
+    public void Focus_DoesNotSurviveTabSwitch()
+    {
+        // keys routed into a detached focused widget get swallowed or
+        // mis-handled — the "press 4, land on another tab" weird
+        var field = new TextFieldWidget("hi");
+        var pageA = new ContainerWidget();
+        pageA.Node.Direction = FlexDirection.Column;
+        pageA.Node.Height = 3;
+        pageA.AddChild(field);
+
+        var pageB = new ContainerWidget();
+        pageB.Node.Height = 3;
+
+        var router = new Router();
+        router.Register("a", () => pageA);
+        router.Register("b", () => pageB);
+        var root = UI.Column(0, router.Grow(1));
+        var term = new FakeTerminal(20, 6);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+
+        router.Switch("a");
+        app.RunFrame();
+        app.Focus(field);
+        Assert.Same(field, app.Focused);
+
+        router.Switch("b");
+        app.RunFrame();
+        Assert.Null(app.Focused); // detached widget must not keep focus
+    }
+}

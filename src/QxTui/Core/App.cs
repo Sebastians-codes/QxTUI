@@ -264,9 +264,22 @@ public sealed class App : IDisposable
                 w.Dispose();
         }
 
+        // focus must not survive detach: keys routed into an off-screen
+        // widget get swallowed or mis-handled (the 'press 4, land on
+        // another tab' class of weird)
+        bool focusedDetached = false;
+        void CheckFocus(Widget w)
+        {
+            if (ReferenceEquals(Focused, w)) focusedDetached = true;
+            for (int i = 0; i < w.Children.Count; i++) CheckFocus(w.Children[i]);
+        }
+        CheckFocus(child);
+
         Un(child);
         RebuildFlat();
         _needsLayout = true;
+        if (focusedDetached)
+            Focus(null);
 
         for (int i = 0; i < rects.Count; i++)
         {
@@ -908,6 +921,13 @@ public sealed class App : IDisposable
         if (idA == written) return false;
         if (idB == written) return true;
         return idA <= idB; // neither protected: recycle the older slot
+    }
+
+    internal static void TraceLine(string line)
+    {
+        if (!Trace) return;
+        TraceWriter.WriteLine(line);
+        TraceWriter.Flush();
     }
 
     private bool BackContains(string text)
