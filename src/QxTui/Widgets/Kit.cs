@@ -415,3 +415,10 @@ public sealed class TextWidget(Func<string> text, ThemeRole fg = ThemeRole.Text)
         buffer.WriteTextWrapped(Clip, r.X + 1, r.Y, text(), fg: Theme.Get(fg));
     }
 }
+
+/// <summary>Composition-only widget: paints nothing, exists to hold
+/// children in the widget tree (panels, groups, rows of controls).</summary>
+public sealed class ContainerWidget : Widget
+{
+    public override void Render(CellBuffer buffer) { }
+}

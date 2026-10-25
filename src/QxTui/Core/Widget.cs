@@ -55,6 +55,41 @@ public abstract class Widget
 
     private List<Action<App>>? _mountActions;
     private List<IDisposable>? _lifetime;
+    private List<Widget>? _children;
+
+    /// <summary>Parent in the widget tree; null for roots.</summary>
+    public Widget? Parent { get; private set; }
+
+    public IReadOnlyList<Widget> Children => _children ??= [];
+
+    /// <summary>
+    /// Attach a child: its layout node nests under this widget's node, it
+    /// mounts immediately if this widget is mounted, and it renders AFTER
+    /// this widget (children paint on top of their parent).
+    /// </summary>
+    public Widget AddChild(Widget child)
+    {
+        if (child.Parent is not null)
+            throw new InvalidOperationException("Widget already has a parent.");
+
+        (_children ??= []).Add(child);
+        child.Parent = this;
+        Node.Add(child.Node);
+        App?.AttachSubtree(child);
+        return child;
+    }
+
+    /// <summary>Detach and dispose a subtree.</summary>
+    public bool RemoveChild(Widget child)
+    {
+        if (_children is null || !_children.Remove(child))
+            return false;
+
+        child.Parent = null;
+        Node.Remove(child.Node);
+        App?.DetachSubtree(child);
+        return true;
+    }
 
     /// <summary>
     /// Declare a periodic invalidation (or callback) on the app's single
@@ -117,6 +152,14 @@ public abstract class Widget
     /// rect (slider drags).</summary>
     public bool CapturesMouse { get; set; }
 
+    /// <summary>Widget asked to invalidate on EVERY produced frame — its
+    /// refresh rate follows the app's fps target instead of a fixed timer.</summary>
+    internal bool PerFrame { get; private set; }
+
+    /// <summary>Refresh in lockstep with the frame loop (whatever the target
+    /// fps is). For sim-coupled widgets like game balls or particles.</summary>
+    protected void TickPerFrame() => PerFrame = true;
+
     private TimeSpan _flashUntil;
 
     /// <summary>True while a press flash is held. Real clicks press+release
@@ -172,6 +215,12 @@ public abstract class Widget
             foreach (var d in _lifetime)
                 d.Dispose();
             _lifetime = null;
+        }
+
+        if (_children is not null)
+        {
+            foreach (var child in _children)
+                child.Dispose();
         }
     }
 }

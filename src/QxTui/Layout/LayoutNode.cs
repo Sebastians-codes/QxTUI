@@ -55,6 +55,9 @@ public sealed class LayoutNode
     private List<LayoutNode>? _children;
     public IReadOnlyList<LayoutNode> Children => _children ??= [];
 
+    /// <summary>Detach a child node (widget RemoveChild).</summary>
+    public bool Remove(LayoutNode child) => _children?.Remove(child) ?? false;
+
     /// <summary>Leaf content measurement: (available size) → desired size.
     /// Containers ignore this; leaves without it fill their available space.</summary>
     public Func<Size, Size>? Measure { get; set; }

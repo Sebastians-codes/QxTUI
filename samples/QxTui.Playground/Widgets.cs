@@ -73,7 +73,11 @@ internal sealed class BallWidget : Widget
 {
     private HalfBlockSurface? _surface;
     private float _px = 0.3f, _py = 0.4f, _vx = 0.55f, _vy = 0.4f;
-    private readonly Queue<(int X, int Y)> _trail = new();
+    // time-based trail: a frame-count trail shrinks as fps rises (24 points
+    // = 0.2s at 120fps but 0.024s at 1000fps). Age-based expiry keeps the
+    // tail the same LENGTH IN TIME at any frame rate.
+    private readonly Queue<(int X, int Y, long TsMs)> _trail = new();
+    private const int TrailMs = 250;
     private long _lastTs = Environment.TickCount64;
     private readonly Signal<float> _speed;
     private Rect _lastRect;
@@ -81,12 +85,16 @@ internal sealed class BallWidget : Widget
     public BallWidget(Signal<float> speed)
     {
         _speed = speed;
-        Tick(TimeSpan.FromMilliseconds(1)); // 1kHz: data for targets up to 1000fps
+        TickPerFrame(); // refresh follows the app's fps target, whatever it is
     }
 
-    /// <summary>0..1 slider → 0.2x..100x, exponential so low speeds stay
-    /// controllable (linear would cram 0.2-3x into 3% of the track).</summary>
-    public static float MultFor(float v) => 0.2f * MathF.Pow(500f, v);
+    /// <summary>0..1 slider → 0.2x..100x, piecewise-exponential with 1.0x
+    /// exactly at mid-travel: 0.2→1 over the first half, 1→100 over the
+    /// second. (A single exponential put 1x at an arbitrary spot — the
+    /// default read 1.3x and felt like broken math.)</summary>
+    public static float MultFor(float v) => v <= 0.5f
+        ? 0.2f * MathF.Pow(5f, v * 2f)
+        : MathF.Pow(100f, (v - 0.5f) * 2f);
     private float Mult => MultFor(_speed.Value);
 
     public override void Render(CellBuffer buffer)
@@ -127,17 +135,17 @@ internal sealed class BallWidget : Widget
 
         int bx = (int)(_px * (pw - 1));
         int by = (int)(_py * (ph - 1));
-        _trail.Enqueue((bx, by));
-        while (_trail.Count > 24) _trail.Dequeue();
+        _trail.Enqueue((bx, by, now));
+        while (_trail.Count > 0 && now - _trail.Peek().TsMs > TrailMs)
+            _trail.Dequeue();
 
         _surface.Clear();
-        int i = 0;
-        foreach (var (tx, ty) in _trail)
+        foreach (var (tx, ty, ts) in _trail)
         {
-            // fade: oldest dim → newest bright, grayscale so any theme works
-            int c = 236 + (i * (252 - 236)) / Math.Max(1, _trail.Count - 1);
-            _surface.SetPixel(tx, ty, c);
-            i++;
+            // fade by AGE: oldest dim → newest bright, identical at any fps
+            int age = (int)(now - ts);
+            int c = 252 - (age * (252 - 236)) / TrailMs;
+            _surface.SetPixel(tx, ty, Math.Clamp(c, 236, 252));
         }
         _surface.SetPixel(bx, by, 255);
         _surface.Draw();

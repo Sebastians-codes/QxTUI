@@ -75,6 +75,7 @@ checks = {
     "isolation panel":  "damage isolation" in text,
     "stats panel":      "static renders: 1" in screen or "static renders:" in text,
     "unicode wrap":     "日本語" in text,
+    "default 1x":       "speed 1.0x" in text,
     "help line":        "t: theme" in text,
     "popup opens":      "modals swallow" in text,
     "popup fps buttons": "240fps" in text,

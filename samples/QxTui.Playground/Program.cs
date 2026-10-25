@@ -54,7 +54,7 @@ int themeIdx = 0;
 var sineHist = new RingHistory(120);
 var walkHist = new RingHistory(120);
 
-var speed = new Signal<float>(0.3f);
+var speed = new Signal<float>(0.5f); // mid-travel = exactly 1.0x
 
 var hud = new HudWidget(() => themeNames[themeIdx], fpsSig);
 var ball = new BallWidget(speed);
@@ -136,6 +136,23 @@ var themeBtn = new ButtonWidget(() => " theme ", () =>
 
 // ---- the whole layout as ONE expression (the DSL showcase) ------------------
 
+// widget tree: the slider row lives INSIDE the ball panel — mounted,
+// laid out and rendered via the parent, not the root list
+ball.Node.Direction = FlexDirection.Column;
+var ballSpacer = new ContainerWidget();
+ball.AddChild(ballSpacer);
+ballSpacer.Node.Grow = 1f;
+
+var sliderRow = new ContainerWidget();
+sliderRow.Node.Direction = FlexDirection.Row;
+sliderRow.Node.Gap = 1;
+ball.AddChild(sliderRow);
+sliderRow.Node.Height = 1;
+sliderRow.AddChild(speedLabel);
+speedLabel.Node.Width = 16;
+sliderRow.AddChild(speedSlider);
+speedSlider.Node.Grow = 1f;
+
 app.SetRoot(UI.Column(1,
     hud.Height(1),
     UI.Row(1,
@@ -156,23 +173,13 @@ app.SetRoot(UI.Column(1,
         .Grow(2),
         ball.Grow(3))
     .Grow(1),
-    UI.Row(1, speedLabel.Width(16), speedSlider.Grow(1)).Height(1), // full-width: fine control
     UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
         UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
     .Height(11), // three 3-row buttons + gaps: below this they'd crush
     help.Height(1)));
 
-app.AddWidget(hud)
-   .AddWidget(feederWired)
-   .AddWidget(sineSpark)
-   .AddWidget(walkSpark)
-   .AddWidget(wrapDemo)
-   .AddWidget(ball)
-   .AddWidget(speedLabel)
-   .AddWidget(speedSlider)
-   .AddWidget(staticPanel)
-   .AddWidget(stats)
-   .AddWidget(help);
+// no AddWidget calls needed: SetRoot walks the DSL tree and mounts
+// every widget it finds (roots AND children)
 
 // ---- keys: theme cycle + runtime fps control --------------------------------
 

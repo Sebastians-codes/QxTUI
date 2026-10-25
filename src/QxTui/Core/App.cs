@@ -39,7 +39,8 @@ public sealed class App : IDisposable
 {
     private readonly ITerminal _terminal;
     private LayoutNode _root;
-    private readonly List<Widget> _widgets = [];
+    private readonly List<Widget> _roots = [];
+    private readonly List<Widget> _widgets = []; // flat pre-order: parents before children
     private readonly HashSet<Widget> _registered = [];
     private readonly AnimationScheduler _scheduler;
     private readonly FramePacer _pacer;
@@ -107,12 +108,61 @@ public sealed class App : IDisposable
     /// and signals, and will be disposed with the app.</summary>
     public App AddWidget(Widget widget)
     {
+        if (widget.Parent is not null)
+            return this; // child: registered via its root's subtree
+
         if (_registered.Add(widget))
         {
-            widget.Mount(this);
-            _widgets.Add(widget);
+            _roots.Add(widget);
+            MountSubtree(widget);
+            RebuildFlat();
         }
         return this;
+    }
+
+    private void MountSubtree(Widget widget)
+    {
+        widget.Mount(this);
+        for (int i = 0; i < widget.Children.Count; i++)
+            MountSubtree(widget.Children[i]);
+    }
+
+    internal void AttachSubtree(Widget child)
+    {
+        if (_registered.Add(child))
+            MountSubtree(child);
+        for (int i = 0; i < child.Children.Count; i++)
+            AttachSubtree(child.Children[i]);
+        RebuildFlat();
+    }
+
+    internal void DetachSubtree(Widget child)
+    {
+        void Un(Widget w)
+        {
+            _registered.Remove(w);
+            for (int i = 0; i < w.Children.Count; i++)
+                Un(w.Children[i]);
+            w.Dispose();
+        }
+
+        Un(child);
+        RebuildFlat();
+    }
+
+    private void RebuildFlat()
+    {
+        _widgets.Clear();
+        void Walk(Widget w)
+        {
+            _widgets.Add(w);
+            for (int i = 0; i < w.Children.Count; i++)
+                Walk(w.Children[i]);
+        }
+        for (int i = 0; i < _roots.Count; i++)
+            Walk(_roots[i]);
+        if (_overlay is not null && !_widgets.Contains(_overlay))
+            _widgets.Add(_overlay);
     }
 
     // ---- overlays (popups/modals) ------------------------------------------
@@ -129,7 +179,11 @@ public sealed class App : IDisposable
             PopOverlay(); // one modal at a time (v1)
 
         _overlay = overlay;
-        AddWidget(overlay);
+        if (_registered.Add(overlay))
+        {
+            overlay.Mount(this);
+            _widgets.Add(overlay); // last = top of the z-order
+        }
         ResetHover();
         overlay.Invalidate();
     }
@@ -142,6 +196,7 @@ public sealed class App : IDisposable
         var ov = _overlay;
         _overlay = null;
         _widgets.Remove(ov);
+        _roots.Remove(ov);
         _registered.Remove(ov);
         ov.Dispose();
         ResetHover();
@@ -381,6 +436,11 @@ public sealed class App : IDisposable
         // 3) animations tick → signals → widgets mark themselves dirty
         _scheduler.Tick();
 
+        // widgets that asked for per-frame refresh follow the fps target
+        for (int i = 0; i < _widgets.Count; i++)
+            if (_widgets[i].PerFrame)
+                _widgets[i].Invalidate();
+
         // overlay covers the viewport; positioned outside the layout tree
         if (_overlay is { } ov)
             ov.Node.SetRect(new Rect(0, 0, _back.Width, _back.Height));
@@ -532,8 +592,10 @@ public sealed class App : IDisposable
 
     public void Dispose()
     {
-        foreach (var w in _widgets)
-            w.Dispose();
+        foreach (var w in _roots)
+            w.Dispose(); // cascades to children
+        if (_overlay is not null)
+            _overlay.Dispose();
         _presenter?.Dispose();
         _back.Dispose();
         _renderer.Dispose();
