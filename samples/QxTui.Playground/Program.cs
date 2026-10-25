@@ -44,8 +44,8 @@ app.Scheduler.Animate(back, 1f, new Transition(TimeSpan.FromSeconds(2.5), Easing
 var amber = new Theme(
     Border: 238, Title: 214, Text: 222, Dim: 244, Faint: 236,
     Accent: 214, Success: 100, Warning: 214, Danger: 196, PanelBg: 233);
-Theme[] themes = [Theme.Night, Theme.Mono, amber];
-string[] themeNames = ["Night", "Mono", "Amber"];
+Theme[] themes = [Theme.Night, Theme.Mono, amber, Theme.NightRgb];
+string[] themeNames = ["Night", "Mono", "Amber", "NightRGB"];
 int themeIdx = 0;
 
 // ---- widgets ---------------------------------------------------------------

@@ -220,16 +220,30 @@ public sealed class Renderer : IDisposable
         if (bold)
             w.WriteRaw(";1"u8);
         if (fg >= 0)
-        {
-            w.WriteRaw(";38;5;"u8);
-            w.WriteInt(fg);
-        }
+            WriteColor(ref w, "38"u8, fg);
         if (bg >= 0)
-        {
-            w.WriteRaw(";48;5;"u8);
-            w.WriteInt(bg);
-        }
+            WriteColor(ref w, "48"u8, bg);
         w.WriteRaw("m"u8);
+    }
+
+    private static void WriteColor(ref SpanWriter w, System.ReadOnlySpan<byte> kind, int c)
+    {
+        if (Core.Color.IsRgb(c))
+        {
+            w.WriteRaw(kind);
+            w.WriteRaw(";2;"u8);
+            w.WriteInt(Core.Color.R(c));
+            w.WriteRaw(";"u8);
+            w.WriteInt(Core.Color.G(c));
+            w.WriteRaw(";"u8);
+            w.WriteInt(Core.Color.B(c));
+        }
+        else
+        {
+            w.WriteRaw(kind);
+            w.WriteRaw(";5;"u8);
+            w.WriteInt(c);
+        }
     }
 
     private void SwapPrev(CellBuffer back) => back.Cells.CopyTo(_prev.Cells);

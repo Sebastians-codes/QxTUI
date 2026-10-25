@@ -162,3 +162,48 @@ public class EllipsizeTests
         Assert.Equal("…", Text.Ellipsize("abc", 1));
     }
 }
+
+public class TrueColorTests
+{
+    [Fact]
+    public void Rgb_EncodeDecode()
+    {
+        int c = Color.Rgb(1, 2, 3);
+        Assert.True(Color.IsRgb(c));
+        Assert.Equal((1, 2, 3), (Color.R(c), Color.G(c), Color.B(c)));
+
+        Assert.False(Color.IsRgb(-1));
+        Assert.False(Color.IsRgb(42)); // palette index stays palette
+        Assert.False(Color.IsRgb(255));
+    }
+
+    [Fact]
+    public void Serializer_Emits24BitSequences()
+    {
+        using var back = new CellBuffer(6, 2);
+        using var renderer = new Renderer(6, 2, synchronizedOutput: false);
+        var output = new System.Buffers.ArrayBufferWriter<byte>();
+
+        back[1, 1] = new Cell { Char = 'x', Fg = Color.Rgb(10, 20, 30), Bg = Color.Rgb(1, 2, 3) };
+        renderer.Render(back, output);
+
+        var text = System.Text.Encoding.Latin1.GetString(output.WrittenSpan);
+        Assert.Contains("38;2;10;20;30", text);
+        Assert.Contains("48;2;1;2;3", text);
+    }
+
+    [Fact]
+    public void PaletteCells_StillUse256Encoding()
+    {
+        using var back = new CellBuffer(6, 2);
+        using var renderer = new Renderer(6, 2, synchronizedOutput: false);
+        var output = new System.Buffers.ArrayBufferWriter<byte>();
+
+        back[1, 1] = new Cell { Char = 'x', Fg = 42, Bg = -1 };
+        renderer.Render(back, output);
+
+        var text = System.Text.Encoding.Latin1.GetString(output.WrittenSpan);
+        Assert.Contains("38;5;42", text);
+        Assert.DoesNotContain("38;2;", text);
+    }
+}
