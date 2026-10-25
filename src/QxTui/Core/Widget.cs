@@ -1,3 +1,4 @@
+using QxTui.Animation;
 using QxTui.Layout;
 using QxTui.Reactive;
 using QxTui.Render;
@@ -111,6 +112,25 @@ public abstract class Widget
     /// <summary>True between mouse press and release on this widget —
     /// the momentary "pushed down" state. Maintained by the App.</summary>
     public bool Pressed { get; internal set; }
+
+    private TimeSpan _flashUntil;
+
+    /// <summary>True while a press flash is held. Real clicks press+release
+    /// within one frame batch, so without a held flash the pushed-down look
+    /// would never be seen — only a label blip.</summary>
+    public bool FlashActive => App is not null && App.Scheduler.Time.Now < _flashUntil;
+
+    /// <summary>Hold the pressed look for <paramref name="ms"/> after a
+    /// click, then repaint back to idle (one-shot animation on the app
+    /// clock — virtual-time testable).</summary>
+    public void FlashPressed(int ms = 120)
+    {
+        if (App is null) return;
+        _flashUntil = App.Scheduler.Time.Now + TimeSpan.FromMilliseconds(ms);
+        Invalidate();
+        App.Scheduler.Animate(0f, 1f,
+            new Transition(TimeSpan.FromMilliseconds(ms)), _ => Invalidate());
+    }
 
     /// <summary>While this widget is the open overlay: freeze base paints
     /// (dimmed modals need it to keep the dim clean). Floating popups set

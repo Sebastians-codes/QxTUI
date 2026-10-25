@@ -1,3 +1,4 @@
+using QxTui.Animation;
 using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Render;
@@ -580,6 +581,42 @@ public class PressedStateTests
         app.RunFrame();
 
         Assert.False(btn.Pressed);
+        Assert.True(btn.FlashActive);             // flash holds the look
+        Assert.Equal(pressedBg, app.Back[10, 2].Bg);
+
+        Thread.Sleep(160);                        // flash window is 120ms real time here
+        app.RunFrame();
+        Assert.Equal(idleBg, app.Back[10, 2].Bg); // back to idle
+    }
+}
+
+public class PressFlashTests
+{
+    [Fact]
+    public void FastClick_HoldsPressedLook_ThenReturnsToIdle()
+    {
+        var clock = new VirtualTimeSource();
+        var term = new FakeTerminal(20, 5);
+        var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
+        var root = UI.Column(0, btn.Grow(1));
+        using var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+
+        app.RunFrame();
+        int idleBg = app.Back[10, 2].Bg;
+
+        // press+release in ONE batch: the physical pressed state is never
+        // rendered — the flash must carry the visual
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;11;3M\x1b[<0;11;3m"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.True(btn.FlashActive);
+        Assert.NotEqual(idleBg, app.Back[10, 2].Bg); // pushed-down look visible
+
+        clock.Advance(TimeSpan.FromMilliseconds(200)); // flash window over
+        app.RunFrame();
+
+        Assert.False(btn.FlashActive);
         Assert.Equal(idleBg, app.Back[10, 2].Bg); // back to idle
     }
 }

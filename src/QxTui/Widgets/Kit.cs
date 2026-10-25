@@ -127,14 +127,15 @@ public sealed class ButtonWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
 
-        // three reactive states: idle → hovered (brighter) → pressed (inverted)
+        // reactive states: idle → hovered (brighter) → pressed/flashing (inverted)
+        bool down = Pressed || FlashActive;
         ThemeRole role = RoleProvider?.Invoke() ?? _fg;
         int baseCol = Theme.Get(role);
         int hot = Theme.Get(Hovered ? ThemeRole.Title : role);
-        int fill = Pressed ? Theme.Get(ThemeRole.Faint)
+        int fill = down ? Theme.Get(ThemeRole.Faint)
                  : Hovered ? Theme.Get(ThemeRole.Title)
                  : baseCol;
-        int textOnFill = Pressed ? hot : 232;
+        int textOnFill = down ? hot : 232;
 
         var label = _label();
         int lx = r.X + Math.Max(1, (r.W - label.Length) / 2);
@@ -151,18 +152,18 @@ public sealed class ButtonWidget : Widget
 
             case ButtonStyle.Outline:
                 Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, hot);
-                if (Pressed)
+                if (down)
                     buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
                         new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: Pressed ? Theme.Get(ThemeRole.Title) : hot, bold: true);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: down ? Theme.Get(ThemeRole.Title) : hot, bold: true);
                 break;
 
             default:
                 Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, hot);
-                if (Pressed)
+                if (down)
                     buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
                         new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: Pressed ? Theme.Get(ThemeRole.Title) : hot, bold: true);
+                buffer.WriteTextClipped(Clip, lx, ly, label, fg: down ? Theme.Get(ThemeRole.Title) : hot, bold: true);
                 break;
         }
     }

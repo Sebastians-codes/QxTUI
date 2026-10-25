@@ -216,6 +216,7 @@ public sealed class App : IDisposable
             if (target.Clickable && ReferenceEquals(clicked, target))
             {
                 target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+                target.FlashPressed(); // hold the pushed-down look ~120ms
                 // a click almost always mutates rendered state: repaint the
                 // clicked widget immediately, don't wait for hover to change
                 target.Invalidate();
