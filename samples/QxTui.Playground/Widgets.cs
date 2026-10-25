@@ -28,8 +28,10 @@ internal sealed class HudWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.Faint) });
         buffer.WriteTextClipped(Clip, r.X, r.Y,
-            $" qxtui playground │ theme: {_themeName()} │ {_fps.Value}fps │ "
-            + $"{stats?.LastBytesWritten.ToString("N0", CultureInfo.InvariantCulture) ?? "-"} B/frame ",
+            QxTui.Render.Text.Ellipsize(
+                $" qxtui playground │ theme: {_themeName()} │ {_fps.Value}fps │ "
+                + $"{stats?.LastBytesWritten.ToString("N0", CultureInfo.InvariantCulture) ?? "-"} B/frame ",
+                r.W),
             fg: 255, bg: Theme.Get(ThemeRole.Faint), bold: true);
     }
 }
@@ -79,7 +81,7 @@ internal sealed class BallWidget : Widget
     public BallWidget(Signal<float> speed)
     {
         _speed = speed;
-        Tick(TimeSpan.FromMilliseconds(10)); // 100Hz
+        Tick(TimeSpan.FromMilliseconds(1)); // 1kHz: data for targets up to 1000fps
     }
 
     /// <summary>0..1 slider → 0.2x..100x, exponential so low speeds stay
@@ -166,7 +168,8 @@ internal sealed class StaticPanelWidget : Widget
             "count in the STATS panel →",
         ];
         for (int i = 0; i < lines.Length && r.Y + 1 + i < r.Bottom - 1; i++)
-            buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1 + i, lines[i], fg: Theme.Get(ThemeRole.Text));
+            buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1 + i,
+                QxTui.Render.Text.Ellipsize(lines[i], r.W - 4), fg: Theme.Get(ThemeRole.Text));
     }
 }
 

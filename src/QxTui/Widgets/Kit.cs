@@ -36,7 +36,8 @@ public sealed class LabelWidget : Widget
         // stale text behind (only writing text ghosts on reflow)
         buffer.FillRect(r.X, r.Y, r.W, r.H,
             new Cell { Char = ' ', Fg = -1, Bg = _bg is { } r3 ? Theme.Get(r3) : -1 });
-        buffer.WriteTextClipped(Clip, r.X + 1, r.Y, _text(), fg: Theme.Get(_fg),
+        buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
+            QxTui.Render.Text.Ellipsize(_text(), r.W - 2), fg: Theme.Get(_fg),
             bg: _bg is { } r2 ? Theme.Get(r2) : -1);
     }
 }
@@ -303,7 +304,8 @@ public sealed class ModalWidget : Widget
 
         var lines = _lines();
         for (int i = 0; i < lines.Length && box.Y + 2 + i < box.Bottom - 1; i++)
-            buffer.WriteTextClipped(Clip, box.X + 2, box.Y + 2 + i, lines[i],
+            buffer.WriteTextClipped(Clip, box.X + 2, box.Y + 2 + i,
+                QxTui.Render.Text.Ellipsize(lines[i], box.W - 4),
                 fg: Theme.Get(ThemeRole.Text), bg: Theme.Get(ThemeRole.PanelBg));
 
         // action button row: key hint + filled chip (hover brightens)

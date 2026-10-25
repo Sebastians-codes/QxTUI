@@ -61,8 +61,6 @@ var ball = new BallWidget(speed);
 var staticPanel = new StaticPanelWidget();
 var stats = new StatsPanelWidget(staticPanel, ball);
 
-ThemeRole filledRole = ThemeRole.Accent;
-
 var wrapDemo = new TextWidget(() =>
     "wrapping: 日本語のテキスト flows by 2-col runes, emoji 👍 = 2 cols, " +
     "ZWJ family 👨‍👩‍ = one glyph, combining é = zero — resize to reflow.");
@@ -178,7 +176,7 @@ app.AddWidget(hud)
 
 // ---- keys: theme cycle + runtime fps control --------------------------------
 
-int[] fpsPresets = [30, 60, 120, 240];
+int[] fpsPresets = [30, 60, 120, 240, 480, 1000];
 
 app.OnKey = ev =>
 {

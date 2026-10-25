@@ -131,3 +131,34 @@ public class WideCellRenderTests
         return count;
     }
 }
+
+public class EllipsizeTests
+{
+    [Fact]
+    public void ShortText_Unchanged() =>
+        Assert.Equal("hello", Text.Ellipsize("hello", 10));
+
+    [Fact]
+    public void LongText_GetsEllipsis_NotHardCut()
+    {
+        string result = Text.Ellipsize("hello world", 8);
+        Assert.Equal("hello w…", result);
+        Assert.Equal(8, UnicodeWidth.OfText(result));
+    }
+
+    [Fact]
+    public void WideRunes_NeverSplit()
+    {
+        // width 5: 你(2)好(2) = 4, next 世 would need 2 but only 4 left (5-1 for …)
+        string result = Text.Ellipsize("你好世界", 5);
+        Assert.Equal("你好…", result);
+        Assert.Equal(5, UnicodeWidth.OfText(result));
+    }
+
+    [Fact]
+    public void TinyWidths()
+    {
+        Assert.Equal("", Text.Ellipsize("abc", 0));
+        Assert.Equal("…", Text.Ellipsize("abc", 1));
+    }
+}
