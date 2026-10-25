@@ -69,7 +69,7 @@ var speedLabel = new LabelWidget(speed, v =>
 {
     float m = BallWidget.MultFor(v);
     return $"speed {(m < 10 ? m.ToString("F1") : m.ToString("F0"))}x";
-});
+}, bg: ThemeRole.PanelBg); // opaque strip: ball must not show through
 var speedSlider = new SliderWidget(speed, ThemeRole.Warning);
 
 var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);

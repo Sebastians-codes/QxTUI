@@ -1,3 +1,4 @@
+using QxTui.Reactive;
 using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Render;
@@ -225,5 +226,22 @@ public class ListViewMouseTests
         Mouse(term, "\x1b[<0;5;6M\x1b[<0;5;6m"); // press row y=5
         app.RunFrame();
         Assert.Equal(5, list.Selected);
+    }
+}
+
+public class OpaqueStripTests
+{
+    [Fact]
+    public void Slider_OwnsItsBackground_NoTransparentHoles()
+    {
+        var sig = new Signal<float>(0.5f);
+        var slider = new SliderWidget(sig);
+        var root = UI.Column(0, slider.Height(1));
+        var term = new FakeTerminal(20, 3);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        for (int x = 0; x < 20; x++)
+            Assert.Equal(Theme.Night.PanelBg, app.Back[x, 0].Bg); // fully opaque
     }
 }

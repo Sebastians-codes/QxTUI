@@ -413,7 +413,11 @@ public sealed class SliderWidget : Widget
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
-        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        // opaque: a transparent slider row lets whatever is behind the
+        // panel (or the terminal wallpaper) show through — widgets that
+        // form a UI strip must own their background
+        buffer.FillRect(r.X, r.Y, r.W, r.H,
+            new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
         int y = r.Y + r.H / 2;
         int track = Math.Max(1, r.W - 3);
         int pos = r.X + 1 + (int)(_value.Value * track);
@@ -421,10 +425,12 @@ public sealed class SliderWidget : Widget
         int col = Theme.Get(_fg);
         int hot = Theme.Get(Hovered || Pressed ? ThemeRole.Title : _fg);
 
+        int panelBg = Theme.Get(ThemeRole.PanelBg);
         for (int x = r.X + 1; x <= r.X + 1 + track; x++)
-            buffer.WriteTextClipped(Clip, x, y, "─", fg: x <= pos ? col : Theme.Get(ThemeRole.Faint));
+            buffer.WriteTextClipped(Clip, x, y, "─",
+                fg: x <= pos ? col : Theme.Get(ThemeRole.Faint), bg: panelBg);
 
-        buffer.WriteTextClipped(Clip, pos, y, "█", fg: hot, bold: true);
+        buffer.WriteTextClipped(Clip, pos, y, "█", fg: hot, bg: panelBg, bold: true);
     }
 }
 
