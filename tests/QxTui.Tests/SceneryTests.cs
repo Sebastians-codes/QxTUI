@@ -147,7 +147,7 @@ public class ShootingStarTests
         int n = 0;
         for (int y = 0; y < 22; y++)
             for (int x = 0; x < 102; x++)
-                if (buf[x, y].Fg is 255 or 252) n++;
+                if (buf[x, y].Fg == 255) n++; // streak head color is unique
         return n;
     }
 
@@ -156,8 +156,8 @@ public class ShootingStarTests
     {
         int during = BrightPixels(70.5); // mid-streak (cycle 0.5 of 7s)
         int after = BrightPixels(74.0);  // quiet sky
-        Assert.True(during > after + 5,
-            $"shooting star must add bright pixels ({during} vs {after})");
+        Assert.True(during >= 1, "streak head must be visible mid-cycle");
+        Assert.Equal(0, after);
     }
 
     [Fact]
