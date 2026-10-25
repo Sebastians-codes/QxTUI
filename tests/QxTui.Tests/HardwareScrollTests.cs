@@ -7,6 +7,8 @@ namespace QxTui.Tests;
 
 public class HardwareScrollTests
 {
+    internal static CellBuffer MakeBufPublic(int w, int h, int shift) => MakeBuf(w, h, shift);
+
     private static CellBuffer MakeBuf(int w, int h, int shift)
     {
         var b = new CellBuffer(w, h);
@@ -26,7 +28,7 @@ public class HardwareScrollTests
     [Fact]
     public void ScrollHint_EmitsRegionScroll_AndRepaintsOnlyExposedRows()
     {
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
         var first = MakeBuf(20, 10, 0);
         RenderToString(r, first, out var full);
 
@@ -48,7 +50,7 @@ public class HardwareScrollTests
     [Fact]
     public void ScrollHint_Downward_UsesSD()
     {
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
         RenderToString(r, MakeBuf(20, 10, 3), out _);
 
         r.ScrollHint(new Rect(0, 0, 20, 10), -3);
@@ -60,7 +62,7 @@ public class HardwareScrollTests
     [Fact]
     public void ScrollHint_NoOverlap_IsIgnored()
     {
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
         RenderToString(r, MakeBuf(20, 10, 0), out _);
 
         r.ScrollHint(new Rect(0, 0, 20, 10), 10); // >= height: no overlap
@@ -74,7 +76,7 @@ public class HardwareScrollTests
     public void ScrollHint_PartialRect_LeavesRestUntouched()
     {
         // a static header row outside the rect must not shift or repaint
-        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
         var a = MakeBuf(20, 10, 0);
         for (int x = 0; x < 20; x++) a[x, 0] = new Cell { Char = 'H', Fg = 7 };
         RenderToString(r, a, out _);
@@ -86,5 +88,26 @@ public class HardwareScrollTests
 
         Assert.Contains("\x1b[2;10r", s); // region starts below the header
         Assert.True(res.DirtyCells <= 2 * 20, $"only exposed rows dirty, got {res.DirtyCells}");
+    }
+}
+
+public class HardwareScrollGateTests
+{
+    [Fact]
+    public void DisabledByDefault_NoScrollSequences_OnTheWire()
+    {
+        // a terminal that misimplements SU/SD must never see them unless
+        // the app explicitly opts in — desyncs have no self-heal
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(HardwareScrollTests.MakeBufPublic(20, 10, 0), outp);
+
+        r.ScrollHint(new Rect(0, 0, 20, 10), 3);
+        var out2 = new ArrayBufferWriter<byte>();
+        r.Render(HardwareScrollTests.MakeBufPublic(20, 10, 3), out2);
+        string s = Encoding.UTF8.GetString(out2.WrittenSpan);
+
+        Assert.DoesNotContain("\x1b[3S", s);
+        Assert.DoesNotContain("\x1b[1;10r", s);
     }
 }

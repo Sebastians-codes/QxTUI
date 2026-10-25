@@ -30,6 +30,12 @@ public sealed class Renderer : IDisposable
     private readonly List<DamageRect> _damage = new(64);
     private readonly bool _synchronizedOutput;
     private bool _resync;
+    /// <summary>Opt-in: emit DECSTBM+SU/SD hardware scrolls from ScrollHint.
+    /// Off by default — SU/SD semantics vary across emulators and a
+    /// mismatch desyncs the front buffer with no self-heal (ghost columns).
+    /// Wire tests enable it explicitly.</summary>
+    public bool HardwareScroll { get; set; }
+
     private Layout.Rect _hintRect;
     private int _hintDelta;
     private bool _hasHint;
@@ -106,7 +112,7 @@ public sealed class Renderer : IDisposable
             _hasHint = false;
             var r = _hintRect;
             int d = _hintDelta;
-            if (!forceFull && !_resync && d != 0 && Math.Abs(d) < r.H &&
+            if (HardwareScroll && !forceFull && !_resync && d != 0 && Math.Abs(d) < r.H &&
                 r.X >= 0 && r.Y >= 0 && r.Right <= _prev.Width && r.Bottom <= _prev.Height)
             {
                 ShiftPrev(r, d);
