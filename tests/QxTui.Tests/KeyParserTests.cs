@@ -1,0 +1,84 @@
+using QxTui.Terminal;
+
+namespace QxTui.Tests;
+
+public class KeyParserTests
+{
+    private static List<KeyEvent> Feed(string bytes)
+    {
+        var parser = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(bytes))
+            parser.Feed(b);
+        parser.Flush();
+
+        var events = new List<KeyEvent>();
+        while (parser.TryRead(out var ev))
+            events.Add(ev);
+        return events;
+    }
+
+    [Fact]
+    public void PlainChars()
+    {
+        var events = Feed("qw");
+        Assert.Equal([KeyEvent.OfChar('q'), KeyEvent.OfChar('w')], events);
+    }
+
+    [Fact]
+    public void Arrows_Csi()
+    {
+        var events = Feed("\x1b[A\x1b[B\x1b[C\x1b[D");
+        Assert.Equal([Key.Up, Key.Down, Key.Right, Key.Left],
+            events.Select(e => e.Key));
+    }
+
+    [Fact]
+    public void Arrows_Ss3()
+    {
+        var events = Feed("\x1bOA\x1bOD");
+        Assert.Equal([Key.Up, Key.Left], events.Select(e => e.Key));
+    }
+
+    [Fact]
+    public void Enter_Space_Escape()
+    {
+        var events = Feed("\r \x1b");
+        Assert.Equal([Key.Enter, Key.Space, Key.Escape], events.Select(e => e.Key));
+    }
+
+    [Fact]
+    public void PartialSequence_BufferedUntilComplete()
+    {
+        var parser = new KeyParser();
+
+        parser.Feed(0x1b);
+        parser.Feed((byte)'[');
+        Assert.False(parser.TryRead(out _)); // still incomplete
+
+        parser.Feed((byte)'C');
+        Assert.True(parser.TryRead(out var ev));
+        Assert.Equal(Key.Right, ev.Key);
+    }
+
+    [Fact]
+    public void LoneEsc_ThenChar_YieldsBoth()
+    {
+        var events = Feed("q");
+        Assert.Equal([Key.Escape, Key.Char], events.Select(e => e.Key));
+        Assert.Equal('q', events[1].Char);
+    }
+
+    [Fact]
+    public void DeleteWithParams()
+    {
+        var events = Feed("\x1b[3~");
+        Assert.Equal([Key.Delete], events.Select(e => e.Key));
+    }
+
+    [Fact]
+    public void CtrlC_IsCharC()
+    {
+        var events = Feed("\x3");
+        Assert.Equal(KeyEvent.OfChar('c'), events.Single());
+    }
+}

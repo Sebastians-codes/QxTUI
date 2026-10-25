@@ -28,8 +28,10 @@ dotnet test                                  # 77 tests, incl. the invariants be
 dotnet run -c Release --project bench/QxTui.Bench        # headless fps/bytes proof
 dotnet run -c Release --project samples/QxTui.PoC        # the demo (needs a TTY)
 dotnet run -c Release --project samples/QxTui.SysMon     # qxtop: a real app (needs a TTY)
+dotnet run -c Release --project samples/QxTui.Snake      # snake: a real game (needs a TTY)
 python3 samples/pty_smoke_test.py            # demo under a pty, asserts on-screen proof
 python3 samples/sysmon_smoke_test.py         # qxtop under a pty, asserts every panel
+python3 samples/snake_smoke_test.py          # snake under a pty: plays turns, asserts pixels
 python3 samples/resize_stress_test.py        # rapid shrink/grow stress, asserts no crash
 ```
 
@@ -80,6 +82,15 @@ intermediate frames drop latest-wins) → pace.
 The demo reports produced fps (pacer) and presented fps (terminal-capped)
 separately, plus dropped frames — so "the framework held 240" and "the
 terminal showed N" are never conflated.
+
+### snake — games on square pixels
+
+Classic snake with parsed arrow/WASD input, pause/restart, score-ramping
+speed. Rendered through `HalfBlockSurface`: terminal cells are ~2:1, so the
+square pixel is full-width × half-height (▀ ▄ █) — one cell holds 1×2
+square pixels with exact two-color support (fg top, bg bottom). Quadrant
+2×2 splits are deliberately NOT used: they keep the 1:2 aspect and make
+vertical motion look twice as fast as horizontal.
 
 ## Read this before contributing
 

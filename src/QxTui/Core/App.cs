@@ -61,8 +61,15 @@ public sealed class App : IDisposable
     public int BackHeight => _back.Height;
     public int TargetFps { get; }
 
-    /// <summary>Input callback (PoC scope: raw bytes). Return false to quit.</summary>
+    /// <summary>Raw byte callback (legacy/simple apps). Return false to quit.</summary>
     public Func<byte, bool>? OnInput { get; set; }
+
+    /// <summary>Parsed key callback (games/apps needing arrows etc.).
+    /// Return false to quit.</summary>
+    public Func<KeyEvent, bool>? OnKey { get; set; }
+
+    private readonly KeyParser _keyParser = new();
+    private readonly List<byte> _rawBatch = new(16);
 
     public AnimationScheduler Scheduler => _scheduler;
 
@@ -164,14 +171,24 @@ public sealed class App : IDisposable
         double startMs = NowMs();
         _pacer.MarkFpsSample();
 
-        // 1) input
+        // 1) input: raw bytes → parsed key events (arrows, enter, chars)
+        _rawBatch.Clear();
         while (_terminal.TryReadInput(out byte b))
         {
-            if (OnInput is { } handler && !handler(b))
-            {
+            _keyParser.Feed(b);
+            _rawBatch.Add(b);
+        }
+
+        while (_running && _keyParser.TryRead(out var keyEvent))
+        {
+            if (OnKey is { } keyHandler && !keyHandler(keyEvent))
                 _running = false;
-                break;
-            }
+        }
+
+        for (int i = 0; i < _rawBatch.Count && _running; i++)
+        {
+            if (OnInput is { } handler && !handler(_rawBatch[i]))
+                _running = false;
         }
 
         bool relayoutThisFrame = false;
