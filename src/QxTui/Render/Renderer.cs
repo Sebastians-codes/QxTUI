@@ -30,6 +30,9 @@ public sealed class Renderer : IDisposable
     private readonly List<DamageRect> _damage = new(64);
     private readonly bool _synchronizedOutput;
     private bool _resync;
+    private Layout.Rect _hintRect;
+    private int _hintDelta;
+    private bool _hasHint;
 
     public int Width => _prev.Width;
     public int Height => _prev.Height;
@@ -67,6 +70,24 @@ public sealed class Renderer : IDisposable
         back.Cells.CopyTo(_prev.Cells);
     }
 
+    /// <summary>
+    /// Widget hint: `rect`'s content is the previous frame's content shifted
+    /// vertically by `delta` rows (positive = up, i.e. scrolled down). The
+    /// renderer then hardware-scrolls (DECSTBM region + SU/SD), shifts its
+    /// own front buffer to match, and diffs as usual — so only the exposed
+    /// rows serialize. A 3-row wheel notch becomes ~1KB instead of a
+    /// full-window repaint; that is what keeps terminals' presented fps
+    /// (and therefore perceived smoothness) alive while scrolling.
+    /// Ignored when there is no row overlap (|delta| >= rect.H).
+    /// </summary>
+    public void ScrollHint(Layout.Rect rect, int delta)
+    {
+        if (delta == 0 || Math.Abs(delta) >= rect.H) return;
+        _hintRect = rect;
+        _hintDelta = delta;
+        _hasHint = true;
+    }
+
     /// <param name="forceFull">Emit a whole-screen repaint regardless of
     /// the diff. Used to RESYNC the terminal after dropped delta frames:
     /// a missed delta leaves the terminal on a wrong base forever, and only
@@ -77,6 +98,24 @@ public sealed class Renderer : IDisposable
             throw new InvalidOperationException(
                 $"Back buffer {back.Width}x{back.Height} != renderer {_prev.Width}x{_prev.Height}. Call Resize first.");
 
+        // consume the hint BEFORE diffing: shifting the front buffer makes
+        // the diff see only the exposed rows
+        string? scrollCmd = null;
+        if (_hasHint)
+        {
+            _hasHint = false;
+            var r = _hintRect;
+            int d = _hintDelta;
+            if (!forceFull && !_resync && d != 0 && Math.Abs(d) < r.H &&
+                r.X >= 0 && r.Y >= 0 && r.Right <= _prev.Width && r.Bottom <= _prev.Height)
+            {
+                ShiftPrev(r, d);
+                scrollCmd = d > 0
+                    ? $"\x1b[{r.Y + 1};{r.Bottom}r\x1b[{d}S\x1b[r"
+                    : $"\x1b[{r.Y + 1};{r.Bottom}r\x1b[{-d}T\x1b[r";
+            }
+        }
+
         _damage.Clear();
         int dirtyCells = Diff(back, _damage, out bool fullRepaint);
         if (forceFull || _resync)
@@ -85,11 +124,15 @@ public sealed class Renderer : IDisposable
             fullRepaint = true;
             _damage.Clear();
             dirtyCells = back.Width * back.Height;
+            scrollCmd = null; // full repaint supersedes the scroll
         }
 
         var writer = new SpanWriter(output);
         if (_synchronizedOutput)
             writer.WriteRaw("\x1b[?2026h"u8);
+
+        if (scrollCmd is not null)
+            writer.WriteText(scrollCmd.AsSpan());
 
         if (fullRepaint)
         {
@@ -162,6 +205,18 @@ public sealed class Renderer : IDisposable
         if (damage.Count > 1)
             DamageCoalescer.Coalesce(damage);
         return dirty;
+    }
+
+    /// <summary>Shift front-buffer rows inside `rect` by `d` (memmove-safe),
+    /// mirroring what SU/SD does on the terminal.</summary>
+    private void ShiftPrev(Layout.Rect r, int d)
+    {
+        int w = _prev.Width;
+        int rows = r.H - Math.Abs(d);
+        int srcRow = d > 0 ? r.Y + d : r.Y;
+        int dstRow = d > 0 ? r.Y : r.Y - d;
+        _prev.Cells.Slice(srcRow * w + r.X, rows * w)
+             .CopyTo(_prev.Cells.Slice(dstRow * w + r.X));
     }
 
     private void SerializeRect(CellBuffer back, ref SpanWriter w, in DamageRect rect)

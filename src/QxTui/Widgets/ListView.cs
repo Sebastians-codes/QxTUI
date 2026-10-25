@@ -27,10 +27,9 @@ public sealed class ListView : Widget
 
     private bool _dragThumb;
     private int _grabDelta;      // cursor offset inside the thumb at grab
-    private double _target;      // content glide target (drag)
-    private double _glideFrom;
-    private long _glideStartTs;
-    private const double DragGlideMs = 140; // constant-velocity catch-up
+    private double _target;      // drag stream target (thumb = cursor)
+    private long _lastGlideTs;
+    private int _lastRenderedOffset; // for hardware-scroll hints
 
     /// <summary>Index of the first visible row.</summary>
     public int Offset { get; private set; }
@@ -60,14 +59,29 @@ public sealed class ListView : Widget
     /// list — so the CONTENT glides to the drag target while the thumb
     /// itself stays glued to the cursor. Linear (not eased): continuous
     /// drags track without rubber-band lag; discrete jumps animate.</summary>
+    /// <summary>Drag catch-up stream: the thumb is glued to the cursor while
+    /// the content flows to it at a velocity that ADAPTS to what the
+    /// terminal actually presents (cheap hardware-scroll frames raise
+    /// presented fps → the stream accelerates: a feedback loop that
+    /// converges on smooth). Large lags ramp the rate so catch-up after a
+    /// fast flick stays short.</summary>
     private void Glide()
     {
         int target = (int)Math.Round(_target);
-        if (target == Offset) return;
+        int diff = target - Offset;
+        if (diff == 0) return;
         long now = Environment.TickCount64;
-        double t = Math.Clamp((now - _glideStartTs) / DragGlideMs, 0, 1);
-        int pos = (int)Math.Round(_glideFrom + (target - _glideFrom) * t);
-        pos = Math.Clamp(pos, 0, Math.Max(0, Count() - VisibleRows()));
+        double dt = Math.Min(0.25, Math.Max(0.001, (now - _lastGlideTs) / 1000.0));
+        _lastGlideTs = now;
+
+        double presented = App is { } host && host.Stats.PresentedFps > 0
+            ? host.Stats.PresentedFps : 60;
+        double window = Math.Max(1, VisibleRows());
+        double ramp = 1 + Math.Abs(diff) / (window * 4);
+        double v = Math.Clamp(presented * window * 0.5 * ramp, 300, 6000);
+        int maxStep = Math.Max(1, (int)(v * dt));
+        int pos = Math.Clamp(Offset + Math.Clamp(diff, -maxStep, maxStep),
+            0, Math.Max(0, Count() - VisibleRows()));
         if (pos != Offset)
         {
             Offset = pos;
@@ -77,14 +91,14 @@ public sealed class ListView : Widget
 
     private void Retarget(double target)
     {
-        _glideFrom = Offset;
-        _glideStartTs = Environment.TickCount64;
+        _lastGlideTs = Environment.TickCount64;
         _target = Math.Clamp(target, 0, Math.Max(0, Count() - VisibleRows()));
         Invalidate();
     }
 
-    /// <summary>Wheel: immediate small steps — discrete notches feel wrong
-    /// when eased (the 'awkward accel'); raw steps read as smooth.</summary>
+    /// <summary>Wheel: immediate steps. Smoothness comes from the terminal
+    /// presenting frames fast, not from client-side delay — hardware-scroll
+    /// hints keep those frames ~1KB so presented fps stays healthy.</summary>
     public void ScrollBy(int delta) => ScrollTo(Offset + delta);
 
     private int VisibleRows() =>
@@ -229,6 +243,12 @@ public sealed class ListView : Widget
 
         Offset = Math.Clamp(Offset, 0, Math.Max(0, total - rows));
         _target = Math.Clamp(_target, 0, Math.Max(0, total - rows));
+
+        // hardware scroll: window shifted vertically → repaint exposed only
+        int deltaCells = (Offset - _lastRenderedOffset) * RowHeight;
+        _lastRenderedOffset = Offset;
+        if (deltaCells != 0)
+            App?.ScrollHint(new Rect(r.X, r.Y, contentW, r.H), deltaCells);
 
         int last = Math.Min(total, Offset + rows);
         for (int i = Offset; i < last; i++)

@@ -152,7 +152,7 @@ public class AdaptivePacingTests
         eff = app.AdaptToPresented(10); // collapses
         Assert.True(eff < 240);
 
-        for (int i = 0; i < 12; i++)
+        for (int i = 0; i < 20; i++)
             eff = app.AdaptToPresented(eff); // keeps up → climb
 
         Assert.Equal(240, eff); // fully recovered to the user target

@@ -122,9 +122,9 @@ public sealed class App : IDisposable
             _recoverWindows = 0;
         }
 
-        if (_slowWindows >= 2 && _effectiveFps > 60)
+        if (_slowWindows >= 2 && _effectiveFps > 24)
         {
-            _effectiveFps = Math.Max(60, (int)(presented * 1.5));
+            _effectiveFps = Math.Max(24, (int)(presented * 1.5));
             _pacer.SetTargetFps(_effectiveFps);
             _slowWindows = 0;
         }
@@ -406,6 +406,10 @@ public sealed class App : IDisposable
             _pressed = null;
         }
     }
+
+    /// <summary>Forward a hardware-scroll hint from a widget: the renderer
+    /// emits a scroll-region SU/SD and repaints only exposed rows.</summary>
+    public void ScrollHint(Layout.Rect rect, int delta) => _renderer.ScrollHint(rect, delta);
 
     /// <summary>Mark every widget dirty (theme switch, global style change).</summary>
     public void InvalidateAll()

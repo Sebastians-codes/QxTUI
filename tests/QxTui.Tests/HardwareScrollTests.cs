@@ -1,0 +1,90 @@
+using System.Buffers;
+using System.Text;
+using QxTui.Layout;
+using QxTui.Render;
+
+namespace QxTui.Tests;
+
+public class HardwareScrollTests
+{
+    private static CellBuffer MakeBuf(int w, int h, int shift)
+    {
+        var b = new CellBuffer(w, h);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                b[x, y] = new Cell { Char = (char)('a' + ((y + shift) % 26)), Fg = 7 };
+        return b;
+    }
+
+    private static string RenderToString(Renderer r, CellBuffer b, out RenderResult res)
+    {
+        var outp = new ArrayBufferWriter<byte>();
+        res = r.Render(b, outp);
+        return Encoding.UTF8.GetString(outp.WrittenSpan);
+    }
+
+    [Fact]
+    public void ScrollHint_EmitsRegionScroll_AndRepaintsOnlyExposedRows()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var first = MakeBuf(20, 10, 0);
+        RenderToString(r, first, out var full);
+
+        var shifted = MakeBuf(20, 10, 3);
+        r.ScrollHint(new Rect(0, 0, 20, 10), 3);
+        string s = RenderToString(r, shifted, out var hinted);
+
+        Assert.Contains("\x1b[1;10r", s);  // scroll region = the rect
+        Assert.Contains("\x1b[3S", s);    // SU 3: content moved up
+        // exposed rows (3 of 10) instead of a whole-window repaint
+        Assert.True(hinted.BytesWritten < full.BytesWritten / 2,
+            $"hint frame {hinted.BytesWritten}B vs full {full.BytesWritten}B");
+
+        // front buffer mirrors the terminal now: same content = clean frame
+        RenderToString(r, shifted, out var idle);
+        Assert.Equal(0, idle.DirtyCells);
+    }
+
+    [Fact]
+    public void ScrollHint_Downward_UsesSD()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        RenderToString(r, MakeBuf(20, 10, 3), out _);
+
+        r.ScrollHint(new Rect(0, 0, 20, 10), -3);
+        string s = RenderToString(r, MakeBuf(20, 10, 0), out _);
+
+        Assert.Contains("\x1b[3T", s);    // SD 3: content moved down
+    }
+
+    [Fact]
+    public void ScrollHint_NoOverlap_IsIgnored()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        RenderToString(r, MakeBuf(20, 10, 0), out _);
+
+        r.ScrollHint(new Rect(0, 0, 20, 10), 10); // >= height: no overlap
+        string s = RenderToString(r, MakeBuf(20, 10, 10), out _);
+
+        Assert.DoesNotContain("S\x1b", s);
+        Assert.DoesNotContain("\x1b[1;10r", s);
+    }
+
+    [Fact]
+    public void ScrollHint_PartialRect_LeavesRestUntouched()
+    {
+        // a static header row outside the rect must not shift or repaint
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var a = MakeBuf(20, 10, 0);
+        for (int x = 0; x < 20; x++) a[x, 0] = new Cell { Char = 'H', Fg = 7 };
+        RenderToString(r, a, out _);
+
+        var b = MakeBuf(20, 10, 2);
+        for (int x = 0; x < 20; x++) b[x, 0] = new Cell { Char = 'H', Fg = 7 };
+        r.ScrollHint(new Rect(0, 1, 20, 9), 2);
+        string s = RenderToString(r, b, out var res);
+
+        Assert.Contains("\x1b[2;10r", s); // region starts below the header
+        Assert.True(res.DirtyCells <= 2 * 20, $"only exposed rows dirty, got {res.DirtyCells}");
+    }
+}

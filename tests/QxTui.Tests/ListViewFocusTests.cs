@@ -62,8 +62,8 @@ public class ListViewTests
             term.QueueInput(b);
         app.RunFrame();
 
-        Assert.Equal(3, list.Offset); // wheel steps are immediate
-        // the wheel frame painted exactly the new visible window
+        Assert.Equal(3, list.Offset); // wheel steps are immediate (no lag)
+        // the final frame painted exactly the new visible window
         Assert.Equal(Enumerable.Range(3, 12), painted.TakeLast(12));
     }
 
@@ -247,7 +247,7 @@ public class ListViewMouseTests
         int mid = list.Offset;
         Assert.True(mid > early, $"glide must progress, early={early} mid={mid}");
 
-        Settle.Run(app, 200);
+        Settle.Run(app, 400);
         app.RunFrame();
         Assert.True(list.Offset >= 700, $"glide must land on target, got {list.Offset}");
 
