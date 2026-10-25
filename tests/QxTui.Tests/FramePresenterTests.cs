@@ -139,41 +139,47 @@ public class DropResyncTests
     }
 
     [Fact]
-    public void DroppedFrames_TriggerResyncFullFrame()
+    public void DroppedFrames_RepairConverges_WithoutFullRepaintFlood()
     {
-        // a sink that stalls: submits pile up and get dropped, then the app
-        // must resync with a full repaint on the next frame
+        // a sink that stalls: submits pile up and get dropped. The repair
+        // must re-base on the last SUBMITTED content and converge with a
+        // DELTA — the old full-repaint repair flooded exactly the
+        // terminals that were already drowning (drop → 40KB → more drops)
         var sizes = new List<int>();
+        var writes = new List<string>();
         var gate = new ManualResetEventSlim(true);
-        var sinkTerm = new SlowTerminal(sizes, gate);
+        var sinkTerm = new SlowTerminal(sizes, gate, writes);
 
-        var widget = new BlockWidgetPublic('.', 7);
+        var widget = new BlockWidgetPublic('a', 7);
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
         root.Add(widget.Node);
-        widget.Node.Grow = 1f;
+        widget.Node.Grow = 0.5f;
+        var spacer = new QxTui.Widgets.ContainerWidget();
+        root.Add(spacer.Node);
+        spacer.Node.Grow = 0.5f;
 
         using var app = new App(sinkTerm, root, targetFps: 1000);
         app.RunFrame(); // initial paint (writer consumes it)
 
         gate.Reset(); // writer stalls from here on
-        int small = 0;
-        for (int i = 0; i < 6; i++)
-        {
-            widget.Invalidate();
-            app.RunFrame(pace: false);
-        }
+        widget.Char = 'b'; widget.Invalidate(); app.RunFrame(pace: false);
+        widget.Char = 'c'; widget.Invalidate(); app.RunFrame(pace: false);
 
         gate.Set();
-        widget.Invalidate();
-        app.RunFrame(pace: false); // this one must resync (drops happened)
-        Thread.Sleep(100);          // let the writer drain
+        widget.Char = 'z'; widget.Invalidate(); app.RunFrame(pace: false);
+        Thread.Sleep(150);          // let the writer drain
 
         Assert.True(app.Stats.DroppedFrames > 0, "test setup must actually drop frames");
-        Assert.Contains(sizes, sz => sz > 40 * 10); // a full-screen frame went out
-        _ = small;
+        // terminal converges on the truth: some write carries the 'z' block
+        Assert.Contains(writes, w => w.Contains('z'));
+        // repair frame is a delta: no whole-screen sweep (the old repair
+        // opened with ESC[H and serialized every row, empty margins too)
+        Assert.True(sizes.Count >= 2, "expected initial + post-stall writes");
+        Assert.DoesNotContain("\x1b[H", sizes.Count > 0 ? writes[^1] : "");
     }
 
-    private sealed class SlowTerminal(List<int> sizes, ManualResetEventSlim gate) : ITerminal
+    private sealed class SlowTerminal(List<int> sizes, ManualResetEventSlim gate,
+        List<string>? writes = null) : ITerminal
     {
         public int Width { get; } = 40;
         public int Height { get; } = 10;
@@ -185,7 +191,11 @@ public class DropResyncTests
         public void Write(ReadOnlySpan<byte> bytes)
         {
             gate.Wait(TimeSpan.FromSeconds(2));
-            lock (sizes) sizes.Add(bytes.Length);
+            lock (sizes)
+            {
+                sizes.Add(bytes.Length);
+                writes?.Add(System.Text.Encoding.UTF8.GetString(bytes));
+            }
         }
 
         public void Enter() { }

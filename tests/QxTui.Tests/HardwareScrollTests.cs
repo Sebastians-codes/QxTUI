@@ -191,3 +191,36 @@ public class ScrollbarColumnSurvivesScrollTests
         Assert.DoesNotContain("│", frame);
     }
 }
+
+public class DropRepairTests
+{
+    [Fact]
+    public void AdoptPrev_RebasesFrontBuffer_MinimalRepairAfterDrop()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false);
+        var a = new CellBuffer(20, 10);
+        var b = new CellBuffer(20, 10);
+        for (int y = 0; y < 10; y++)
+            for (int x = 0; x < 20; x++)
+            {
+                a[x, y] = new Cell { Char = 'a', Fg = 7 };
+                b[x, y] = new Cell { Char = 'b', Fg = 7 };
+            }
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(a, outp);
+        r.Render(b, outp);          // front buffer now = b
+
+        r.AdoptPrev(a);             // terminal actually shows a (drop happened)
+        var out2 = new ArrayBufferWriter<byte>();
+        var res = r.Render(b, out2);
+
+        // repair frame diffs b against a: every cell, but NOT a forced
+        // full-repaint flag (which would also serialize empty margins)
+        Assert.True(res.DirtyCells >= 200, $"delta repair expected, got {res.DirtyCells}");
+        Assert.False(res.FullRepaint);
+
+        var out3 = new ArrayBufferWriter<byte>();
+        var idle = r.Render(b, out3);
+        Assert.Equal(0, idle.DirtyCells); // converged
+    }
+}

@@ -22,6 +22,15 @@ public sealed class FrameStats
     /// the terminal emulator's drain rate — the honest "what you see" number,
     /// as opposed to <see cref="Fps"/> (frames produced).</summary>
     public double PresentedFps;
+    /// <summary>Frames actually rendered+submitted per second (the number
+    /// that matters for smoothness; 'produced' is only the pacer rate).</summary>
+    public double RenderedFps;
+    /// <summary>Mouse events routed per second (is the terminal sending
+    /// motion at drag speed at all?).</summary>
+    public double MouseEventsPerSec;
+    /// <summary>Max tty write latency in the window (ms): high = the
+    /// emulator/pty is not draining, i.e. present-path backpressure.</summary>
+    public double WriterMaxMs;
 
     /// <summary>Frames dropped by the mailbox because a newer frame replaced
     /// them before the writer thread could hand them to the terminal.</summary>
@@ -49,6 +58,7 @@ public sealed class App : IDisposable
 
     private CellBuffer _back;
     private Renderer _renderer;
+    private CellBuffer? _lastSubmitted;
     private readonly FramePresenter? _presenter;
     private bool _needsLayout = true;
     // true by default so RunFrame() works standalone (headless tests);
@@ -57,6 +67,8 @@ public sealed class App : IDisposable
     private long _lastPresentedCount;
     private long _droppedSeen;
     private int _presentedWindowFrames;
+    private int _renderedWindowFrames;
+    private int _mouseWindowEvents;
     private double _presentedWindowStart;
 
     public FrameStats Stats { get; } = new();
@@ -391,6 +403,7 @@ public sealed class App : IDisposable
 
     private void RouteMouse(MouseEvent ev)
     {
+        _mouseWindowEvents++;
         Widget? target = TopMostAt(ev.X, ev.Y);
 
         // press/release bookkeeping FIRST: widgets may consume the event in
@@ -614,6 +627,8 @@ public sealed class App : IDisposable
             // panels, stale HUD fragments during window drags). One full
             // repaint per resize event is cheap; ghost chains are not.
             _back.Resize(w, h, preserve: false);
+            _lastSubmitted?.Dispose();
+            _lastSubmitted = null; // size changes; recreated on next submit
             _renderer.Resize(w, h); // fresh empty prev → diff = whole screen
             InvalidateAll();
             _needsLayout = true;
@@ -706,13 +721,20 @@ public sealed class App : IDisposable
             // those diffs): the next frame after any drop must be FULL.
             // Capture the count BEFORE submitting: a drop caused by this
             // frame's own submit must trigger the NEXT frame's resync.
-            bool resync = _presenter is not null &&
-                          _presenter.DroppedCount != _droppedSeen;
+            bool dropped = _presenter is not null &&
+                           _presenter.DroppedCount != _droppedSeen;
             if (_presenter is not null)
                 _droppedSeen = _presenter.DroppedCount;
 
+            // a drop means the terminal never saw those diffs: re-base the
+            // front buffer on the last SUBMITTED content and repair with a
+            // minimal delta (a full repaint here would flood a terminal
+            // that is already drowning: drop → 40KB → more drops)
+            if (dropped && _lastSubmitted is not null)
+                _renderer.AdoptPrev(_lastSubmitted);
+
             _output.Clear();
-            result = _renderer.Render(_back, _output, forceFull: resync);
+            result = _renderer.Render(_back, _output, forceFull: false);
             if (_presenter is { } presenter)
             {
                 presenter.Submit(_output.WrittenSpan);
@@ -721,6 +743,11 @@ public sealed class App : IDisposable
             {
                 _terminal.Write(_output.WrittenSpan); // synchronous test mode
             }
+            _renderedWindowFrames++;
+
+            _lastSubmitted ??= new CellBuffer(_back.Width, _back.Height);
+            if (_lastSubmitted.Width == _back.Width && _lastSubmitted.Height == _back.Height)
+                _back.Cells.CopyTo(_lastSubmitted.Cells);
 
             Stats.LastBytesWritten = result.BytesWritten;
             Stats.LastDirtyCells = result.DirtyCells;
@@ -791,6 +818,11 @@ public sealed class App : IDisposable
         if (span >= 0.5)
         {
             Stats.PresentedFps = _presentedWindowFrames / span;
+            Stats.RenderedFps = _renderedWindowFrames / span;
+            Stats.MouseEventsPerSec = _mouseWindowEvents / span;
+            Stats.WriterMaxMs = _presenter?.WindowMaxWriteMs ?? 0;
+            _renderedWindowFrames = 0;
+            _mouseWindowEvents = 0;
             _presentedWindowFrames = 0;
             _presentedWindowStart = nowS;
             AdaptToPresented(Stats.PresentedFps);
@@ -808,6 +840,7 @@ public sealed class App : IDisposable
             _overlays[oi].Dispose();
         _presenter?.Dispose();
         _back.Dispose();
+        _lastSubmitted?.Dispose();
         _renderer.Dispose();
         _terminal.Dispose();
     }

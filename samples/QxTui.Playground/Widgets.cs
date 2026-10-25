@@ -224,6 +224,9 @@ internal sealed class StatsPanelWidget : Widget
             $"dropped: {s.DroppedFrames.ToString("N0", CultureInfo.InvariantCulture)}",
             $"static renders: {_staticPanel.RenderCount}",
             $"ball renders:   {_ball.RenderCount.ToString("N0", CultureInfo.InvariantCulture)}",
+            $"rendered: {s.RenderedFps.ToString("F0", CultureInfo.InvariantCulture)} fps"
+            + $" ev/s: {s.MouseEventsPerSec.ToString("F0", CultureInfo.InvariantCulture)}"
+            + $" wmax: {s.WriterMaxMs.ToString("F0", CultureInfo.InvariantCulture)} ms",
         ];
         for (int i = 0; i < lines.Length && r.Y + 1 + i < r.Bottom - 1; i++)
             buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1 + i, lines[i], fg: Theme.Get(ThemeRole.Text));

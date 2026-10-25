@@ -32,6 +32,20 @@ public sealed class FramePresenter : IDisposable
     public long DroppedCount => Volatile.Read(ref _dropped);
     private long _dropped;
 
+    private double _maxWriteMs;
+
+    /// <summary>Max write() latency since last read (ms), read-and-reset.
+    /// High = pty/emulator not draining: present-path backpressure.</summary>
+    public double WindowMaxWriteMs
+    {
+        get
+        {
+            double v = _maxWriteMs;
+            _maxWriteMs = 0;
+            return v;
+        }
+    }
+
     public FramePresenter(Action<ReadOnlySpan<byte>> sink)
     {
         _sink = sink;
@@ -91,7 +105,11 @@ public sealed class FramePresenter : IDisposable
             }
 
             // Blocking write happens HERE, off the frame loop.
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             _sink(buffer.AsSpan(0, length));
+            double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0
+                        / System.Diagnostics.Stopwatch.Frequency;
+            if (ms > _maxWriteMs) _maxWriteMs = ms;
             Interlocked.Increment(ref _presented);
 
             ArrayPool<byte>.Shared.Return(buffer);

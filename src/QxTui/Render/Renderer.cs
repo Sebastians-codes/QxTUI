@@ -66,6 +66,21 @@ public sealed class Renderer : IDisposable
     /// </summary>
     public void Resync() => _resync = true;
 
+    /// <summary>Adopt `content` as what the terminal actually shows (copy
+    /// into the front buffer). Used after DROPPED frames: the terminal
+    /// never applied them, so diffing against the last RENDERED buffer
+    /// would skip cells it still needs — the old fix was a full repaint
+    /// (40KB), which floods exactly when the terminal is already
+    /// struggling (drop → full frame → more drops). Re-diffing against
+    /// the last SUBMITTED content repairs with a minimal delta instead.</summary>
+    public void AdoptPrev(CellBuffer content)
+    {
+        if (content.Width != _prev.Width || content.Height != _prev.Height)
+            return;
+        content.Cells.CopyTo(_prev.Cells);
+        _resync = false;
+    }
+
     /// <summary>Resize the prev buffer to match a content-preserving back
     /// buffer: prev becomes a copy of back, so the next diff only reports
     /// cells that widgets actually re-render (partial repaint on resize).</summary>

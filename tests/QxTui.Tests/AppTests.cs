@@ -305,9 +305,11 @@ public class AppTests
 
 public sealed class BlockWidgetPublic(char c, int fg) : Widget
 {
+    public char Char = c;
+
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
-        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = c, Fg = fg, Bg = -1 });
+        buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = Char, Fg = fg, Bg = -1 });
     }
 }
