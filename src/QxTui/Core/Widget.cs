@@ -141,6 +141,12 @@ public abstract class Widget
     /// <summary>Receive click callbacks (OnMouse release inside Rect).</summary>
     public bool Clickable { get; set; }
 
+    /// <summary>Can receive keyboard focus (Tab cycle, click-to-focus,
+    /// App.Focus). Focused widgets get keys before App.OnKey.</summary>
+    public bool Focusable { get; set; }
+
+    public bool Focused => App?.Focused == this;
+
     /// <summary>True while the pointer is over this widget (motion events
     /// must be enabled; the App maintains this and invalidates on change).</summary>
     public bool Hovered { get; internal set; }

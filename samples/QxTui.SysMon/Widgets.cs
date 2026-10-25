@@ -2,6 +2,7 @@ using System.Globalization;
 using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Render;
+using QxTui.Widgets;
 
 namespace QxTui.SysMon;
 
@@ -265,9 +266,36 @@ internal sealed class ProcWidget : Widget
     private readonly Dictionary<int, double> _smoothCpu = new(256);
     private List<LinuxProc.ProcRow> _rows = [];
     private long _lastSampleTs;
+    private readonly ListView _list;
     public bool Paused;
 
-    public ProcWidget() => Tick(TimeSpan.FromSeconds(1)); // 1Hz: /proc scan is the dominant cost
+    public ProcWidget()
+    {
+        // virtualized: 2000+ processes, only visible rows ever painted
+        _list = new ListView(() => _rows.Count)
+        {
+            RenderRow = (buffer, clip, rect, index, selected) =>
+            {
+                var p = _rows[index];
+                int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent * Environment.ProcessorCount));
+                if (selected)
+                    buffer.FillRect(rect.X, rect.Y, rect.W, rect.H,
+                        new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+                buffer.WriteTextClipped(clip, rect.X + 2, rect.Y,
+                    string.Create(CultureInfo.InvariantCulture,
+                        $"{p.Pid,7} {p.State,1} {p.CpuPercent,5:F1} {Format.CompactKiB(p.MemKb),7}  "),
+                    fg: selected ? Theme.Get(ThemeRole.Title) : Theme.Get(ThemeRole.Text));
+                buffer.WriteTextClipped(clip, rect.X + 28, rect.Y, p.Name, fg: cpuColor);
+            },
+        };
+        // header occupies rows 0-1; spacer then virtualized list below
+        var headerSpacer = new ContainerWidget();
+        AddChild(headerSpacer);
+        headerSpacer.Node.Height = 2;
+        AddChild(_list);
+        _list.Node.Grow = 1f;
+        Tick(TimeSpan.FromSeconds(1)); // 1Hz: /proc scan is the dominant cost
+    }
 
     public override void Render(CellBuffer buffer)
     {
@@ -300,24 +328,12 @@ internal sealed class ProcWidget : Widget
                 .Select(row => row with { CpuPercent = _smoothCpu.GetValueOrDefault(row.Pid) })
                 .OrderByDescending(row => row.CpuPercent)
                 .ToList();
+            _list.Invalidate();
         }
 
+        // header row inside the frame, list lives below it
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"{"PID",7} {"S",1} {"CPU%",5} {"MEM",7}  NAME", fg: Theme.Dim, bold: true);
-
-        int maxRows = r.H - 4;
-        for (int i = 0; i < _rows.Count && i < maxRows; i++)
-        {
-            var p = _rows[i];
-            int y = r.Y + 2 + i;
-            int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent * Environment.ProcessorCount));
-
-            buffer.WriteTextClipped(Clip, r.X + 2, y,
-                string.Create(CultureInfo.InvariantCulture,
-                    $"{p.Pid,7} {p.State,1} {p.CpuPercent,5:F1} {Format.CompactKiB(p.MemKb),7}  "),
-                fg: Theme.Text);
-            buffer.WriteTextClipped(Clip, r.X + 28, y, p.Name, fg: cpuColor);
-        }
     }
 }
 

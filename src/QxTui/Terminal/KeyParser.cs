@@ -10,6 +10,8 @@ public enum Key
     Home,
     End,
     Delete,
+    PageUp,
+    PageDown,
     Backspace,
     Tab,
     Enter,
@@ -40,6 +42,7 @@ public sealed class KeyParser
     private readonly Queue<MouseEvent> _mouse = new(4);
     private readonly byte[] _params = new byte[48];
     private int _plen;
+    private int _param0;
     private bool _isMouse;
     private State _state = State.Ground;
 
@@ -57,6 +60,7 @@ public sealed class KeyParser
                     case (byte)'[':
                         _state = State.Csi;
                         _plen = 0;
+                        _param0 = 0;
                         _isMouse = false;
                         break;
                     case (byte)'O':
@@ -80,7 +84,9 @@ public sealed class KeyParser
                 {
                     if (_plen < _params.Length)
                         _params[_plen++] = b;
-                    break; // parameter byte
+                    if (b >= '0' && b <= '9' && _plen <= 3)
+                        _param0 = _param0 * 10 + (b - '0'); // first numeric param
+                    break;
                 }
 
                 _state = State.Ground;
@@ -91,7 +97,7 @@ public sealed class KeyParser
                     ParseMouse(b);
                 else
                 {
-                    var ev = Translate(b);
+                    var ev = Translate(b, _param0);
                     if (ev.Key != Key.None)
                         _keys.Enqueue(ev);
                 }
@@ -101,7 +107,7 @@ public sealed class KeyParser
                 _state = State.Ground;
                 if (b is >= 0x40 and <= 0x7e)
                 {
-                    var ev = Translate(b);
+                    var ev = Translate(b, 0);
                     if (ev.Key != Key.None)
                         _keys.Enqueue(ev);
                 }
@@ -190,7 +196,7 @@ public sealed class KeyParser
         }
     }
 
-    private static KeyEvent Translate(byte final) => final switch
+    private static KeyEvent Translate(byte final, int param0) => final switch
     {
         (byte)'A' => KeyEvent.Of(Key.Up),
         (byte)'B' => KeyEvent.Of(Key.Down),
@@ -198,7 +204,15 @@ public sealed class KeyParser
         (byte)'D' => KeyEvent.Of(Key.Left),
         (byte)'H' => KeyEvent.Of(Key.Home),
         (byte)'F' => KeyEvent.Of(Key.End),
-        (byte)'~' => KeyEvent.Of(Key.Delete), // reached with params like 3~
+        (byte)'~' => param0 switch
+        {
+            1 or 7 => KeyEvent.Of(Key.Home),
+            3 => KeyEvent.Of(Key.Delete),
+            4 or 8 => KeyEvent.Of(Key.End),
+            5 => KeyEvent.Of(Key.PageUp),
+            6 => KeyEvent.Of(Key.PageDown),
+            _ => KeyEvent.Of(Key.None),
+        },
         _ => KeyEvent.Of(Key.None),
     };
 }

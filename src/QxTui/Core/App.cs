@@ -243,6 +243,30 @@ public sealed class App : IDisposable
         InvalidateAll();
     }
 
+    /// <summary>The widget receiving keyboard input, if any.</summary>
+    public Widget? Focused { get; private set; }
+
+    /// <summary>Move keyboard focus (null clears). Invalidates both ends so
+    /// cursor/highlight states repaint.</summary>
+    public void Focus(Widget? widget)
+    {
+        if (ReferenceEquals(Focused, widget))
+            return;
+        Focused?.Invalidate();
+        Focused = widget;
+        Focused?.Invalidate();
+    }
+
+    private void CycleFocus()
+    {
+        var focusable = _widgets.Where(w => w.Focusable).ToList();
+        if (focusable.Count == 0)
+            return;
+
+        int idx = Focused is { } cur ? focusable.IndexOf(cur) : -1;
+        Focus(focusable[(idx + 1) % focusable.Count]);
+    }
+
     private Widget? _hovered;
 
     private Widget? TopMostAt(int x, int y)
@@ -282,6 +306,9 @@ public sealed class App : IDisposable
             target.Pressed = true;
             target.Invalidate();
         }
+
+        if (ev.Kind == MouseKind.Press && target is { Focusable: true })
+            Focus(target); // click-to-focus
         else if (ev.Kind == MouseKind.Release)
         {
             clicked = _pressed;
@@ -430,6 +457,18 @@ public sealed class App : IDisposable
             // modal overlay gets first chance at keys
             if (_overlay is { } overlayKeys && overlayKeys.HandleKey(keyEvent))
                 continue;
+
+            // Tab cycles focus among focusable widgets
+            if (keyEvent.Key == Key.Tab)
+            {
+                CycleFocus();
+                continue;
+            }
+
+            // focused widget gets keys before the app-level handler
+            if (Focused is { } focused && focused.HandleKey(keyEvent))
+                continue;
+
             if (OnKey is { } keyHandler && !keyHandler(keyEvent))
                 _running = false;
         }
