@@ -5,6 +5,8 @@ public enum MouseKind
     Press,
     Release,
     Motion,
+    WheelUp,
+    WheelDown,
 }
 
 /// <summary>Terminal mouse event in 0-based cell coordinates.</summary>

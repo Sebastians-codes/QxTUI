@@ -72,8 +72,17 @@ internal sealed class BallWidget : Widget
     private float _px = 0.3f, _py = 0.4f, _vx = 0.55f, _vy = 0.4f;
     private readonly Queue<(int X, int Y)> _trail = new();
     private long _lastTs = Environment.TickCount64;
+    private readonly Signal<float> _speed;
+    private Rect _lastRect;
 
-    public BallWidget() => Tick(TimeSpan.FromMilliseconds(10)); // 100Hz
+    public BallWidget(Signal<float> speed)
+    {
+        _speed = speed;
+        Tick(TimeSpan.FromMilliseconds(10)); // 100Hz
+    }
+
+    /// <summary>0..1 slider value → 0.2x..3.0x ball speed.</summary>
+    private float Mult => 0.2f + _speed.Value * 2.8f;
 
     public override void Render(CellBuffer buffer)
     {
@@ -82,16 +91,24 @@ internal sealed class BallWidget : Widget
         if (r.W < 6 || r.H < 4) return;
 
         int pw = r.W - 2, ph = (r.H - 2) * 2;
-        if (_surface is null || _surface.PixelWidth != pw || _surface.PixelHeight != ph)
+        // ANY rect change (size OR position) needs a new surface: a stale
+        // origin paints the ball into the wrong place, and stale trail
+        // points from the old coordinate space show up as lone specks
+        if (_surface is null || _lastRect != r)
+        {
             _surface = new HalfBlockSurface(buffer, r.X + 1, r.Y + 1, pw, ph,
                 new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+            _trail.Clear();
+            _lastRect = r;
+        }
 
         long now = Environment.TickCount64;
         double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);
         _lastTs = now;
 
-        _px += _vx * (float)dt;
-        _py += _vy * (float)dt;
+        float m = Mult;
+        _px += _vx * m * (float)dt;
+        _py += _vy * m * (float)dt;
         if (_px is < 0 or > 1) { _vx = -_vx; _px = Math.Clamp(_px, 0, 1); }
         if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
 

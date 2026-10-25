@@ -54,12 +54,17 @@ int themeIdx = 0;
 var sineHist = new RingHistory(120);
 var walkHist = new RingHistory(120);
 
+var speed = new Signal<float>(0.3f);
+
 var hud = new HudWidget(() => themeNames[themeIdx], fpsSig);
-var ball = new BallWidget();
+var ball = new BallWidget(speed);
 var staticPanel = new StaticPanelWidget();
 var stats = new StatsPanelWidget(staticPanel, ball);
 
 ThemeRole filledRole = ThemeRole.Accent;
+
+var speedLabel = new LabelWidget(speed, v => $"speed {0.2 + v * 2.8:F1}x");
+var speedSlider = new SliderWidget(speed, ThemeRole.Warning);
 
 var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);
 var walkSpark = new SparklineWidget(walkHist, ThemeRole.Success, autoFloor: 10f);
@@ -83,7 +88,7 @@ var filledDemo = new ButtonWidget(
 };
 
 var help = new LabelWidget(() =>
-    " t: theme   [ ]: fps   o/click: popup (1-4 fps inside)   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+    " t: theme   [ ]: fps   o/click: popup   drag slider: ball speed   q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
 string[] PopupLines() =>
 [
@@ -142,7 +147,10 @@ app.SetRoot(UI.Column(1,
             new LabelWidget(() => "random walk · auto scale").Height(1),
             walkSpark.Height(2))
         .Grow(2),
-        ball.Grow(3))
+        UI.Column(1,
+            ball.Grow(1),
+            UI.Row(1, speedLabel.Width(14), speedSlider.Grow(1)).Height(1))
+        .Grow(3))
     .Grow(1),
     UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
         UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
@@ -154,6 +162,8 @@ app.AddWidget(hud)
    .AddWidget(sineSpark)
    .AddWidget(walkSpark)
    .AddWidget(ball)
+   .AddWidget(speedLabel)
+   .AddWidget(speedSlider)
    .AddWidget(staticPanel)
    .AddWidget(stats)
    .AddWidget(help);

@@ -147,9 +147,15 @@ public sealed class KeyParser
             acc = 0;
         }
 
-        var kind = final == (byte)'m'
-            ? MouseKind.Release
-            : (btn & 32) != 0 ? MouseKind.Motion : MouseKind.Press;
+        MouseKind kind;
+        if (final == (byte)'m')
+            kind = MouseKind.Release;
+        else if ((btn & 64) != 0)
+            kind = (btn & 1) == 0 ? MouseKind.WheelUp : MouseKind.WheelDown;
+        else if ((btn & 32) != 0)
+            kind = MouseKind.Motion;
+        else
+            kind = MouseKind.Press;
 
         _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind));
     }

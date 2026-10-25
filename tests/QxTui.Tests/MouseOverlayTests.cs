@@ -1,3 +1,4 @@
+using QxTui.Reactive;
 using QxTui.Animation;
 using QxTui.Core;
 using QxTui.Layout;
@@ -618,5 +619,127 @@ public class PressFlashTests
 
         Assert.False(btn.FlashActive);
         Assert.Equal(idleBg, app.Back[10, 2].Bg); // back to idle
+    }
+}
+
+public class SliderTests
+{
+    private static (App app, FakeTerminal term, SliderWidget slider, Signal<float> sig) Make()
+    {
+        var sig = new Signal<float>(0.5f);
+        var slider = new SliderWidget(sig);
+        var root = UI.Column(0, slider.Height(1));
+        var term = new FakeTerminal(22, 3);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame(); // layout: slider rect = (0,0,22,1)
+        return (app, term, slider, sig);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void Click_JumpsValue()
+    {
+        var (app, term, slider, sig) = Make();
+
+        // track: x=1..1+track(19); click at x=11 → frac ≈ (11-1)/19 ≈ 0.53
+        Mouse(term, "\x1b[<0;12;1M\x1b[<0;12;1m");
+        app.RunFrame();
+
+        Assert.InRange(sig.Value, 0.45f, 0.60f);
+    }
+
+    [Fact]
+    public void Drag_CapturesOutsideRect()
+    {
+        var (app, term, slider, sig) = Make();
+
+        Mouse(term, "\x1b[<0;3;1M");          // press near left
+        app.RunFrame();
+        Assert.InRange(sig.Value, 0f, 0.15f);
+        Assert.True(slider.Pressed);
+
+        Mouse(term, "\x1b[<35;12;3M");        // motion OUTSIDE the 1-row rect
+        app.RunFrame();
+        Assert.InRange(sig.Value, 0.45f, 0.60f); // capture kept the drag alive
+
+        Mouse(term, "\x1b[<0;12;3m");         // release
+        app.RunFrame();
+        Mouse(term, "\x1b[<35;20;3M");        // motion after release: ignored
+        app.RunFrame();
+        Assert.InRange(sig.Value, 0.45f, 0.60f);
+    }
+
+    [Fact]
+    public void ExternalWrite_Repaints()
+    {
+        var (app, term, slider, sig) = Make();
+        long before = slider.RenderCount;
+
+        sig.Set(0.9f);
+        app.RunFrame();
+
+        Assert.True(slider.RenderCount > before);
+    }
+}
+
+public class WheelTests
+{
+    [Fact]
+    public void Parser_DecodesWheelDirections()
+    {
+        var parser = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<64;5;5M\x1b[<65;9;9M"))
+            parser.Feed(b);
+
+        Assert.True(parser.TryReadMouse(out var up));
+        Assert.Equal(MouseKind.WheelUp, up.Kind);
+        Assert.Equal(new Point(4, 4).X, up.X);
+
+        Assert.True(parser.TryReadMouse(out var down));
+        Assert.Equal(MouseKind.WheelDown, down.Kind);
+        Assert.Equal(8, down.X);
+    }
+
+    [Fact]
+    public void Slider_HoverPlusScroll_AdjustsValue()
+    {
+        var sig = new Signal<float>(0.5f);
+        var slider = new SliderWidget(sig);
+        var root = UI.Column(0, slider.Height(1));
+        var term = new FakeTerminal(22, 3);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        // wheel up x3 over the slider (no press, no drag)
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<64;6;1M\x1b[<64;6;1M\x1b[<64;6;1M"))
+            term.QueueInput(b);
+        app.RunFrame();
+        Assert.Equal(0.65f, sig.Value, precision: 3);
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<65;6;1M"))
+            term.QueueInput(b);
+        app.RunFrame();
+        Assert.Equal(0.60f, sig.Value, precision: 3);
+    }
+
+    [Fact]
+    public void Wheel_ClampsAtEnds()
+    {
+        var sig = new Signal<float>(0.98f);
+        var slider = new SliderWidget(sig);
+        var root = UI.Column(0, slider.Height(1));
+        var term = new FakeTerminal(22, 3);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<64;6;1M\x1b[<64;6;1M\x1b[<64;6;1M"))
+            term.QueueInput(b);
+        app.RunFrame();
+        Assert.Equal(1f, sig.Value);
     }
 }

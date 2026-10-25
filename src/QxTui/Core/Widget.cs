@@ -113,6 +113,10 @@ public abstract class Widget
     /// the momentary "pushed down" state. Maintained by the App.</summary>
     public bool Pressed { get; internal set; }
 
+    /// <summary>While pressed, receive ALL mouse events even outside the
+    /// rect (slider drags).</summary>
+    public bool CapturesMouse { get; set; }
+
     private TimeSpan _flashUntil;
 
     /// <summary>True while a press flash is held. Real clicks press+release

@@ -151,19 +151,23 @@ public sealed class ButtonWidget : Widget
                 break;
 
             case ButtonStyle.Outline:
-                Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, hot);
-                if (down)
-                    buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
-                        new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: down ? Theme.Get(ThemeRole.Title) : hot, bold: true);
-                break;
-
             default:
-                Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, hot);
                 if (down)
-                    buffer.FillRect(r.X + 1, r.Y + 1, r.W - 2, r.H - 2,
-                        new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.Faint) });
-                buffer.WriteTextClipped(Clip, lx, ly, label, fg: down ? Theme.Get(ThemeRole.Title) : hot, bold: true);
+                {
+                    // pressed reads as a momentary filled chip in every
+                    // style — one consistent push-down language, no
+                    // interior-wash flicker inside bordered buttons
+                    for (int y = r.Y; y < r.Bottom; y++)
+                        for (int x = r.X; x < r.Right; x++)
+                            buffer.WriteTextClipped(Clip, x, y, " ", fg: hot, bg: Theme.Get(ThemeRole.Faint));
+                    buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bg: Theme.Get(ThemeRole.Faint), bold: true);
+                }
+                else
+                {
+                    Box.Draw(buffer, r.X, r.Y, r.W, r.H,
+                        _style == ButtonStyle.Outline ? BoxStyles.Single : BoxStyles.Rounded, hot);
+                    buffer.WriteTextClipped(Clip, lx, ly, label, fg: hot, bold: true);
+                }
                 break;
         }
     }
@@ -320,5 +324,82 @@ public sealed class ModalWidget : Widget
 
             ax += 2 + btnW + 1;
         }
+    }
+}
+
+/// <summary>
+/// Horizontal slider bound to a Signal&lt;float&gt; in [0,1].
+/// Click to jump, drag to slide (mouse capture keeps the drag alive even
+/// when the pointer leaves the row). Knob brightens on hover/press.
+/// </summary>
+public sealed class SliderWidget : Widget
+{
+    private readonly Signal<float> _value;
+    private readonly ThemeRole _fg;
+    private bool _dragging;
+
+    public SliderWidget(Signal<float> value, ThemeRole fg = ThemeRole.Accent)
+    {
+        _value = value;
+        _fg = fg;
+        Clickable = true;
+        CapturesMouse = true;
+        OnSignal(value); // external writes repaint too
+    }
+
+    public float Value => _value.Value;
+
+    /// <summary>Value change per wheel notch.</summary>
+    public float WheelStep { get; set; } = 0.05f;
+
+    public override bool OnMouse(MouseEvent ev)
+    {
+        switch (ev.Kind)
+        {
+            case MouseKind.Press:
+                _dragging = true;
+                SetFromX(ev.X);
+                return true;
+            case MouseKind.Motion:
+                if (_dragging) SetFromX(ev.X);
+                return _dragging;
+            case MouseKind.WheelUp:
+                Nudge(+WheelStep); // hover + scroll adjusts, no click needed
+                return true;
+            case MouseKind.WheelDown:
+                Nudge(-WheelStep);
+                return true;
+            default: // release
+                _dragging = false;
+                return true;
+        }
+    }
+
+    private void Nudge(float delta) =>
+        _value.Set(Math.Clamp(_value.Value + delta, 0f, 1f));
+
+    private void SetFromX(int x)
+    {
+        var r = Rect;
+        int track = Math.Max(1, r.W - 3); // 1-cell inset each side + knob
+        float frac = Math.Clamp((x - r.X - 1) / (float)track, 0f, 1f);
+        _value.Set(frac);
+    }
+
+    public override void Render(CellBuffer buffer)
+    {
+        var r = Rect;
+        buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
+        int y = r.Y + r.H / 2;
+        int track = Math.Max(1, r.W - 3);
+        int pos = r.X + 1 + (int)(_value.Value * track);
+
+        int col = Theme.Get(_fg);
+        int hot = Theme.Get(Hovered || Pressed ? ThemeRole.Title : _fg);
+
+        for (int x = r.X + 1; x <= r.X + 1 + track; x++)
+            buffer.WriteTextClipped(Clip, x, y, "─", fg: x <= pos ? col : Theme.Get(ThemeRole.Faint));
+
+        buffer.WriteTextClipped(Clip, pos, y, "█", fg: hot, bold: true);
     }
 }

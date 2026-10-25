@@ -160,6 +160,9 @@ public sealed class App : IDisposable
 
     private Widget? TopMostAt(int x, int y)
     {
+        // a dragging widget captures all mouse events until release
+        if (_pressed is { CapturesMouse: true } cap)
+            return cap;
         if (_overlay is not null)
             return _overlay;
         for (int i = _widgets.Count - 1; i >= 0; i--)
@@ -182,45 +185,40 @@ public sealed class App : IDisposable
     {
         Widget? target = TopMostAt(ev.X, ev.Y);
 
-        if (ev.Kind == MouseKind.Motion && !ReferenceEquals(target, _hovered))
-        {
-            ResetHover();
-            _hovered = target;
-            if (target is not null)
-            {
-                target.Hovered = true;
-                target.Invalidate(); // border/color reacts to hover
-            }
-        }
-
-        if (target is null)
-        {
-            ReleasePressed();
-            return;
-        }
-        if (target.OnMouse(ev)) return;
-
-        if (ev.Kind == MouseKind.Press && target.Clickable)
+        // press/release bookkeeping FIRST: widgets may consume the event in
+        // OnMouse (sliders do), and capture/Pressed/flash must still work
+        Widget? clicked = null;
+        if (ev.Kind == MouseKind.Press && target is { Clickable: true })
         {
             ReleasePressed();
             _pressed = target;
             target.Pressed = true;
             target.Invalidate();
-            return;
+        }
+        else if (ev.Kind == MouseKind.Release)
+        {
+            clicked = _pressed;
+            ReleasePressed();
         }
 
-        if (ev.Kind == MouseKind.Release)
+        if (target is null) return;
+
+        if (ev.Kind == MouseKind.Motion && !ReferenceEquals(target, _hovered))
         {
-            var clicked = _pressed;
-            ReleasePressed();
-            if (target.Clickable && ReferenceEquals(clicked, target))
-            {
-                target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
-                target.FlashPressed(); // hold the pushed-down look ~120ms
-                // a click almost always mutates rendered state: repaint the
-                // clicked widget immediately, don't wait for hover to change
-                target.Invalidate();
-            }
+            ResetHover();
+            _hovered = target;
+            target.Hovered = true;
+            target.Invalidate(); // border/color reacts to hover
+        }
+
+        if (target.OnMouse(ev)) return;
+
+        if (ev.Kind == MouseKind.Release &&
+            ReferenceEquals(clicked, target) && target.Clickable)
+        {
+            target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+            target.FlashPressed(); // hold the pushed-down look ~120ms
+            target.Invalidate();
         }
     }
 
