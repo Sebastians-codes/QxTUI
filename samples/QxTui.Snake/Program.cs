@@ -43,20 +43,7 @@ app.AddWidget(hud).AddWidget(game).AddWidget(help);
 
 app.OnKey = ev =>
 {
-    Direction? turn = ev.Key switch
-    {
-        Key.Up => Direction.Up,
-        Key.Down => Direction.Down,
-        Key.Left => Direction.Left,
-        Key.Right => Direction.Right,
-        Key.Char when ev.Char is 'w' or 'W' => Direction.Up,
-        Key.Char when ev.Char is 's' or 'S' => Direction.Down,
-        Key.Char when ev.Char is 'a' or 'A' => Direction.Left,
-        Key.Char when ev.Char is 'd' or 'D' => Direction.Right,
-        _ => null,
-    };
-
-    if (turn is { } d)
+    if (InputMap.ToDirection(ev) is { } d)
     {
         game.Turn(d);
         return true;

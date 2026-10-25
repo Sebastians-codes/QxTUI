@@ -1,3 +1,4 @@
+using QxTui.Terminal;
 using QxTui.Snake;
 
 namespace QxTui.Tests;
@@ -186,5 +187,49 @@ public class SnakeInputBufferTests
         m.Step();
         Assert.Equal(Direction.Right, m.Dir);
         Assert.True(m.Alive);
+    }
+}
+
+public class InputMapTests
+{
+    private static Direction? Map(char c) =>
+        QxTui.Snake.InputMap.ToDirection(KeyEvent.OfChar(c));
+
+    [Theory]
+    [InlineData('h', Direction.Left)]
+    [InlineData('j', Direction.Down)]
+    [InlineData('k', Direction.Up)]
+    [InlineData('l', Direction.Right)]
+    [InlineData('H', Direction.Left)]
+    [InlineData('J', Direction.Down)]
+    [InlineData('K', Direction.Up)]
+    [InlineData('L', Direction.Right)]
+    public void VimKeys_MapLikeVi(char c, Direction expected) =>
+        Assert.Equal(expected, Map(c));
+
+    [Theory]
+    [InlineData('w', Direction.Up)]
+    [InlineData('a', Direction.Left)]
+    [InlineData('s', Direction.Down)]
+    [InlineData('d', Direction.Right)]
+    public void Wasd_StillWorks(char c, Direction expected) =>
+        Assert.Equal(expected, Map(c));
+
+    [Fact]
+    public void Arrows_StillWork()
+    {
+        Assert.Equal(Direction.Up, QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Up)));
+        Assert.Equal(Direction.Down, QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Down)));
+        Assert.Equal(Direction.Left, QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Left)));
+        Assert.Equal(Direction.Right, QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Right)));
+    }
+
+    [Fact]
+    public void NonMovementKeys_AreNull()
+    {
+        Assert.Null(Map('q'));
+        Assert.Null(Map(' '));
+        Assert.Null(QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Space)));
+        Assert.Null(QxTui.Snake.InputMap.ToDirection(KeyEvent.Of(QxTui.Terminal.Key.Enter)));
     }
 }

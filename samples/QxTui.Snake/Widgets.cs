@@ -178,6 +178,6 @@ internal sealed class HelpWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
         buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
-            " arrows/wasd: turn   space: pause   enter: restart   q: quit ", fg: 250, bg: 236);
+            " arrows/wasd/hjkl: turn   space: pause   enter: restart   q: quit ", fg: 250, bg: 236);
     }
 }
