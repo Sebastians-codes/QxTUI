@@ -78,6 +78,10 @@ internal sealed class BallWidget : Widget
     private long _lastTs = Environment.TickCount64;
     private readonly Signal<float> _speed;
 
+    /// <summary>Test hook: pixel-canvas height in square pixels.</summary>
+    public int SurfacePixelHeight => _probeHeight;
+    private int _probeHeight;
+
     public BallWidget(Signal<float> speed)
     {
         _speed = speed;
@@ -102,12 +106,14 @@ internal sealed class BallWidget : Widget
 
         // surface fills the inset area ABOVE the child row (last inner row
         // belongs to children, e.g. the slider)
-        // framework-cached canvas: rebuilt on any rect change; the rebuilt
-        // flag is the cue to drop trail points from the old coordinate space
-        var (surface, rebuilt) = Pixels(r,
+        // framework-cached canvas, rebuilt on any rect change. Height is
+        // r.H-1 so the surface STOPS ABOVE the slider strip: the ball
+        // bounces off the UI strip instead of sliding underneath it
+        var (surface, rebuilt) = Pixels(new Rect(r.X, r.Y, r.W, r.H - 1),
             new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
         if (rebuilt)
             _trail.Clear();
+        _probeHeight = surface.PixelHeight;
 
         long now = Environment.TickCount64;
         double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);

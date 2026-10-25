@@ -245,3 +245,26 @@ public class OpaqueStripTests
             Assert.Equal(Theme.Night.PanelBg, app.Back[x, 0].Bg); // fully opaque
     }
 }
+
+public class BallStripCollisionTests
+{
+    [Fact]
+    public void Surface_StopsAboveChildStrip()
+    {
+        // the ball's pixel canvas must exclude the bottom strip row so the
+        // ball reads as colliding with the UI instead of passing under it
+        var speed = new Signal<float>(0.5f);
+        var ball = new QxTui.Playground.BallWidget(speed);
+        var row = new ContainerWidget();
+        row.Node.Height = 1;
+        ball.AddChild(row);
+
+        var root = UI.Column(0, ball.Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        // rect h=12 → inner rows 10 → surface rows must be 9 (strip excluded)
+        Assert.Equal(9 * 2, ball.SurfacePixelHeight);
+    }
+}
