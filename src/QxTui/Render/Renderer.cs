@@ -162,6 +162,7 @@ public sealed class Renderer : IDisposable
             for (int x = rect.X; x < rect.Right; x++)
             {
                 ref var cell = ref back[x, y];
+                if (cell.WidePad) continue; // wide char already advanced the cursor
 
                 if (cell.Fg != curFg || cell.Bg != curBg || (cell.Bold ? 1 : 0) != curBold)
                 {
@@ -170,12 +171,16 @@ public sealed class Renderer : IDisposable
                     curFg = cell.Fg; curBg = cell.Bg; curBold = cell.Bold ? 1 : 0;
                 }
 
-                textScratch[textLen++] = cell.Char;
-                if (textLen == textScratch.Length)
+                int need = char.IsHighSurrogate(cell.Char) ? 2 : 1;
+                if (textLen + need > textScratch.Length)
                 {
-                    w.WriteText(textScratch);
+                    w.WriteText(textScratch[..textLen]);
                     textLen = 0;
                 }
+
+                textScratch[textLen++] = cell.Char;
+                if (need == 2 && x + 1 < back.Width)
+                    textScratch[textLen++] = back[x + 1, y].Char; // low surrogate
             }
 
             // End of row: flush pending text BEFORE the next row's cursor move,

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Buffers;
 
 namespace QxTui.Render;
@@ -79,6 +80,9 @@ public sealed class CellBuffer : IDisposable
     /// Write text clipped to BOTH the buffer bounds and <paramref name="clip"/>
     /// (a widget's rect). Widgets must never paint outside their own region.
     /// </summary>
+    /// <summary>Rune-aware clipped write: 2-column runes occupy two cells
+    /// (second marked WidePad), combining marks are skipped, and a wide rune
+    /// never straddles the clip edge.</summary>
     public int WriteTextClipped(RenderClip clip, int x, int y, ReadOnlySpan<char> text,
         int fg = -1, int bg = -1, bool bold = false)
     {
@@ -86,20 +90,64 @@ public sealed class CellBuffer : IDisposable
             return 0;
 
         int written = 0;
-        for (int i = 0; i < text.Length; i++)
+        int cx = x;
+        int i = 0;
+        while (i < text.Length)
         {
-            int cx = x + i;
-            if (cx < 0 || cx < clip.X) continue;
-            if (cx >= Width || cx >= clip.Right) break;
+            if (Rune.DecodeFromUtf16(text[i..], out var rune, out int consumed)
+                != System.Buffers.OperationStatus.Done)
+            {
+                rune = new Rune('?');
+                consumed = 1;
+            }
+
+            int w = UnicodeWidth.Of(rune);
+            i += consumed;
+            if (w == 0) continue; // combining/zwj: attaches, no column
+
+            if (cx < 0 || cx < clip.X) { cx += w; continue; }
+            if (cx + w > Width || cx + w > clip.Right) break; // never split a wide rune
 
             ref var cell = ref _cells[y * Width + cx];
-            cell.Char = text[i];
+            cell.Char = consumed == 2 ? text[i - 2] : (char)rune.Value; // high surrogate or BMP
+            cell.WidePad = false;
             cell.Fg = fg;
             cell.Bg = bg;
             cell.Bold = bold;
-            written++;
+
+            if (w == 2)
+            {
+                ref var pad = ref _cells[y * Width + cx + 1];
+                pad.Char = consumed == 2 ? text[i - 1] : '\0'; // low surrogate or marker
+                pad.WidePad = true;
+                pad.Fg = fg;
+                pad.Bg = bg;
+                pad.Bold = bold;
+            }
+
+            cx += w;
+            written += w;
         }
         return written;
+    }
+
+    /// <summary>Word-wrapped write inside the clip; returns lines written.</summary>
+    public int WriteTextWrapped(RenderClip clip, int x, int y, ReadOnlySpan<char> text,
+        int fg = -1, int bg = -1, bool bold = false, int maxLines = int.MaxValue)
+    {
+        int right = Math.Min(clip.Right, Width);
+        int width = right - Math.Max(x, clip.X);
+        if (width <= 0) return 0;
+
+        var lines = TextWrap.Wrap(text, width);
+        int n = 0;
+        foreach (var line in lines)
+        {
+            if (n >= maxLines || y + n >= clip.Bottom || y + n >= Height) break;
+            WriteTextClipped(clip, x, y + n, line.Span, fg, bg, bold);
+            n++;
+        }
+        return n;
     }
 
     /// <summary>Resize. With preserve:true, overlapping content is kept —

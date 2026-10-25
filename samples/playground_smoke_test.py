@@ -74,6 +74,7 @@ checks = {
     "square pixels":    "square pixels" in text,
     "isolation panel":  "damage isolation" in text,
     "stats panel":      "static renders: 1" in screen or "static renders:" in text,
+    "unicode wrap":     "日本語" in text,
     "help line":        "t: theme" in text,
     "popup opens":      "modals swallow" in text,
     "popup fps buttons": "240fps" in text,

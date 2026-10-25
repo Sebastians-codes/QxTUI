@@ -63,6 +63,10 @@ var stats = new StatsPanelWidget(staticPanel, ball);
 
 ThemeRole filledRole = ThemeRole.Accent;
 
+var wrapDemo = new TextWidget(() =>
+    "wrapping: 日本語のテキスト flows by 2-col runes, emoji 👍 = 2 cols, " +
+    "ZWJ family 👨‍👩‍ = one glyph, combining é = zero — resize to reflow.");
+
 var speedLabel = new LabelWidget(speed, v =>
 {
     float m = BallWidget.MultFor(v);
@@ -149,7 +153,8 @@ app.SetRoot(UI.Column(1,
             new LabelWidget(() => "sine · 20Hz feed · fixed scale").Height(1),
             sineSpark.Height(2),
             new LabelWidget(() => "random walk · auto scale").Height(1),
-            walkSpark.Height(2))
+            walkSpark.Height(2),
+            wrapDemo.Grow(1))
         .Grow(2),
         ball.Grow(3))
     .Grow(1),
@@ -163,6 +168,7 @@ app.AddWidget(hud)
    .AddWidget(feederWired)
    .AddWidget(sineSpark)
    .AddWidget(walkSpark)
+   .AddWidget(wrapDemo)
    .AddWidget(ball)
    .AddWidget(speedLabel)
    .AddWidget(speedSlider)

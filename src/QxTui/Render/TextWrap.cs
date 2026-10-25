@@ -3,11 +3,11 @@ using System.Text;
 namespace QxTui.Render;
 
 /// <summary>
-/// Width-aware word wrap. Breaks on spaces, honors explicit newlines,
-/// hard-splits words wider than the column budget, and never places a
-/// 2-column rune where only 1 column remains (the classic CJK ragged-edge
-/// bug). Returns line spans over the input — no per-line string allocs
-/// beyond the list itself (cold path: text layout, not the frame loop).
+/// Width-aware greedy word wrap with unicode line-break opportunities:
+/// after spaces and around wide (CJK) runes, per UAX #14's spirit. Never
+/// splits a wide rune across lines; hard-splits words wider than the
+/// budget; honors explicit newlines; trims trailing spaces.
+/// Cold path (text layout), not the frame loop.
 /// </summary>
 public static class TextWrap
 {
@@ -17,8 +17,8 @@ public static class TextWrap
         if (maxWidth <= 0)
             return lines;
 
-        foreach (var paragraph in SplitLines(text))
-            WrapParagraph(paragraph, maxWidth, lines);
+        foreach (var para in SplitLines(text))
+            WrapParagraph(para, maxWidth, lines);
 
         return lines;
     }
@@ -43,132 +43,72 @@ public static class TextWrap
         List<ReadOnlyMemory<char>> lines)
     {
         var span = paragraph.Span;
-        int lineStart = 0;
-        int used = 0;
-        int? wordStart = null;
-        int wordWidth = 0;
 
-        void FlushLine(int end)
+        void Emit(ReadOnlySpan<char> sp, int start, int end)
         {
-            lines.Add(paragraph.Slice(lineStart, Math.Max(0, end - lineStart)));
+            while (end > start && char.IsWhiteSpace(sp[end - 1])) end--;
+            lines.Add(paragraph.Slice(start, end - start));
         }
 
-        int i = 0;
-        while (i <= span.Length)
+        int lineStart = 0, used = 0, candStart = -1, i = 0;
+
+        while (i < span.Length)
         {
-            if (i == span.Length || char.IsWhiteSpace(span[i]))
+            if (span[i] == '\n')
             {
-                // word boundary: place the pending word if it fits
-                if (wordStart is { } ws)
-                {
-                    if (used + wordWidth > maxWidth && used > 0)
-                    {
-                        FlushLine(TrimEnd(span, lineStart, ws));
-                        lineStart = TrimStart(span, ws, i);
-                        used = WordWidthAt(span, lineStart, i);
-                    }
-                    else
-                    {
-                        used += wordWidth;
-                    }
-                    wordStart = null;
-                    wordWidth = 0;
-                }
-
-                if (i == span.Length)
-                    break;
-
-                // the space itself: counts only mid-line
-                int spaceW = 1;
-                if (used > 0 && used + spaceW <= maxWidth)
-                    used += spaceW;
-                else if (used > 0)
-                {
-                    FlushLine(TrimEnd(span, lineStart, i));
-                    lineStart = i + 1;
-                    used = 0;
-                }
-                else
-                {
-                    lineStart = i + 1;
-                }
+                Emit(span, lineStart, i);
                 i++;
+                lineStart = i;
+                used = 0;
+                candStart = -1;
                 continue;
             }
 
-            // start/extend a word (cluster-aware: combining marks join)
-            if (Rune.DecodeFromUtf16(span[i..], out var rune, out int consumed) != System.Buffers.OperationStatus.Done)
+            if (Rune.DecodeFromUtf16(span[i..], out var rune, out int consumed)
+                != System.Buffers.OperationStatus.Done)
             {
-                consumed = 1;
                 rune = new Rune('?');
+                consumed = 1;
             }
 
             int w = UnicodeWidth.Of(rune);
-            if (w == 0 && wordStart is not null)
+            bool isSpace = char.IsWhiteSpace(span[i]);
+
+            if (isSpace)
             {
-                // combining mark: attaches, no width
-            }
-            else
-            {
-                wordStart ??= i;
-                // hard-split words wider than the budget
-                if (w > maxWidth)
+                if (used > 0 && used + 1 > maxWidth)
                 {
-                    if (used > 0)
-                    {
-                        FlushLine(TrimEnd(span, lineStart, i));
-                        lineStart = i;
-                        used = 0;
-                    }
-                    lines.Add(paragraph.Slice(i, 1));
-                    lineStart = i + consumed;
-                    used = 0;
-                    wordStart = null;
+                    // dangling space at line end: free, but a break point
+                    candStart = i + consumed;
                     i += consumed;
                     continue;
                 }
-
-                if (used + wordWidth + w > maxWidth && used > 0 && wordStart == i)
-                {
-                    FlushLine(TrimEnd(span, lineStart, i));
-                    lineStart = i;
-                    used = 0;
-                }
-                wordWidth += w;
+                candStart = i + consumed;
+                used += 1;
+                i += consumed;
+                continue;
             }
 
-            i += consumed;
-        }
-
-        FlushLine(TrimEnd(span, lineStart, span.Length));
-    }
-
-    private static int TrimEnd(ReadOnlySpan<char> span, int start, int end)
-    {
-        while (end > start && char.IsWhiteSpace(span[end - 1])) end--;
-        return end;
-    }
-
-    private static int TrimStart(ReadOnlySpan<char> span, int start, int end)
-    {
-        while (start < end && char.IsWhiteSpace(span[start])) start++;
-        return start;
-    }
-
-    private static int WordWidthAt(ReadOnlySpan<char> span, int start, int end)
-    {
-        int w = 0;
-        int i = start;
-        while (i < end)
-        {
-            if (Rune.DecodeFromUtf16(span[i..], out var rune, out int consumed) != System.Buffers.OperationStatus.Done)
+            if (w > 0 && used > 0 && used + w > maxWidth)
             {
-                consumed = 1;
-                rune = new Rune('?');
+                int breakAt = candStart > lineStart ? candStart : i;
+                Emit(span, lineStart, breakAt);
+                lineStart = breakAt;
+                while (lineStart < span.Length && char.IsWhiteSpace(span[lineStart]))
+                    lineStart++;
+                i = Math.Max(i, lineStart);
+                used = UnicodeWidth.OfText(span[lineStart..i]);
+                candStart = -1;
+                continue; // re-process this cluster on the fresh line
             }
-            w += UnicodeWidth.Of(rune);
+
+            if (w >= 2)
+                candStart = i + consumed; // break allowed after wide runes
+
+            used += w;
             i += consumed;
         }
-        return w;
+
+        Emit(span, lineStart, span.Length);
     }
 }
