@@ -41,7 +41,7 @@ var help = new LabelWidget("q: quit   r: refresh stats   ↔: resize the termina
 
 // ---- layout tree: flexbox from day one --------------------------------------
 
-var row1 = new LayoutNode { Direction = FlexDirection.Row, Height = 9, Gap = 1 };
+var row1 = new LayoutNode { Direction = FlexDirection.Row, Height = 12, Gap = 1 };
 row1.Add(spinner.Node);      // fixed width
 row1.Add(staticPanel.Node);  // grow: 1
 row1.Add(stats.Node);        // 25%
@@ -296,6 +296,8 @@ file sealed class StatsWidget() : Widget
             $"  full repaint ≈ {fullRepaint.ToString("N0", CultureInfo.InvariantCulture)} B",
             $"dirty cells: {s.LastDirtyCells}  rects: {s.LastDamageRects}",
             $"fps: {s.Fps.ToString("F0", CultureInfo.InvariantCulture)} (target {app.TargetFps})",
+            $"presented: {s.PresentedFps.ToString("F0", CultureInfo.InvariantCulture)} fps (terminal-capped)",
+            $"dropped: {s.DroppedFrames.ToString("N0", CultureInfo.InvariantCulture)}",
             $"work p50: {s.FrameWorkP50Ms.ToString("F2", CultureInfo.InvariantCulture)}ms",
             $"work p99: {s.FrameWorkP99Ms.ToString("F2", CultureInfo.InvariantCulture)}ms",
             $"relayouts: {s.Relayouts}",

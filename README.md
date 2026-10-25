@@ -63,7 +63,13 @@ headless-testable. All I/O goes through `IBufferWriter<byte>` / `ITerminal`.
 
 Frame loop order: input → resize → animation tick → layout (if needed) →
 dirty widgets paint the retained back buffer → diff/damage/coalesce →
-ONE write (synchronized output) → pace.
+ONE submit to the FramePresenter (a dedicated writer thread owns the
+blocking tty write; the frame loop never stalls on terminal backpressure,
+intermediate frames drop latest-wins) → pace.
+
+The demo reports produced fps (pacer) and presented fps (terminal-capped)
+separately, plus dropped frames — so "the framework held 240" and "the
+terminal showed N" are never conflated.
 
 ## Read this before contributing
 

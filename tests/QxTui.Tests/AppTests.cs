@@ -49,7 +49,7 @@ public class AppTests
     {
         var term = new FakeTerminal(w, h);
         var clock = new VirtualTimeSource();
-        var app = new App(term, root, targetFps: 240, time: clock);
+        var app = new App(term, root, targetFps: 240, time: clock, asyncPresenting: false);
         foreach (var widget in widgets)
             app.AddWidget(widget);
         return (app, term, clock);

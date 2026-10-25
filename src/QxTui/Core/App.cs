@@ -17,6 +17,15 @@ public sealed class FrameStats
     public double FrameWorkP50Ms;
     public double FrameWorkP99Ms;
     public int Relayouts;
+
+    /// <summary>Frames the terminal actually received per second. Capped by
+    /// the terminal emulator's drain rate — the honest "what you see" number,
+    /// as opposed to <see cref="Fps"/> (frames produced).</summary>
+    public double PresentedFps;
+
+    /// <summary>Frames dropped by the mailbox because a newer frame replaced
+    /// them before the writer thread could hand them to the terminal.</summary>
+    public long DroppedFrames;
 }
 
 /// <summary>
@@ -38,8 +47,12 @@ public sealed class App : IDisposable
 
     private CellBuffer _back;
     private Renderer _renderer;
+    private readonly FramePresenter? _presenter;
     private bool _needsLayout = true;
     private bool _running;
+    private long _lastPresentedCount;
+    private int _presentedWindowFrames;
+    private double _presentedWindowStart;
 
     public FrameStats Stats { get; } = new();
 
@@ -53,7 +66,10 @@ public sealed class App : IDisposable
 
     public AnimationScheduler Scheduler => _scheduler;
 
-    public App(ITerminal terminal, LayoutNode root, int targetFps = 60, ITimeSource? time = null)
+    /// <param name="asyncPresenting">When false, frames are written to the
+    /// terminal inline (deterministic, for headless tests). Production keeps
+    /// true so the frame loop never blocks on tty backpressure.</param>
+    public App(ITerminal terminal, LayoutNode root, int targetFps = 60, ITimeSource? time = null, bool asyncPresenting = true)
     {
         _terminal = terminal;
         _root = root;
@@ -62,6 +78,8 @@ public sealed class App : IDisposable
         _pacer = new FramePacer(targetFps);
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
+        _presenter = asyncPresenting ? new FramePresenter(terminal.Write) : null;
+        _presentedWindowStart = NowMs() / 1000.0;
     }
 
     /// <summary>Register a widget (attached to its Node) for the frame loop.</summary>
@@ -82,6 +100,8 @@ public sealed class App : IDisposable
         }
         finally
         {
+            // Flush pending frame BEFORE exit sequences so ordering holds.
+            _presenter?.Dispose();
             _terminal.Exit();
         }
     }
@@ -159,7 +179,10 @@ public sealed class App : IDisposable
         // 6) diff → damage → serialize → ONE write
         _output.Clear();
         var result = _renderer.Render(_back, _output);
-        _terminal.Write(_output.WrittenSpan);
+        if (_presenter is { } presenter)
+            presenter.Submit(_output.WrittenSpan);
+        else
+            _terminal.Write(_output.WrittenSpan); // synchronous test mode
 
         // 7) stats + pace
         double workMs = NowMs() - startMs;
@@ -169,6 +192,8 @@ public sealed class App : IDisposable
         Stats.Fps = _pacer.Fps;
         Stats.FrameWorkP50Ms = _pacer.FrameTimeP50Ms;
         Stats.FrameWorkP99Ms = _pacer.FrameTimeP99Ms;
+        Stats.DroppedFrames = _presenter?.DroppedCount ?? 0;
+        UpdatePresentedFps();
 
         if (pace)
             _pacer.PaceFrame(workMs);
@@ -210,6 +235,24 @@ public sealed class App : IDisposable
         }
     }
 
+    /// <summary>Rolling presented-fps estimate over ~0.5s windows, measured
+    /// from the writer thread's hand-off count (terminal-limited).</summary>
+    private void UpdatePresentedFps()
+    {
+        long presented = _presenter?.PresentedCount ?? 0;
+        _presentedWindowFrames += (int)(presented - _lastPresentedCount);
+        _lastPresentedCount = presented;
+
+        double nowS = NowMs() / 1000.0;
+        double span = nowS - _presentedWindowStart;
+        if (span >= 0.5)
+        {
+            Stats.PresentedFps = _presentedWindowFrames / span;
+            _presentedWindowFrames = 0;
+            _presentedWindowStart = nowS;
+        }
+    }
+
     private static double NowMs() =>
         System.Diagnostics.Stopwatch.GetTimestamp() * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
@@ -217,6 +260,7 @@ public sealed class App : IDisposable
     {
         foreach (var w in _widgets)
             w.Dispose();
+        _presenter?.Dispose();
         _back.Dispose();
         _renderer.Dispose();
         _terminal.Dispose();

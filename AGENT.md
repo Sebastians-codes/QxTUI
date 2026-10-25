@@ -55,14 +55,23 @@ signals/animations → mark widgets dirty
 dirty widgets      → render into persistent back CellBuffer (retained scene)
 back vs prev       → per-cell diff → damage rects → coalesce
 damage rects       → serialize ANSI (raster order, minimal cursor moves)
-one write          → wrapped in synchronized output (?2026) when supported
+one submit         → FramePresenter mailbox (single slot, latest wins)
+writer thread      → the ONLY place a blocking tty write may happen
 ```
 
 - The scene is **retained**, not immediate-mode. Widgets render only when
   dirty; the back buffer persists between frames.
-- One frame = at most ONE write to the output.
-- Frame pacer renders the LATEST state; never queue frames. If behind,
-  skip ahead (drop intermediate frames).
+- One frame = at most ONE submitted frame; the writer thread performs the
+  terminal write. The frame loop MUST NEVER block on tty backpressure —
+  the pty queue is a few KB and a blocking write couples our fps to the
+  terminal emulator's drain rate (which scales with window size). If the
+  writer is behind, intermediate frames are DROPPED (latest wins): render
+  the latest state, never queue frames.
+- Stats must report produced fps (pacer) AND presented fps (writer
+  hand-offs) separately; presented is terminal-capped and that is expected.
+- Frame pacer renders the LATEST state; if behind, skip ahead (drop
+  intermediate frames). For budgets ≤ 8ms the pacer spin-waits (sleep
+  overshoot on Linux alone caps a 240fps loop near ~200fps).
 
 ### Hot-path performance budget (MUST)
 
