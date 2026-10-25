@@ -110,27 +110,7 @@ return 0;
 file static class Box
 {
     public static void Draw(CellBuffer buf, Rect r, string? title, int fg = 244)
-    {
-        if (r.W < 2 || r.H < 2) return;
-
-        for (int x = r.X; x < r.Right; x++)
-        {
-            buf[x, r.Y] = new Cell { Char = '─', Fg = fg, Bg = -1 };
-            buf[x, r.Bottom - 1] = new Cell { Char = '─', Fg = fg, Bg = -1 };
-        }
-        for (int y = r.Y; y < r.Bottom; y++)
-        {
-            buf[r.X, y] = new Cell { Char = '│', Fg = fg, Bg = -1 };
-            buf[r.Right - 1, y] = new Cell { Char = '│', Fg = fg, Bg = -1 };
-        }
-        buf[r.X, r.Y] = new Cell { Char = '┌', Fg = fg, Bg = -1 };
-        buf[r.Right - 1, r.Y] = new Cell { Char = '┐', Fg = fg, Bg = -1 };
-        buf[r.X, r.Bottom - 1] = new Cell { Char = '└', Fg = fg, Bg = -1 };
-        buf[r.Right - 1, r.Bottom - 1] = new Cell { Char = '┘', Fg = fg, Bg = -1 };
-
-        if (title is { Length: > 0 } && r.W > title.Length + 4)
-            buf.WriteTextClipped(new RenderClip(r.X, r.Y, r.W, r.H), r.X + 2, r.Y, $" {title} ", fg: 39, bg: -1, bold: true);
-    }
+        => QxTui.Render.Box.Draw(buf, r.X, r.Y, r.W, r.H, BoxStyles.Single, fg, title, 39);
 }
 
 file sealed class SpinnerWidget() : Widget

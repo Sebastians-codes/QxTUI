@@ -8,27 +8,7 @@ namespace QxTui.SysMon;
 internal static class Panel
 {
     public static void Frame(CellBuffer buf, Rect r, string title, int accent)
-    {
-        if (r.W < 2 || r.H < 2) return;
-
-        for (int x = r.X; x < r.Right; x++)
-        {
-            buf[x, r.Y] = new Cell { Char = '─', Fg = 238, Bg = -1 };
-            buf[x, r.Bottom - 1] = new Cell { Char = '─', Fg = 238, Bg = -1 };
-        }
-        for (int y = r.Y; y < r.Bottom; y++)
-        {
-            buf[r.X, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
-            buf[r.Right - 1, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
-        }
-        buf[r.X, r.Y] = new Cell { Char = '┌', Fg = 238, Bg = -1 };
-        buf[r.Right - 1, r.Y] = new Cell { Char = '┐', Fg = 238, Bg = -1 };
-        buf[r.X, r.Bottom - 1] = new Cell { Char = '└', Fg = 238, Bg = -1 };
-        buf[r.Right - 1, r.Bottom - 1] = new Cell { Char = '┘', Fg = 238, Bg = -1 };
-
-        buf.WriteTextClipped(new RenderClip(r.X, r.Y, r.W, 1), r.X + 2, r.Y,
-            $" {title} ", fg: accent, bg: -1, bold: true);
-    }
+        => QxTui.Render.Box.Draw(buf, r.X, r.Y, r.W, r.H, BoxStyles.Single, 238, title, accent);
 
     /// <summary>8-level single-row sparkline from a ring buffer, right-aligned.</summary>
     /// <param name="scaleMax">Fixed full-scale value (e.g. 100 for percent).

@@ -30,7 +30,7 @@ var hud = new HudWidget(score, alive, fps);
 var game = new SnakeWidget(app.Scheduler, score, alive);
 var help = new HelpWidget();
 
-var root = new LayoutNode { Direction = FlexDirection.Column, Gap = 1 };
+var root = new LayoutNode { Direction = FlexDirection.Column, Gap = 0 };
 root.Add(hud.Node);
 root.Add(game.Node);
 root.Add(help.Node);

@@ -109,18 +109,6 @@ internal sealed class SnakeWidget : Widget
             ? (float)Math.Clamp((now - _stepTs) / _stepIntervalMs, 0, 1)
             : 1f;
 
-        // border
-        for (int x = r.X; x < r.Right; x++)
-        {
-            buffer[x, r.Y] = new Cell { Char = '─', Fg = 238, Bg = -1 };
-            buffer[x, r.Bottom - 1] = new Cell { Char = '─', Fg = 238, Bg = -1 };
-        }
-        for (int y = r.Y; y < r.Bottom; y++)
-        {
-            buffer[r.X, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
-            buffer[r.Right - 1, y] = new Cell { Char = '│', Fg = 238, Bg = -1 };
-        }
-
         // square pixels: scenery first, then food, then the interpolated snake
         _surface.Clear();
         _scenery.Paint(_surface, now / 1000.0);
@@ -135,6 +123,9 @@ internal sealed class SnakeWidget : Widget
             _surface.SetPixel(px, py, i == 0 ? 46 : 42);
         }
         _surface.Draw();
+
+        // border: framework primitive
+        QxTui.Render.Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single, 238);
 
         // overlays
         if (!_model.Alive)
