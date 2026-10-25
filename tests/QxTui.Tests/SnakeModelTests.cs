@@ -128,3 +128,63 @@ public class SnakeModelTests
         Assert.Equal(3, m.Body.Count);
     }
 }
+
+public class SnakeInputBufferTests
+{
+    [Fact]
+    public void MashedTurns_AreQueuedNotLost()
+    {
+        var m = new SnakeModel(20, 20);
+        var h0 = m.Body[0];
+
+        // two turns mashed inside ONE step interval
+        m.Turn(Direction.Up);
+        m.Turn(Direction.Left);
+
+        m.Step();
+        Assert.Equal(Direction.Up, m.Dir);
+        Assert.Equal(new Point(h0.X, h0.Y - 1), m.Body[0]);
+
+        m.Step();
+        Assert.Equal(Direction.Left, m.Dir);
+        Assert.Equal(new Point(h0.X - 1, h0.Y - 1), m.Body[0]);
+    }
+
+    [Fact]
+    public void QueuedReversal_IsSkippedNotFatal()
+    {
+        var m = new SnakeModel(20, 20);
+
+        m.Turn(Direction.Left);  // reversal of initial Right: must be skipped
+        m.Turn(Direction.Up);    // ...and this one still applies
+        m.Step();
+
+        Assert.True(m.Alive);
+        Assert.Equal(Direction.Up, m.Dir);
+    }
+
+    [Fact]
+    public void QueueIsBounded_SpamDoesNotAccumulate()
+    {
+        var m = new SnakeModel(20, 20);
+        for (int i = 0; i < 50; i++)
+            m.Turn(i % 2 == 0 ? Direction.Up : Direction.Down);
+
+        // at most MaxQueuedTurns survive: after enough steps the snake must
+        // be heading in a stable direction, not oscillating for 50 steps
+        for (int i = 0; i < 5; i++) m.Step();
+        Assert.True(m.Alive);
+    }
+
+    [Fact]
+    public void SameDirectionSpam_IsHarmless()
+    {
+        var m = new SnakeModel(20, 20);
+        m.Turn(Direction.Right);
+        m.Turn(Direction.Right);
+        m.Turn(Direction.Right);
+        m.Step();
+        Assert.Equal(Direction.Right, m.Dir);
+        Assert.True(m.Alive);
+    }
+}

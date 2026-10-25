@@ -14,7 +14,11 @@ internal sealed class SnakeModel
     private readonly List<Point> _body; // [0] = head
     private readonly Random _rng;
     private Direction _dir = Direction.Right;
-    private Direction _pending = Direction.Right;
+
+    // Input buffer: mashing two turns inside one step interval must not
+    // lose the first one (single-slot pending did exactly that).
+    private readonly Queue<Direction> _turns = new(4);
+    private const int MaxQueuedTurns = 3;
 
     public int Width { get; private set; }
     public int Height { get; private set; }
@@ -35,12 +39,14 @@ internal sealed class SnakeModel
         Food = RandomFreeCell();
     }
 
-    /// <summary>Queue a turn. Reversals (and 180° into the neck) are ignored.</summary>
+    /// <summary>Queue a turn. Validated at STEP time against the heading
+    /// actually in effect then — so mashing up-then-left works, and a
+    /// queued reversal is skipped instead of killing you.</summary>
     public void Turn(Direction d)
     {
         if (!Alive) return;
-        if (Opposite(d) == _dir) return;
-        _pending = d;
+        if (_turns.Count < MaxQueuedTurns)
+            _turns.Enqueue(d);
     }
 
     /// <summary>Advance one tick. Returns false when this step killed us.</summary>
@@ -48,7 +54,15 @@ internal sealed class SnakeModel
     {
         if (!Alive) return false;
 
-        _dir = _pending;
+        // consume the first queued turn that is legal right now
+        while (_turns.Count > 0)
+        {
+            var d = _turns.Dequeue();
+            if (d == _dir || Opposite(d) == _dir) continue; // no-op or reversal
+            _dir = d;
+            break;
+        }
+
         var head = _body[0];
         var next = _dir switch
         {
@@ -114,7 +128,8 @@ internal sealed class SnakeModel
         _body.Add(new Point(cx, cy));
         _body.Add(new Point(cx - 1, cy));
         _body.Add(new Point(cx - 2, cy));
-        _dir = _pending = Direction.Right;
+        _dir = Direction.Right;
+        _turns.Clear();
         Score = 0;
         Alive = true;
         _rng.GetType(); // keep analyzer quiet about unused reseed
