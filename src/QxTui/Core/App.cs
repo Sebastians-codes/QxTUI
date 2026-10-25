@@ -130,6 +130,7 @@ public sealed class App : IDisposable
 
         _overlay = overlay;
         AddWidget(overlay);
+        ResetHover();
         overlay.Invalidate();
     }
 
@@ -143,21 +144,49 @@ public sealed class App : IDisposable
         _widgets.Remove(ov);
         _registered.Remove(ov);
         ov.Dispose();
+        ResetHover();
+
+        // the dim covered gaps/uncovered regions no widget repaints:
+        // full clear + full repaint is the only correct restore
+        _back.Clear();
+        _renderer.ResizeToContent(_back); // prev = cleared → next diff = full repaint
         InvalidateAll();
+    }
+
+    private Widget? _hovered;
+
+    private Widget? TopMostAt(int x, int y)
+    {
+        if (_overlay is not null)
+            return _overlay;
+        for (int i = _widgets.Count - 1; i >= 0; i--)
+            if (_widgets[i].Rect.Contains(x, y))
+                return _widgets[i];
+        return null;
+    }
+
+    private void ResetHover()
+    {
+        if (_hovered is { } old)
+        {
+            old.Hovered = false;
+            old.Invalidate();
+        }
+        _hovered = null;
     }
 
     private void RouteMouse(MouseEvent ev)
     {
-        Widget? target = _overlay;
-        if (target is null)
+        Widget? target = TopMostAt(ev.X, ev.Y);
+
+        if (ev.Kind == MouseKind.Motion && !ReferenceEquals(target, _hovered))
         {
-            for (int i = _widgets.Count - 1; i >= 0; i--)
+            ResetHover();
+            _hovered = target;
+            if (target is not null)
             {
-                if (_widgets[i].Rect.Contains(ev.X, ev.Y))
-                {
-                    target = _widgets[i];
-                    break;
-                }
+                target.Hovered = true;
+                target.Invalidate(); // border/color reacts to hover
             }
         }
 
@@ -342,10 +371,15 @@ public sealed class App : IDisposable
         }
 
         // 5) retained render: only dirty widgets touch the back buffer
+        bool modalOpen = _overlay is not null;
         bool anyRendered = false;
         for (int i = 0; i < _widgets.Count; i++)
         {
             var widget = _widgets[i];
+            // a modal blocks the base: frozen base keeps the dim layer clean
+            // (otherwise ticking widgets repaint over the dim patchwork-style)
+            if (modalOpen && !ReferenceEquals(widget, _overlay))
+                continue;
             if (widget.Dirty)
             {
                 widget.RenderTracked(_back);

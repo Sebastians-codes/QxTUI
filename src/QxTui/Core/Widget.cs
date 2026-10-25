@@ -104,6 +104,10 @@ public abstract class Widget
     /// <summary>Receive click callbacks (OnMouse release inside Rect).</summary>
     public bool Clickable { get; set; }
 
+    /// <summary>True while the pointer is over this widget (motion events
+    /// must be enabled; the App maintains this and invalidates on change).</summary>
+    public bool Hovered { get; internal set; }
+
     /// <summary>Raw mouse events hitting this widget's rect. Return true to
     /// consume (stop routing to widgets below).</summary>
     public virtual bool OnMouse(MouseEvent ev) => false;

@@ -165,3 +165,94 @@ public class OverlayTests
         Assert.Equal(-1, app.Back[15, 0].Bg);    // base content restored
     }
 }
+
+file sealed class FillWidget(char c) : Widget
+{
+    public override void Render(CellBuffer buffer) =>
+        buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, new Cell { Char = c, Fg = 7, Bg = -1 });
+}
+
+public class ModalSemanticsTests
+{
+    private static (App app, FakeTerminal term) MakeApp(LayoutNode root, int w = 30, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        return (app, term);
+    }
+
+    [Fact]
+    public void Modal_FreezesBasePaints_WhileOpen()
+    {
+        var baseWidget = new FillWidget('T');
+        var root = UI.Column(0, baseWidget.Grow(1));
+        var (app, _) = MakeApp(root);
+
+        app.RunFrame();
+        Assert.Equal(1, baseWidget.RenderCount);
+
+        app.PushOverlay(new ModalWidget("t", () => ["x"]));
+
+        baseWidget.Invalidate(); // base wants to repaint (a tick would do this)
+        app.RunFrame();
+        baseWidget.Invalidate();
+        app.RunFrame();
+
+        // modal blocks it: no patchwork over the dim layer
+        Assert.Equal(1, baseWidget.RenderCount);
+
+        app.PopOverlay();
+        app.RunFrame();
+        Assert.Equal(2, baseWidget.RenderCount); // restored after pop
+    }
+
+    [Fact]
+    public void Pop_RestoresEvenUncoveredRegions()
+    {
+        var baseWidget = new FillWidget('T');
+        // trailing empty row = region no widget ever paints (uncovered)
+        var root = UI.Column(1, baseWidget.Grow(1), new LayoutNode { Height = 1 });
+        var (app, _) = MakeApp(root);
+
+        app.RunFrame();
+        Assert.Equal('T', app.Back[15, 0].Char);
+        Assert.Equal(' ', app.Back[0, 11].Char); // bottom gap row: uncovered by any widget
+
+        app.PushOverlay(new ModalWidget("t", () => ["x"]));
+        app.RunFrame();
+        Assert.Equal(236, app.Back[15, 0].Bg); // dimmed
+
+        app.PopOverlay();
+        app.RunFrame();
+        Assert.Equal(-1, app.Back[15, 0].Bg);   // dim gone everywhere
+        Assert.Equal(' ', app.Back[0, 11].Char); // uncovered gap restored too
+        Assert.Equal('T', app.Back[15, 5].Char);
+    }
+
+    [Fact]
+    public void Motion_SetsHover_OnTopmostWidgetOnly()
+    {
+        var a = new ClickTarget();
+        var b = new ClickTarget();
+        var root = UI.Row(0, a.Grow(1), b.Grow(1));
+        var (app, term) = MakeApp(root, 20, 10);
+
+        app.RunFrame(); // layout
+
+        void Motion(int x, int y)
+        {
+            foreach (byte ch in System.Text.Encoding.ASCII.GetBytes(
+                     $"\x1b[<32;{x + 1};{y + 1}M"))
+                term.QueueInput(ch);
+            app.RunFrame();
+        }
+
+        Motion(5, 5);
+        Assert.True(a.Hovered);
+        Assert.False(b.Hovered);
+
+        Motion(15, 5);
+        Assert.False(a.Hovered);
+        Assert.True(b.Hovered);
+    }
+}

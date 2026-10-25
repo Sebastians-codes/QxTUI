@@ -104,8 +104,16 @@ public sealed class ButtonWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded,
-            Theme.Get(_fg), _label(), Theme.Get(ThemeRole.Title));
+
+        // hover-reactive: border AND label brighten under the pointer —
+        // the affordance that says "this is clickable"
+        int edge = Theme.Get(Hovered ? ThemeRole.Title : _fg);
+        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded, edge);
+
+        var label = _label();
+        int lx = r.X + Math.Max(1, (r.W - label.Length) / 2);
+        buffer.WriteTextClipped(Clip, lx, r.Y + r.H / 2, label,
+            fg: Theme.Get(Hovered ? ThemeRole.Title : _fg), bold: true);
     }
 }
 
