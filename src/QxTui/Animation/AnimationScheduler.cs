@@ -157,7 +157,9 @@ public sealed class AnimationScheduler(ITimeSource? time = null)
 
             if (run.Discrete)
             {
-                long cycles = (long)(elapsed.TotalSeconds / total);
+                // epsilon: 0.1/0.1 can be 0.99999... and (long) would drop
+                // the boundary tick entirely
+                long cycles = (long)Math.Floor(elapsed.TotalSeconds / total + 1e-9);
                 if (cycles > run.LastCycle)
                 {
                     run.LastCycle = cycles;

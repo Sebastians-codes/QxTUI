@@ -1,3 +1,4 @@
+using QxTui.Animation;
 using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Reactive;
@@ -198,5 +199,60 @@ public class WidgetTreeTests
 
         Assert.True(label.Mounted);
         Assert.Equal('h', app.Back[1, 0].Char); // child painted; container painted nothing
+    }
+}
+
+file sealed class TreeFill(char c) : Widget
+{
+    public override void Render(CellBuffer buffer) =>
+        buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, new Cell { Char = c, Fg = 7, Bg = -1 });
+}
+
+file sealed class FeederProbe : Widget
+{
+    private readonly RingHistory _hist;
+    private float _v;
+
+    public FeederProbe(RingHistory hist)
+    {
+        _hist = hist;
+        Tick(TimeSpan.FromMilliseconds(100), _ =>
+        {
+            _v += 1;
+            _hist.Push(_v);
+        });
+    }
+
+    public override void Render(CellBuffer buffer) { }
+}
+
+public class DataOnlyWidgetTests
+{
+    [Fact]
+    public void ZeroHeightTreeSlot_StillMountsAndTicks()
+    {
+        // regression: a data-only widget left OUT of the layout tree never
+        // mounted once the manual AddWidget chains were removed — its Tick
+        // never ran and the sparklines it fed went empty
+        var hist = new RingHistory(60);
+        var feeder = new FeederProbe(hist);
+        var visible = new TreeFill('T');
+
+        var root = UI.Column(0, visible.Grow(1), feeder.Height(0));
+        var term = new FakeTerminal(20, 8);
+        var clock = new VirtualTimeSource();
+        using var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+
+        app.RunFrame();
+        Assert.True(feeder.Mounted);
+        Assert.Equal(0, hist.Count);
+
+        for (int i = 0; i < 5; i++)
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(100));
+            app.RunFrame();
+        }
+
+        Assert.Equal(5, hist.Count); // tick ran via the zero-height slot
     }
 }

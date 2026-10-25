@@ -119,6 +119,8 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
         ("60fps", () => SetFps(60)),
         ("120fps", () => SetFps(120)),
         ("240fps", () => SetFps(240)),
+        ("480fps", () => SetFps(480)),
+        ("1000fps", () => SetFps(1000)),
     ]);
 
 ButtonWidget? openBtn = null;
@@ -176,7 +178,8 @@ app.SetRoot(UI.Column(1,
     UI.Row(1, staticPanel.Grow(1), stats.Grow(1),
         UI.Column(1, themeBtn.Height(3), filledDemo.Height(3), openBtn.Height(3)).Width(16))
     .Height(11), // three 3-row buttons + gaps: below this they'd crush
-    help.Height(1)));
+    help.Height(1),
+    feederWired.Height(0))); // data-only widget: zero-height tree slot keeps it mounted
 
 // no AddWidget calls needed: SetRoot walks the DSL tree and mounts
 // every widget it finds (roots AND children)
