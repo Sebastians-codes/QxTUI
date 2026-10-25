@@ -66,7 +66,7 @@ public class SceneryTests
         new Scenery(3).Paint(s, 17.0);
         s.Draw();
 
-        var allowed = new HashSet<int> { 16, 17, 18, 54, 0, 60, 95, 230, 244, 252, -1 };
+        var allowed = new HashSet<int> { 232, 233, 234, 235, 236, 237, 230, 244, 252, -1 };
         for (int y = 0; y < 30; y++)
             for (int x = 0; x < 60; x++)
             {

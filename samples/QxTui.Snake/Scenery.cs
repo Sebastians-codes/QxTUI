@@ -38,7 +38,7 @@ internal sealed class Scenery(int seed = 7)
         {
             stars[i] = new Star(
                 rng.NextDouble(),
-                rng.NextDouble() * 0.55,          // upper sky only
+                rng.NextDouble() * 0.42,          // above the ridgeline
                 0.002 + rng.NextDouble() * 0.006, // slow drift
                 1.0 + rng.NextDouble() * 3.0,     // twinkle rate
                 rng.NextDouble() * Math.PI * 2);
@@ -64,10 +64,10 @@ internal sealed class Scenery(int seed = 7)
                 s.SetPixel(x, y, c);
         }
 
-        // ground
+        // ground base (near ridge paints over it down to the bottom)
         for (int y = horizon; y < h; y++)
             for (int x = 0; x < w; x++)
-                s.SetPixel(x, y, 16);
+                s.SetPixel(x, y, 233);
 
         // stars: drift + twinkle
         for (int i = 0; i < starCount; i++)
@@ -77,7 +77,7 @@ internal sealed class Scenery(int seed = 7)
             int sx = (int)(fx * w);
             int sy = (int)(st.Y * horizon);
             double tw = Math.Sin(t * st.Twinkle + st.Phase);
-            int c = tw > 0.4 ? 252 : tw > -0.3 ? 244 : 60;
+            int c = tw > 0.4 ? 252 : tw > -0.3 ? 244 : 236; // off-state melts into sky
             s.SetPixel(sx, sy, c);
         }
 
@@ -88,26 +88,29 @@ internal sealed class Scenery(int seed = 7)
             {
                 int d = dx * dx + dy * dy;
                 if (d <= moonR * moonR) s.SetPixel(mx + dx, my + dy, 230);
-                else if (d <= (moonR + 1) * (moonR + 1)) s.SetPixel(mx + dx, my + dy, 95);
+                else if (d <= (moonR + 1) * (moonR + 1)) s.SetPixel(mx + dx, my + dy, 244);
             }
 
-        // far ridge (slow parallax), then near ridge (faster, darker)
-        PaintRidge(s, t * 0.6, horizon, horizon * 22 / 100, 18, ridgeScale, _p1, _p2);
-        PaintRidge(s, t * 1.7, horizon, horizon * 34 / 100, 0, ridgeScale, _p2, _p3);
+        // far ridge (slow parallax), then near ridge (faster, darkest,
+        // painted down to the bottom so there is no dead band)
+        PaintRidge(s, t * 0.6, horizon, horizon * 22 / 100, 235, ridgeScale, _p1, _p2, horizon + horizon * 22 / 100 / 3);
+        PaintRidge(s, t * 1.7, horizon, horizon * 34 / 100, 232, ridgeScale, _p2, _p3, h);
     }
 
     private static int SkyColor(int y, int horizon)
     {
-        // 16 → 17 → 18 → 54 towards the horizon
+        // Grayscale ramp only (232-250): terminal themes remap cube colors
+        // like 17/18/54 into saturated blues/magentas, but leave the gray
+        // ramp alone. Night sky = subtle vertical gray gradient.
         double f = (double)y / Math.Max(1, horizon);
-        if (f < 0.45) return 16;
-        if (f < 0.72) return 17;
-        if (f < 0.90) return 18;
-        return 54;
+        if (f < 0.45) return 234;
+        if (f < 0.72) return 235;
+        if (f < 0.90) return 236;
+        return 237;
     }
 
     private static void PaintRidge(HalfBlockSurface s, double scroll, int horizon,
-        int amplitude, int color, double ridgeScale, double pa, double pb)
+        int amplitude, int color, double ridgeScale, double pa, double pb, int fillTo)
     {
         int w = s.PixelWidth;
         for (int x = 0; x < w; x++)
@@ -115,7 +118,7 @@ internal sealed class Scenery(int seed = 7)
             double u = (x + scroll * 12.0) * ridgeScale;
             double hgt = 0.55 + 0.30 * Math.Sin(u + pa) + 0.15 * Math.Sin(u * 2.7 + pb);
             int top = horizon - (int)(hgt * amplitude);
-            for (int y = Math.Max(0, top); y < horizon + amplitude / 3; y++)
+            for (int y = Math.Max(0, top); y < fillTo; y++)
                 s.SetPixel(x, y, color);
         }
     }

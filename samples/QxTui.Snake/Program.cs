@@ -20,7 +20,7 @@ if (!OperatingSystem.IsLinux())
 }
 
 var terminal = new PosixTerminal();
-var app = new App(terminal, new LayoutNode(), targetFps: 60);
+var app = new App(terminal, new LayoutNode(), targetFps: 165);
 
 var score = new Signal<int>(0);
 var alive = new Signal<bool>(true);
