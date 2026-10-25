@@ -181,10 +181,16 @@ sparkCol.AddChild(walkSpark); walkSpark.Node.Height = 2;
 var textPage = new ContainerWidget();
 textPage.Node.Direction = FlexDirection.Column;
 textPage.Node.Gap = 1;
+var input = new TextFieldWidget { Placeholder = "type here… (Tab leaves the field)" };
+var echo = new LabelWidget(() => $"you typed: {input.Text}");
+input.Changed += _ => echo.Invalidate();
+
 var textTitle = new LabelWidget(() => "text wrapping + unicode widths");
 var ellipDemo = new LabelWidget(
     () => "ellipsize: the quick brown fox jumps over the lazy dog and keeps going…");
 textPage.AddChild(textTitle); textTitle.Node.Height = 1;
+textPage.AddChild(input); input.Node.Height = 1;
+textPage.AddChild(echo); echo.Node.Height = 1;
 textPage.AddChild(wrapDemo); wrapDemo.Node.Grow = 1f;
 textPage.AddChild(ellipDemo); ellipDemo.Node.Height = 1;
 
