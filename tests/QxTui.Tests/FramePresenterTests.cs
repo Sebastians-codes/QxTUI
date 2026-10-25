@@ -165,11 +165,18 @@ public class DropResyncTests
         spacer.Node.Grow = 0.5f;
 
         using var app = new App(sinkTerm, root, targetFps: 1000);
-        app.RunFrame(); // initial paint (writer consumes it)
+        app.RunFrame(); // initial paint
+        SpinWait.SpinUntil(() =>
+        {
+            lock (sizes) return sizes.Count >= 1;
+        }, TimeSpan.FromSeconds(2)); // writer actually consumed it
 
         gate.Reset(); // writer stalls from here on
+        // three submits: the writer grabs the first and blocks in Write,
+        // the mailbox holds the second, the third is the latest-wins drop
         widget.Char = 'b'; widget.Invalidate(); app.RunFrame(pace: false);
         widget.Char = 'c'; widget.Invalidate(); app.RunFrame(pace: false);
+        widget.Char = 'd'; widget.Invalidate(); app.RunFrame(pace: false);
 
         gate.Set();
         widget.Char = 'z'; widget.Invalidate(); app.RunFrame(pace: false);

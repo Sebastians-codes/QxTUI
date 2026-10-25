@@ -229,7 +229,7 @@ public class ListViewMouseTests
     }
 
     [Fact]
-    public void Drag_ContentGlidesThroughIntermediateOffsets()
+    public void Drag_ViewTeleportsToCursor_NoCatchUpTail()
     {
         var (app, term, list) = Make(); // 1000 rows, 10 visible
 
@@ -238,21 +238,13 @@ public class ListViewMouseTests
         Assert.Equal(0, list.Offset);
 
         Mouse(term, "\x1b[<35;30;8M");  // drag 7 cells down: target ~770
-        app.RunFrame();                  // one frame: NOT teleported yet
-        int early = list.Offset;
-        Assert.True(early < 700, $"content must not teleport, got {early}");
-
-        Thread.Sleep(60);
         app.RunFrame();
-        int mid = list.Offset;
-        Assert.True(mid > early, $"glide must progress, early={early} mid={mid}");
-
-        Settle.Run(app, 400);
-        app.RunFrame();
-        Assert.True(list.Offset >= 700, $"glide must land on target, got {list.Offset}");
+        int at = list.Offset;
+        Assert.True(at >= 700, $"view must be AT the cursor in one frame, got {at}");
 
         Mouse(term, "\x1b[<0;30;8m");   // release
-        app.RunFrame();
+        Settle.Run(app, 250);
+        Assert.Equal(at, list.Offset); // no backwards hop, no oozing tail
     }
 }
 
@@ -358,5 +350,40 @@ public class QuarterRowThumbTests
         Assert.Equal((char)(0x2800 + 0x40 + 0x80), ListView.BrailleBand(3, 3));
         Assert.Equal((char)(0x2800 + 0x01 + 0x02 + 0x04 + 0x40
                              + 0x08 + 0x10 + 0x20 + 0x80), ListView.BrailleBand(0, 3));
+    }
+}
+
+public class TrackPressTests
+{
+    [Fact]
+    public void PressAnywhereOnTrack_JumpsViewToPressedSpot()
+    {
+        var list = new ListView(() => 1000)
+        {
+            RenderRow = (b, c, r, i, sel) =>
+                b.WriteTextClipped(c, r.X, r.Y, $"row {i}", fg: 7),
+        };
+        var root = UI.Column(0, list.Grow(1));
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.SetCellPixelSize(10, 20); // pixel mode armed, like foot via 14t
+        app.RunFrame();
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+
+        // press low on the track (y cell 8 -> py 165), NOT on the thumb
+        Mouse("\x1b[<0;296;166M");
+        app.RunFrame();
+
+        // view must be at the pressed fraction (~8/9 of 990), not paged,
+        // not snapped to top
+        Assert.True(list.Offset > 700, $"press should land at the spot, got {list.Offset}");
+
+        Mouse("\x1b[<0;296;166m");
+        app.RunFrame();
     }
 }

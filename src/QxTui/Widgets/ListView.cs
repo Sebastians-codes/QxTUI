@@ -28,8 +28,6 @@ public sealed class ListView : Widget
     private bool _dragThumb;
     private int _grabDelta;      // cursor offset inside the thumb at grab
     private int _grabDeltaPx;    // same, in pixels (sub-cell drags)
-    private double _target;      // drag stream target (thumb = cursor)
-    private long _lastGlideTs;
     private int _lastRenderedOffset; // for hardware-scroll hints
 
     /// <summary>Index of the first visible row.</summary>
@@ -44,14 +42,12 @@ public sealed class ListView : Widget
         Focusable = true;
         Clickable = true;
         CapturesMouse = true; // thumb drags survive leaving the widget
-        Tick(TimeSpan.FromMilliseconds(8), _ => Glide());
     }
 
     public void ScrollTo(int index)
     {
         int rows = VisibleRows();
         Offset = Math.Clamp(index, 0, Math.Max(0, Count() - rows));
-        _target = Offset;
         Invalidate();
     }
 
@@ -60,43 +56,6 @@ public sealed class ListView : Widget
     /// list — so the CONTENT glides to the drag target while the thumb
     /// itself stays glued to the cursor. Linear (not eased): continuous
     /// drags track without rubber-band lag; discrete jumps animate.</summary>
-    /// <summary>Drag catch-up stream: the thumb is glued to the cursor while
-    /// the content flows to it at a velocity that ADAPTS to what the
-    /// terminal actually presents (cheap hardware-scroll frames raise
-    /// presented fps → the stream accelerates: a feedback loop that
-    /// converges on smooth). Large lags ramp the rate so catch-up after a
-    /// fast flick stays short.</summary>
-    private void Glide()
-    {
-        int target = (int)Math.Round(_target);
-        int diff = target - Offset;
-        if (diff == 0) return;
-        long now = Environment.TickCount64;
-        double dt = Math.Min(0.25, Math.Max(0.001, (now - _lastGlideTs) / 1000.0));
-        _lastGlideTs = now;
-
-        double presented = App is { } host && host.Stats.PresentedFps > 0
-            ? host.Stats.PresentedFps : 60;
-        double window = Math.Max(1, VisibleRows());
-        double ramp = 1 + Math.Abs(diff) / (window * 4);
-        double v = Math.Clamp(presented * window * 0.5 * ramp, 300, 6000);
-        int maxStep = Math.Max(1, (int)(v * dt));
-        int pos = Math.Clamp(Offset + Math.Clamp(diff, -maxStep, maxStep),
-            0, Math.Max(0, Count() - VisibleRows()));
-        if (pos != Offset)
-        {
-            Offset = pos;
-            Invalidate();
-        }
-    }
-
-    private void Retarget(double target)
-    {
-        _lastGlideTs = Environment.TickCount64;
-        _target = Math.Clamp(target, 0, Math.Max(0, Count() - VisibleRows()));
-        Invalidate();
-    }
-
     /// <summary>Wheel: immediate steps. Smoothness comes from the terminal
     /// presenting frames fast, not from client-side delay — hardware-scroll
     /// hints keep those frames ~1KB so presented fps stays healthy.</summary>
@@ -134,7 +93,6 @@ public sealed class ListView : Widget
         int rows = VisibleRows();
         if (Selected < Offset) Offset = Selected;
         else if (Selected >= Offset + rows) Offset = Selected - rows + 1;
-        _target = Offset;
         Invalidate();
     }
 
@@ -158,19 +116,28 @@ public sealed class ListView : Widget
                     // jump-page when pressing the track outside the thumb
                     int thumbY = ThumbY();
                     int thumbH = ThumbH();
+                    int cellH = App?.CellPixelH ?? 0;
                     if (ev.Y >= thumbY && ev.Y < thumbY + thumbH)
+                    {
+                        // grab the thumb where the cursor is (no teleport)
                         _grabDelta = ev.Y - thumbY;
+                        _grabDeltaPx = ev.Py >= 0 && cellH > 0
+                            ? ev.Py - thumbY * cellH
+                            : _grabDelta * cellH;
+                    }
                     else
                     {
+                        // press ANYWHERE on the track: jump the view to the
+                        // pressed spot (center-grab so the drag continues
+                        // from there). The pixel branch must use the same
+                        // center grab — deriving it from the cursor's
+                        // distance to the thumb cancelled the cursor out
+                        // and snapped presses to the top.
                         _grabDelta = thumbH / 2;
-                        ScrollTo(ev.Y < thumbY ? Offset - VisibleRows() : Offset + VisibleRows());
+                        _grabDeltaPx = thumbH * cellH / 2;
                     }
-                    int cellH = App?.CellPixelH ?? 0;
-                    _grabDeltaPx = ev.Py >= 0 && cellH > 0
-                        ? ev.Py - thumbY * cellH
-                        : _grabDelta * cellH;
                     _dragThumb = true;
-                    DragTo(ev, smooth: false); // press lands instantly
+                    DragTo(ev); // drag is 1:1: view goes where the cursor is
                     return true;
                 }
                 // press on content: select that row
@@ -182,7 +149,7 @@ public sealed class ListView : Widget
             case MouseKind.Motion:
                 if (_dragThumb)
                 {
-                    DragTo(ev, smooth: true); // content glides to target
+                    DragTo(ev);
                     return true;
                 }
                 return false;
@@ -209,9 +176,11 @@ public sealed class ListView : Widget
         return Rect.Y + Offset * (Rect.H - ThumbH()) / Math.Max(1, total - rows);
     }
 
-    /// <summary>Maps cursor Y to a scroll target (thumb follows the cursor
-    /// 1:1 minus the grab delta). Presses land instantly; motion glides.</summary>
-    private void DragTo(MouseEvent ev, bool smooth)
+    /// <summary>Cursor → offset, 1:1 and immediate. No catch-up stream: a
+    /// capped-velocity stream made fast drags lag, and on release the thumb
+    /// hopped backwards and oozed to catch up. Renders coalesce to one frame
+    /// per loop tick at the latest offset, so fast motion can't flood.</summary>
+    private void DragTo(MouseEvent ev)
     {
         var r = Rect;
         int total = Count();
@@ -233,19 +202,7 @@ public sealed class ListView : Widget
             thumbTop = ev.Y - r.Y - _grabDelta;
         }
         double frac = Math.Clamp(thumbTop / trackH, 0, 1);
-        int target = Math.Clamp((int)Math.Round(frac * (total - rows)), 0, total - rows);
-
-        if (smooth)
-        {
-            if (target != (int)Math.Round(_target))
-                Retarget(target);
-        }
-        else if (target != Offset)
-        {
-            Offset = target;
-            _target = target;
-            Invalidate();
-        }
+        ScrollTo((int)Math.Round(frac * (total - rows)));
     }
 
     /// <summary>Braille glyph with both dot columns filled over dot-rows
@@ -272,7 +229,6 @@ public sealed class ListView : Widget
         int contentW = Math.Max(1, r.W - trackW);
 
         Offset = Math.Clamp(Offset, 0, Math.Max(0, total - rows));
-        _target = Math.Clamp(_target, 0, Math.Max(0, total - rows));
 
         // hardware scroll: window shifted vertically → repaint exposed
         // only. The rect MUST be the full widget width: SU/SD shift whole
@@ -299,9 +255,8 @@ public sealed class ListView : Widget
             buffer.WriteTextClipped(Clip, sx, y, "│", fg: Theme.Get(ThemeRole.Faint));
 
         int thumbH = Math.Max(1, rows * rows / total);
-        // during a drag the thumb tracks the cursor exactly (target-based);
-        // the content glides to catch up — no rubber-band thumb
-        double thumbOff = _dragThumb ? _target : Offset;
+        // drag is 1:1 and immediate, so Offset IS the cursor position
+        double thumbOff = Offset;
         // QUARTER-ROW precision via braille dot-rows (4 dot-rows per cell):
         // the indicator creeps in quarter-cursor steps instead of hopping
         // whole rows, and keeps one visual texture at every position
