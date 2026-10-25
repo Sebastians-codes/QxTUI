@@ -52,8 +52,12 @@ public sealed class FramePacer
                            / (double)Stopwatch.Frequency * 1000.0;
         double remainingMs = budgetMs - elapsedMs;
 
-        if (budgetMs > SpinOnlyBudgetMs && remainingMs > SpinMarginMs + 1.0)
-            Thread.Sleep((int)(remainingMs - SpinMarginMs));
+        // Spin margin scales with budget: a 60fps loop must not burn 2ms of
+        // core per frame (that alone was ~12% CPU); high-rate targets keep
+        // the full margin because precision is the product there.
+        double margin = Math.Min(SpinMarginMs, budgetMs * 0.15);
+        if (budgetMs > SpinOnlyBudgetMs && remainingMs > margin + 1.0)
+            Thread.Sleep((int)(remainingMs - margin));
 
         // TRUE spin to the deadline. Do NOT use SpinWait.SpinUntil here:
         // after a short spin it degenerates into Thread.Sleep(1) internally,

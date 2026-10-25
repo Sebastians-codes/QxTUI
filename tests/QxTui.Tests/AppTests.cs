@@ -198,6 +198,36 @@ public class AppTests
     }
 
     [Fact]
+    public void OnDemandRendering_IdleLoopDoesNotRunAtTargetRate()
+    {
+        // Regression: the 60fps loop spin-waiting between empty frames burned
+        // ~12-18% CPU in qxtop. With only discrete timers active, the loop
+        // must sleep between ticks instead.
+        var widget = new BlockWidget('.', 7);
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        root.Add(widget.Node);
+        widget.Node.Grow = 1f;
+
+        var term = new FakeTerminal(40, 20);
+        var app = new App(term, root, targetFps: 60);
+        app.AddWidget(widget);
+        app.Scheduler.Every(TimeSpan.FromMilliseconds(100), _ => widget.Invalidate());
+        app.OnInput = b => { app.Quit(); return false; };
+
+        var runTask = Task.Run(() => app.Run());
+        Thread.Sleep(450);
+        int writes = term.WriteCount;
+
+        term.QueueInput((byte)'q');
+        Assert.True(runTask.Wait(TimeSpan.FromSeconds(2)), "app did not quit");
+
+        // a 60fps spin loop would emit ~27 frames in 450ms; on-demand emits
+        // ~4-5 (one per 100ms tick) plus the initial paint.
+        Assert.True(writes >= 3, $"expected tick-driven frames, got {writes}");
+        Assert.True(writes < 12, $"idle loop wrote {writes} frames in 450ms — not on-demand");
+    }
+
+    [Fact]
     public void Input_QQuits()
     {
         var widget = new BlockWidget('.', 7);
@@ -217,19 +247,27 @@ public class AppTests
     }
 
     [Fact]
-    public void FrameLoop_PacesToOneWritePerFrame()
+    public void FrameLoop_OneWritePerDirtyFrame_ZeroWhenIdle()
     {
+        // Idle wakeups must put NOTHING on the wire; each dirty frame emits
+        // exactly one submit (AGENT.md §2 on-demand rendering).
         var widget = new BlockWidget('.', 7);
         var root = new LayoutNode { Direction = FlexDirection.Column };
         root.Add(widget.Node);
+        widget.Node.Grow = 1f;
 
         var (app, term, _) = MakeApp(root, [widget]);
 
-        app.RunFrame();
-        app.RunFrame();
-        app.RunFrame();
+        app.RunFrame(); // initial paint
+        Assert.Equal(1, term.WriteCount);
 
-        Assert.Equal(3, term.WriteCount); // exactly one write per frame
+        app.RunFrame(); // idle
+        app.RunFrame(); // idle
+        Assert.Equal(1, term.WriteCount); // zero bytes while nothing changes
+
+        widget.Invalidate();
+        app.RunFrame();
+        Assert.Equal(2, term.WriteCount); // exactly one submit for the dirty frame
     }
 
     [Fact]

@@ -104,7 +104,13 @@ public sealed class App : IDisposable
         try
         {
             while (_running)
-                RunFrame(pace: true);
+            {
+                double start = NowMs();
+                RunFrame(pace: false);
+                if (!_running)
+                    break;
+                WaitBetweenFrames(NowMs() - start);
+            }
         }
         finally
         {
@@ -112,6 +118,42 @@ public sealed class App : IDisposable
             _presenter?.Dispose();
             _terminal.Exit();
         }
+    }
+
+    /// <summary>
+    /// On-demand rendering (AGENT.md §2): when no continuous animation is
+    /// active and nothing is dirty, SLEEP until the next discrete scheduler
+    /// tick instead of spin-pacing — a monitor with 1-20Hz panels must not
+    /// burn a core running an empty 60fps loop. Continuous animations or
+    /// pending damage fall back to the precision spin pacer.
+    /// </summary>
+    private void WaitBetweenFrames(double workMs)
+    {
+        if (_scheduler.HasContinuousActive || AnyWidgetDirty())
+        {
+            _pacer.PaceFrame(workMs);
+            return;
+        }
+
+        double waitMs = MaxIdleSleepMs;
+        if (_scheduler.NextDiscreteDeadline() is { } next)
+        {
+            double untilNext = (next - _scheduler.Time.Now).TotalMilliseconds;
+            waitMs = Math.Clamp(untilNext, 1.0, MaxIdleSleepMs);
+        }
+
+        Thread.Sleep((int)waitMs);
+    }
+
+    /// <summary>Idle sleeps are capped so input/resize latency stays ≤16ms.</summary>
+    private const double MaxIdleSleepMs = 16.0;
+
+    private bool AnyWidgetDirty()
+    {
+        for (int i = 0; i < _widgets.Count; i++)
+            if (_widgets[i].Dirty)
+                return true;
+        return false;
     }
 
     public void Quit() => _running = false;
@@ -132,6 +174,8 @@ public sealed class App : IDisposable
             }
         }
 
+        bool relayoutThisFrame = false;
+
         // 2) resize → preserve overlapping cells; only rect-changed widgets
         //    re-render (AGENT.md invariant: unchanged rect → cached cells kept)
         if (_terminal.ConsumeResize() ||
@@ -142,6 +186,7 @@ public sealed class App : IDisposable
             _back.Resize(w, h, preserve: true);
             _renderer.ResizeToContent(_back);
             _needsLayout = true;
+            relayoutThisFrame = true;
             Stats.Relayouts++;
         }
 
@@ -174,23 +219,38 @@ public sealed class App : IDisposable
             ClearUncovered();
 
             _needsLayout = false;
+            relayoutThisFrame = true;
         }
 
         // 5) retained render: only dirty widgets touch the back buffer
+        bool anyRendered = false;
         for (int i = 0; i < _widgets.Count; i++)
         {
             var widget = _widgets[i];
             if (widget.Dirty)
+            {
                 widget.RenderTracked(_back);
+                anyRendered = true;
+            }
         }
 
-        // 6) diff → damage → serialize → ONE write
-        _output.Clear();
-        var result = _renderer.Render(_back, _output);
-        if (_presenter is { } presenter)
-            presenter.Submit(_output.WrittenSpan);
+        // 6) diff → damage → serialize → ONE submit. Idle wakeups (nothing
+        //    rendered, no relayout) skip the diff and put ZERO bytes on the
+        //    wire — a monitor between ticks costs nothing (AGENT.md §2).
+        RenderResult result;
+        if (anyRendered || relayoutThisFrame)
+        {
+            _output.Clear();
+            result = _renderer.Render(_back, _output);
+            if (_presenter is { } presenter)
+                presenter.Submit(_output.WrittenSpan);
+            else
+                _terminal.Write(_output.WrittenSpan); // synchronous test mode
+        }
         else
-            _terminal.Write(_output.WrittenSpan); // synchronous test mode
+        {
+            result = default;
+        }
 
         // 7) stats + pace
         double workMs = NowMs() - startMs;

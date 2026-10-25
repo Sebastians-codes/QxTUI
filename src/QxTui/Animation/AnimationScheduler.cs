@@ -40,6 +40,40 @@ public sealed class AnimationScheduler(ITimeSource? time = null)
 
     public int ActiveCount => _running.Count;
 
+    /// <summary>True when any continuous (non-discrete) animation is active —
+    /// those need a tick every frame, so the app must run at full target
+    /// rate. When false, the app can sleep between discrete ticks
+    /// (on-demand rendering — AGENT.md §2).</summary>
+    public bool HasContinuousActive
+    {
+        get
+        {
+            for (int i = 0; i < _running.Count; i++)
+                if (!_running[i].Discrete && !_running[i].Cancelled)
+                    return true;
+            return false;
+        }
+    }
+
+    /// <summary>Earliest future moment a discrete timer will fire, or null.</summary>
+    public TimeSpan? NextDiscreteDeadline()
+    {
+        TimeSpan? min = null;
+        for (int i = 0; i < _running.Count; i++)
+        {
+            var run = _running[i];
+            if (!run.Discrete || run.Cancelled) continue;
+
+            double total = run.Duration.TotalSeconds;
+            if (total <= 0) continue;
+
+            var next = run.Start + run.Delay
+                       + TimeSpan.FromSeconds((run.LastCycle + 1) * total);
+            if (min is null || next < min) min = next;
+        }
+        return min;
+    }
+
     /// <summary>
     /// Animate a float from <paramref name="from"/> to <paramref name="to"/>,
     /// writing each interpolated value through <paramref name="write"/>.

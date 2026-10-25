@@ -72,6 +72,12 @@ writer thread      → the ONLY place a blocking tty write may happen
 - Frame pacer renders the LATEST state; if behind, skip ahead (drop
   intermediate frames). For budgets ≤ 8ms the pacer spin-waits (sleep
   overshoot on Linux alone caps a 240fps loop near ~200fps).
+- **On-demand rendering**: when no continuous animation is active and
+  nothing is dirty, the loop SLEEPS until the next discrete scheduler tick
+  (capped at 16ms for input latency) instead of pacing — idle wakeups put
+  ZERO bytes on the wire and skip the diff. A monitor with 1-20Hz panels
+  must cost ~0% CPU between ticks; spin-pacing an empty loop is a bug
+  (it burned ~12-18% CPU in qxtop before this rule existed).
 
 ### Hot-path performance budget (MUST)
 

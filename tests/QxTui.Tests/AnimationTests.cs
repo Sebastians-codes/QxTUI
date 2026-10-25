@@ -140,6 +140,47 @@ public class AnimationSchedulerTests
     }
 
     [Fact]
+    public void HasContinuousActive_DistinguishesTransitionsFromTimers()
+    {
+        var (sched, clock) = MakeScheduler();
+
+        Assert.False(sched.HasContinuousActive);
+
+        var timer = sched.Every(TimeSpan.FromMilliseconds(100), _ => { });
+        Assert.False(sched.HasContinuousActive); // discrete: sleepable
+
+        var anim = sched.Animate(0f, 1f,
+            new Transition(TimeSpan.FromSeconds(1), Easing.Linear), _ => { });
+        Assert.True(sched.HasContinuousActive); // continuous: full rate
+
+        anim.Dispose();
+        clock.Advance(TimeSpan.FromSeconds(2));
+        sched.Tick(); // removes cancelled/completed
+        Assert.False(sched.HasContinuousActive);
+        _ = timer;
+    }
+
+    [Fact]
+    public void NextDiscreteDeadline_TracksEarliestTick()
+    {
+        var (sched, clock) = MakeScheduler();
+        Assert.Null(sched.NextDiscreteDeadline());
+
+        sched.Every(TimeSpan.FromMilliseconds(100), _ => { });
+        sched.Every(TimeSpan.FromMilliseconds(250), _ => { });
+
+        var next = sched.NextDiscreteDeadline();
+        Assert.NotNull(next);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), next!.Value);
+
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        sched.Tick(); // first timer fires cycle 1
+
+        next = sched.NextDiscreteDeadline();
+        Assert.Equal(TimeSpan.FromMilliseconds(200), next!.Value);
+    }
+
+    [Fact]
     public void Every_FiresOncePerInterval_OnSingleClock()
     {
         var (sched, clock) = MakeScheduler();

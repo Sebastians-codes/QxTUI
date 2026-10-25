@@ -51,19 +51,23 @@ internal static class LinuxProc
         return Math.Clamp(db * 100.0 / dt, 0, 100);
     }
 
-    public readonly record struct MemInfo(long TotalKb, long AvailableKb, long SwapTotalKb, long SwapFreeKb);
+    public readonly record struct MemInfo(long TotalKb, long AvailableKb, long FreeKb, long CacheKb, long SwapTotalKb, long SwapFreeKb);
 
     public static MemInfo ReadMem()
     {
-        long total = 0, avail = 0, swapTotal = 0, swapFree = 0;
+        long total = 0, avail = 0, free = 0, cache = 0, swapTotal = 0, swapFree = 0;
         foreach (var line in File.ReadLines("/proc/meminfo"))
         {
             if (line.StartsWith("MemTotal:", StringComparison.Ordinal)) total = Kb(line);
             else if (line.StartsWith("MemAvailable:", StringComparison.Ordinal)) avail = Kb(line);
+            else if (line.StartsWith("MemFree:", StringComparison.Ordinal)) free = Kb(line);
+            else if (line.StartsWith("Cached:", StringComparison.Ordinal)) cache += Kb(line);
+            else if (line.StartsWith("Buffers:", StringComparison.Ordinal)) cache += Kb(line);
+            else if (line.StartsWith("SReclaimable:", StringComparison.Ordinal)) cache += Kb(line);
             else if (line.StartsWith("SwapTotal:", StringComparison.Ordinal)) swapTotal = Kb(line);
             else if (line.StartsWith("SwapFree:", StringComparison.Ordinal)) swapFree = Kb(line);
         }
-        return new MemInfo(total, avail, swapTotal, swapFree);
+        return new MemInfo(total, avail, free, cache, swapTotal, swapFree);
     }
 
     private static long Kb(string line)
@@ -155,12 +159,19 @@ internal static class LinuxProc
             if (prevCpuTicks.TryGetValue(pid, out long prev))
             {
                 long hz = 100; // USER_HZ on Linux
-                cpuPct = Math.Max(0, (ticks - prev) / (hz * sampleSeconds)) * 100.0;
+                // btop convention: % of TOTAL cpu capacity (all cores), so the
+                // column sums to the aggregate figure. Per-one-core values on
+                // a 16-core box read ~16x "wrong" next to btop.
+                cpuPct = Math.Max(0, (ticks - prev) / (hz * sampleSeconds)) * 100.0
+                         / Environment.ProcessorCount;
             }
             prevCpuTicks[pid] = ticks;
 
+            // rss is in pages (proc(5)); convert with the REAL page size.
+            // (A hardcoded 4K/1024 fudge made every MEM% read 0.0.)
+            double kbPerPage = Environment.SystemPageSize / 1024.0;
             double memPct = memTotalKb > 0
-                ? rssPages * 4.0 / 1024.0 / memTotalKb * 100.0   // 4K pages
+                ? rssPages * kbPerPage / memTotalKb * 100.0
                 : 0;
 
             rows.Add(new ProcRow(pid, state, cpuPct, memPct, comm));

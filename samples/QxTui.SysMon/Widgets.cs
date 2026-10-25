@@ -31,14 +31,16 @@ internal static class Panel
     }
 
     /// <summary>8-level single-row sparkline from a ring buffer, right-aligned.</summary>
+    /// <param name="scaleMax">Fixed full-scale value (e.g. 100 for percent).
+    /// 0 = auto-scale to history max with <paramref name="autoFloor"/>.</param>
     public static void Sparkline(CellBuffer buf, RenderClip clip, int x, int y, int width,
-        RingHistory history, int fg)
+        RingHistory history, int fg, float scaleMax = 0f, float autoFloor = 1f)
     {
         const string Levels = "▁▂▃▄▅▆▇█";
         int n = Math.Min(width, history.Count);
         if (n <= 0) return;
 
-        float max = history.Max(1f);
+        float max = scaleMax > 0 ? scaleMax : history.Max(autoFloor);
         int start = x + width - n;
 
         for (int i = 0; i < n; i++)
@@ -159,7 +161,7 @@ internal sealed class CpuWidget : Widget
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"all {_aggSmooth.ToString("F0", CultureInfo.InvariantCulture),3}%",
             fg: Panel.LoadColor(_aggSmooth), bold: true);
-        Panel.Sparkline(buffer, Clip, r.X + 10, r.Y + 1, Math.Max(0, r.W - 12), _hist, 42);
+        Panel.Sparkline(buffer, Clip, r.X + 10, r.Y + 1, Math.Max(0, r.W - 12), _hist, 42, scaleMax: 100f);
 
         // per-core bars, two columns when narrow
         int rows = r.H - 3;
@@ -206,10 +208,17 @@ internal sealed class MemWidget : Widget
         _hist.Push((float)(usedFrac * 100));
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
-            $"{LinuxProc.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {LinuxProc.HumanBytes(m.TotalKb * 1024.0)}",
+            $"{LinuxProc.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {LinuxProc.HumanBytes(m.TotalKb * 1024.0)}"
+            + $"  ({usedFrac * 100:0}%)",
             fg: 250);
         Panel.HBar(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, 39);
-        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 3, r.W - 4, _hist, 39);
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 3, r.W - 4, _hist, 39, scaleMax: 100f);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 4,
+            $"avail {LinuxProc.HumanBytes(m.AvailableKb * 1024.0)}"
+            + $"  cache {LinuxProc.HumanBytes(m.CacheKb * 1024.0)}"
+            + $"  free {LinuxProc.HumanBytes(m.FreeKb * 1024.0)}", fg: 240);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
+            "used = total - available (btop/free convention)", fg: 238);
 
         double swapUsed = m.SwapTotalKb - m.SwapFreeKb;
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
@@ -257,10 +266,10 @@ internal sealed class NetWidget : Widget
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"▼ {LinuxProc.HumanBytes(_rxRate)}/s", fg: 42);
-        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 1, Math.Max(0, r.W - 18), _rx, 42);
+        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 1, Math.Max(0, r.W - 18), _rx, 42, autoFloor: 100 * 1024f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
             $"▲ {LinuxProc.HumanBytes(_txRate)}/s", fg: 141);
-        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 2, Math.Max(0, r.W - 18), _tx, 141);
+        Panel.Sparkline(buffer, Clip, r.X + 16, r.Y + 2, Math.Max(0, r.W - 18), _tx, 141, autoFloor: 100 * 1024f);
     }
 }
 
@@ -277,7 +286,8 @@ internal sealed class LoadWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Panel.Frame(buffer, r, "LOAD", 214);
+        int cores = Environment.ProcessorCount;
+        Panel.Frame(buffer, r, $"LOAD ({cores} cores)", 214);
 
         var (l1, l5, l15, running, total) = LinuxProc.ReadLoad();
         _hist.Push((float)l1);
@@ -285,21 +295,27 @@ internal sealed class LoadWidget : Widget
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             string.Create(CultureInfo.InvariantCulture, $"{l1:F2}  {l5:F2}  {l15:F2}"), fg: 250, bold: true);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
-            $"{running}/{total} running", fg: 240);
-        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist, 214);
+            "avg runnable tasks 1/5/15m", fg: 240);
+        buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
+            $"{running}/{total} running now", fg: 240);
+        // bar = load1 relative to core count: full bar == all cores saturated
+        Panel.HBar(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4,
+            Math.Clamp(l1 / cores, 0, 1), Panel.LoadColor(l1 / cores * 100));
+        Panel.Sparkline(buffer, Clip, r.X + 2, r.Y + 5, r.W - 4, _hist, 214, scaleMax: cores);
     }
 }
 
 internal sealed class ProcWidget : Widget
 {
     private readonly Dictionary<int, long> _prevTicks = new(256);
+    private readonly Dictionary<int, double> _smoothCpu = new(256);
     private List<LinuxProc.ProcRow> _rows = [];
     private long _lastSampleTs;
     public bool Paused;
 
     public ProcWidget(QxTui.Animation.AnimationScheduler scheduler)
     {
-        scheduler.Every(TimeSpan.FromMilliseconds(500), _ => Invalidate()); // 2Hz
+        scheduler.Every(TimeSpan.FromSeconds(1), _ => Invalidate()); // 1Hz: ~2000 /proc reads per sample is the dominant cost
     }
 
     public override void Render(CellBuffer buffer)
@@ -315,7 +331,26 @@ internal sealed class ProcWidget : Widget
         if (!Paused)
         {
             var mem = LinuxProc.ReadMem();
-            _rows = LinuxProc.ReadProcesses(_prevTicks, dt, mem.TotalKb);
+            var raw = LinuxProc.ReadProcesses(_prevTicks, dt, mem.TotalKb);
+
+            // Raw 1s windows spike hard (a 300ms burst reads as 30%): smooth
+            // per-pid like btop does, so the table is readable, not jumpy.
+            const double alpha = 0.3;
+            var seen = new HashSet<int>(raw.Count);
+            foreach (var row in raw)
+            {
+                seen.Add(row.Pid);
+                double prev = _smoothCpu.GetValueOrDefault(row.Pid, row.CpuPercent);
+                _smoothCpu[row.Pid] = prev + (row.CpuPercent - prev) * alpha;
+            }
+            foreach (var pid in _smoothCpu.Keys.ToList())
+                if (!seen.Contains(pid))
+                    _smoothCpu.Remove(pid);
+
+            _rows = raw
+                .Select(row => row with { CpuPercent = _smoothCpu.GetValueOrDefault(row.Pid) })
+                .OrderByDescending(row => row.CpuPercent)
+                .ToList();
         }
 
         // header
@@ -345,7 +380,7 @@ internal sealed class FooterWidget : Widget
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, new Cell { Char = ' ', Fg = 250, Bg = 236 });
         buffer.WriteTextClipped(Clip, r.X + 1, r.Y,
-            " q: quit   p: pause processes   cpu 5Hz smoothed - net 10Hz - mem/load 4Hz - procs 2Hz - clock 1Hz ",
+            " q: quit   p: pause processes   cpu 5Hz smoothed - net 10Hz - mem/load 4Hz - procs 1Hz - clock 1Hz ",
             fg: 250, bg: 236);
     }
 }
