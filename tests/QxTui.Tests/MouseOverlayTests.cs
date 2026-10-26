@@ -138,7 +138,9 @@ public class OverlayTests
         Assert.Empty(seen); // swallowed by modal
 
         term.QueueInput((byte)0x1b); // escape closes
-        app.RunFrame();
+        app.RunFrame();              // Esc still ambiguous...
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        app.RunFrame();              // ...settled -> delivered -> pops
         Assert.Null(app.Overlay);
 
         term.QueueInput((byte)'x');
@@ -768,6 +770,8 @@ public class OverlayStackTests
 
         term.QueueInput((byte)0x1b); // pop second
         app.RunFrame();
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        app.RunFrame();
         Assert.Same(first, app.Overlay);
 
         term.QueueInput((byte)'x');
@@ -775,6 +779,8 @@ public class OverlayStackTests
         Assert.Empty(seen); // first still modal
 
         term.QueueInput((byte)0x1b); // pop first
+        app.RunFrame();
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
         app.RunFrame();
         Assert.Null(app.Overlay);
 

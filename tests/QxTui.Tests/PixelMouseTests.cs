@@ -148,7 +148,10 @@ public class SplitSequenceFlushTests
         var p = new KeyParser();
         p.Feed(0x1b);
         Assert.True(p.HasPending);
-        p.Flush();
+        p.Flush(); // still ambiguous (could introduce a sequence)
+        Assert.False(p.TryReadKey(out _));
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        p.Flush(); // settled lone Esc -> keypress
         Assert.True(p.TryReadKey(out var ev));
         Assert.Equal(Key.Escape, ev.Key);
     }

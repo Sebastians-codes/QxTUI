@@ -45,6 +45,7 @@ public sealed class KeyParser
     private int _param0;
     private bool _isMouse;
     private bool _paramDone;
+    private long _escSince;
     private State _state = State.Ground;
 
     public void Feed(byte b)
@@ -125,17 +126,27 @@ public sealed class KeyParser
         }
     }
 
-    /// <summary>End of frame: release a pending lone ESC. A half-received
-    /// sequence stays buffered instead — its bytes arrive microseconds
-    /// later with the next drain, and flushing it would type its
-    /// coordinates as keypresses.</summary>
+    /// <summary>End of frame: release a lone ESC only once it has been
+    /// pending longer than <see cref="EscSettleMs"/>. A sequence
+    /// introducer split across drains completes in microseconds; two
+    /// idle frames used to be enough to leak its remainder as ground
+    /// keys (wheel coordinates as tab hotkeys). Time, not frame count,
+    /// is the discriminator. Cost: a real Esc press lands ~50ms late.</summary>
+    public const int EscSettleMs = 50;
+
     public void Flush()
     {
         if (_state == State.Esc)
-            _keys.Enqueue(KeyEvent.Of(Key.Escape));
-        else if (_state != State.Ground)
+        {
+            if (Environment.TickCount64 - _escSince >= EscSettleMs)
+            {
+                _keys.Enqueue(KeyEvent.Of(Key.Escape));
+                _state = State.Ground;
+            }
+            return;
+        }
+        if (_state != State.Ground)
             return; // mid-sequence: keep state, wait for the rest
-        _state = State.Ground;
     }
 
     /// <summary>True when a LONE Esc is buffered. Apps flush at end of frame
@@ -244,6 +255,8 @@ public sealed class KeyParser
         switch (b)
         {
             case 0x1b:
+                if (_state == State.Ground)
+                    _escSince = Environment.TickCount64;
                 _state = State.Esc;
                 break;
             case 13: // CR

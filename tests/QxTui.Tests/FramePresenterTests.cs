@@ -242,8 +242,9 @@ public class WrittenIdTests
         using var p = new FramePresenter(new GateSink(seen, gate).Write);
 
         p.Submit("frame1"u8, 1);
-        SpinWait.SpinUntil(() => { lock (seen) return seen.Count == 1; }, TimeSpan.FromSeconds(2));
-        Assert.Equal(1, p.WrittenId);
+        // WrittenId is published AFTER the sink returns: spin on it, not
+        // on the sink's list
+        SpinWait.SpinUntil(() => p.WrittenId == 1, TimeSpan.FromSeconds(2));
 
         gate.Reset();                 // writer blocks inside the next write
         p.Submit("frame2"u8, 2);      // writer grabs it, stalls

@@ -9,7 +9,9 @@ public class KeyParserTests
         var parser = new KeyParser();
         foreach (byte b in System.Text.Encoding.ASCII.GetBytes(bytes))
             parser.Feed(b);
-        parser.Flush();
+        parser.Flush(); // a lone Esc is still ambiguous for EscSettleMs
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        parser.Flush(); // settled -> keypress
 
         var events = new List<KeyEvent>();
         while (parser.TryReadKey(out var ev))
