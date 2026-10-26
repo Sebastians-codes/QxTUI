@@ -244,18 +244,20 @@ public abstract class Widget
     public bool Resizable { get; set; } = true;
 
     private bool _resizing;
+    private bool _rsApplied;
     private int _rsEdges;           // 1 = right, 2 = bottom, 3 = corner
     private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
+    private int _rsCurW, _rsCurH;
 
-    /// <summary>Which resize edges contain the point (0 = none).</summary>
-    internal int ResizeEdgeAt(int x, int y)
-    {
-        var r = Rect;
-        int e = 0;
-        if (x == r.Right - 1) e |= 1;
-        if (y == r.Bottom - 1) e |= 2;
-        return e;
-    }
+    /// <summary>Bypass MaxRenderHz for the next frame: a relayout that
+    /// moved this widget must not wait out a cap interval (blink).</summary>
+    internal void ForceRenderNext() => _lastRenderTs = 0;
+
+    /// <summary>Resize grab zones: ANYWHERE inside the element (right-drag
+    /// resizes both axes by the cursor delta — thin edges are ungrabbable
+    /// and users think in components, not border pixels).</summary>
+    internal virtual int ResizeEdgeAt(int x, int y) =>
+        Rect.Contains(x, y) ? 3 : 0;
 
     internal void BeginResize(MouseEvent ev, int edges, int cellW, int cellH)
     {
@@ -263,9 +265,23 @@ public abstract class Widget
         _rsEdges = edges;
         _rsStartX = ev.Px >= 0 && cellW > 0 ? ev.Px : ev.X;
         _rsStartY = ev.Py >= 0 && cellH > 0 ? ev.Py : ev.Y;
-        _rsStartW = Rect.W;
-        _rsStartH = Rect.H;
+        (_rsStartW, _rsStartH) = ResizeBaseSize();
+        _rsCurW = _rsStartW;
+        _rsCurH = _rsStartH;
+        _rsApplied = false;
         Node.Grow = 0f; // manual size wins over flex distribution
+    }
+
+    /// <summary>The size a resize grab starts from: the rect for normal
+    /// widgets, the box for modals.</summary>
+    internal virtual (int W, int H) ResizeBaseSize() => (Rect.W, Rect.H);
+
+    /// <summary>Where a resized size lands: flex sizes for normal widgets,
+    /// forced box sizes for modals.</summary>
+    internal virtual void ApplyResizeSize(int w, int h)
+    {
+        Node.Width = w;
+        Node.Height = h;
     }
 
     internal bool ApplyResize(MouseEvent ev, int cellW, int cellH,
@@ -276,19 +292,16 @@ public abstract class Widget
         int cy = ev.Py >= 0 && cellH > 0 ? ev.Py / cellH : ev.Y;
         int sx = ev.Px >= 0 && cellW > 0 ? _rsStartX / cellW : _rsStartX;
         int sy = ev.Py >= 0 && cellH > 0 ? _rsStartY / cellH : _rsStartY;
-        bool changed = false;
-        if ((_rsEdges & 1) != 0)
-        {
-            int w = Math.Max(1, _rsStartW + (cx - sx));
-            if (w != Node.Width) { Node.Width = w; changed = true; }
-        }
-        if ((_rsEdges & 2) != 0)
-        {
-            int h = Math.Max(1, _rsStartH + (cy - sy));
-            if (h != Node.Height) { Node.Height = h; changed = true; }
-        }
-        if (changed) layoutDirty();
-        return changed;
+        int w = _rsCurW, h = _rsCurH;
+        if ((_rsEdges & 1) != 0) w = Math.Max(1, _rsStartW + (cx - sx));
+        if ((_rsEdges & 2) != 0) h = Math.Max(1, _rsStartH + (cy - sy));
+        if (w == _rsCurW && h == _rsCurH && _rsApplied) return false;
+        _rsCurW = w;
+        _rsCurH = h;
+        _rsApplied = true;
+        ApplyResizeSize(w, h);
+        layoutDirty();
+        return true;
     }
 
     internal void EndResize() => _resizing = false;

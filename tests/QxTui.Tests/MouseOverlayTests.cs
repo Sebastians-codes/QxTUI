@@ -1294,15 +1294,146 @@ public class RightDragResizeTests
     }
 
     [Fact]
-    public void RightPressAwayFromEdges_DoesNotResize()
+    public void RightDragAnywhereInside_Resizes()
     {
+        // anywhere-inside semantics: no edge hunting required
         var (app, term, target) = Make();
         int w0 = target.Rect.W;
 
-        Mouse(term, "\x1b[<2;10;3M\x1b[<34;6;3M\x1b[<2;6;3m");
+        Mouse(term, "\x1b[<2;10;3M");   // right-press mid-component
         app.RunFrame();
+        Mouse(term, "\x1b[<34;6;3M");   // drag left 4
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;6;3m");
         app.RunFrame();
 
-        Assert.Equal(w0, target.Rect.W);
+        Assert.Equal(w0 - 4, target.Rect.W);
+    }
+}
+
+public class ResizeEdgeCaseTests
+{
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void SiblingResize_ShiftsTheNeighbour()
+    {
+        var a = new ParserFuzzProbeWidget();
+        var b = new ParserFuzzProbeWidget();
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
+        a.Node.Grow = 1;
+        b.Node.Grow = 1;
+        root.Add(a.Node);
+        root.Add(b.Node);
+        var term = new FakeTerminal(20, 6);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        int aw = a.Rect.W, bx = b.Rect.X;
+
+        Mouse(term, "\x1b[<2;10;3M");   // a's right edge (a = 0..9)
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;6;3M");   // drag left 4
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;6;3m");
+        app.RunFrame();
+
+        Assert.Equal(aw - 4, a.Rect.W);
+        Assert.Equal(bx - 4, b.Rect.X); // neighbour followed
+    }
+
+    [Fact]
+    public void RightDragInsideChild_ResizesTheChildComponent()
+    {
+        // anywhere-inside semantics: the component under the cursor is
+        // the one that resizes, stretched child or not
+        var col = new ContainerWidget();
+        col.Node.Direction = FlexDirection.Column;
+        col.Node.Height = 5;
+        var child = new ParserFuzzProbeWidget();
+        child.Node.Grow = 1;
+        col.AddChild(child);
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
+        root.Add(col.Node);
+        var term = new FakeTerminal(20, 8);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<2;10;2M");   // inside the child
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;6;2M");   // dx -4 (grow would clamp at the
+        app.RunFrame();                  // container: flex cross-axis cap)
+        Mouse(term, "\x1b[<2;6;2m");
+        app.RunFrame();
+
+        Assert.Equal(16, child.Rect.W); // 20 - 4
+    }
+
+    [Fact]
+    public void Relayout_NeverBlanksACappedNeighbour()
+    {
+        var mover = new ParserFuzzProbeWidget();
+        var capped = CappedFill.At(8);
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
+        mover.Node.Grow = 1;
+        capped.Node.Grow = 1;
+        root.Add(mover.Node);
+        root.Add(capped.Node);
+        var term = new FakeTerminal(20, 6);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Thread.Sleep(150); // let the capped widget paint at least once
+        app.RunFrame();
+        int cx = capped.Rect.X + 1;
+        Assert.Equal('C', app.Back[cx, 1].Char);
+
+        // resize the mover: capped shifts; its pixels must survive the
+        // very frame of the relayout (no cap-interval blank = no blink)
+        Mouse(term, "\x1b[<2;10;3M");
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;6;3M");
+        app.RunFrame();   // relayout frame: capped moved AND repainted
+        int nx = capped.Rect.X + 1;
+        Assert.Equal('C', app.Back[nx, 1].Char);
+    }
+
+    [Fact]
+    public void Modal_RightDrag_ResizesItsBox()
+    {
+        var modal = new ModalWidget("box", () => ["one line"], dim: false);
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(modal);
+        app.RunFrame();
+        int w0 = modal.ForceW ?? 0;
+
+        // box: w = max(24, ...) = 24 at (8,3); right edge x=31, y row 3..10
+        Mouse(term, "\x1b[<2;32;6M");   // right edge of the box
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;38;6M");  // widen by 6
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;38;6m");
+        app.RunFrame();
+
+        Assert.True(modal.ForceW > 24, $"modal box must widen, got {modal.ForceW}");
+        _ = w0;
+    }
+
+    private sealed class CappedFill : Widget
+    {
+        private CappedFill(int hz)
+        {
+            MaxRenderHz = hz;
+            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
+        }
+        public static CappedFill At(int hz) => new(hz);
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'C', Fg = 7 });
     }
 }

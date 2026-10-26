@@ -219,7 +219,6 @@ public sealed class ModalWidget : Widget
         _actions = actions ?? [];
         Clickable = true;
         CapturesMouse = true; // title-bar drags survive leaving the box
-        Resizable = false;    // rect is hand-managed per frame
         BlocksBaseRendering = dim; // floating popups keep the background live
         Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
     }
@@ -254,6 +253,28 @@ public sealed class ModalWidget : Widget
     /// side by side instead of perfectly overlapping).</summary>
     public int OffsetX { get; set; }
     public int OffsetY { get; set; }
+
+    /// <summary>Right-drag resize pins these; null = size to content.</summary>
+    public int? ForceW { get; private set; }
+    public int? ForceH { get; private set; }
+
+    internal override int ResizeEdgeAt(int x, int y)
+    {
+        var b = BoxRect(Rect);
+        return b.Contains(x, y) ? 3 : 0;
+    }
+
+    internal override (int W, int H) ResizeBaseSize()
+    {
+        var b = BoxRect(Rect);
+        return (b.W, b.H);
+    }
+
+    internal override void ApplyResizeSize(int w, int h)
+    {
+        ForceW = w;
+        ForceH = h;
+    }
 
     /// <summary>Blocking modals own the whole screen (dim click closes);
     /// floating popups own only their box.</summary>
@@ -315,12 +336,14 @@ public sealed class ModalWidget : Widget
         for (int i = 0; i < _actions.Length; i++)
             actionsWidth += _actions[i].Label.Length + 5;
         w = Math.Min(screen.W - 4, Math.Max(w, actionsWidth + 4));
+        w = Math.Min(screen.W - 4, ForceW ?? w);
 
         // chips wrap inside the clamped width; the box grows vertically
         int actionRows = _actions.Length == 0 ? 0 : ActionRows(w - 4);
         int h = Math.Min(screen.H - 2,
             lines.Length + 4 + (actionRows > 0 ? actionRows + 1 : 0)
             + (BodyRows > 0 ? BodyRows + 1 : 0));
+        h = Math.Min(screen.H - 2, ForceH ?? h);
         int x = Math.Clamp((screen.W - w) / 2 + OffsetX, 0, Math.Max(0, screen.W - w));
         int y = Math.Clamp((screen.H - h) / 2 + OffsetY, 0, Math.Max(0, screen.H - h));
         return new Rect(x, y, w, h);

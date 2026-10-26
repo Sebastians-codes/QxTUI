@@ -538,15 +538,15 @@ public sealed class App : IDisposable
         }
 
         // right-drag on an element's edge/corner = resize gesture
-        if (target is not null && ev.Kind == MouseKind.Press && ev.Button == 2)
+        if (target is not null && ev.Kind == MouseKind.Press && ev.Button == 2 &&
+            target.Resizable && target.ResizeEdgeAt(ev.X, ev.Y) != 0)
         {
-            int edge = target.Resizable ? target.ResizeEdgeAt(ev.X, ev.Y) : 0;
-            if (edge != 0)
-            {
-                _resizing = target;
-                target.BeginResize(ev, edge, _cellPixW, _cellPixH);
-                return;
-            }
+            // right-drag anywhere on a component = resize (dx->width,
+            // dy->height); overlays qualify too (they are parentless by
+            // design, and modals resize their box via ForceW/ForceH)
+            _resizing = target;
+            target.BeginResize(ev, 3, _cellPixW, _cellPixH);
+            return;
         }
         if (_resizing is { } rw)
         {
@@ -599,6 +599,25 @@ public sealed class App : IDisposable
 
     private Widget? _pressed;
     private Widget? _resizing;
+
+    /// <summary>The box a resize edge visually belongs to: the OUTERMOST
+    /// widget whose edge is at the point (stretched children share their
+    /// container's edge — grabbing it must resize the container, not the
+    /// child). Root is excluded (it is the viewport).</summary>
+    private static Widget? ResizeOwnerAt(Widget target, int x, int y, out int edge)
+    {
+        edge = 0;
+        Widget? owner = null;
+        for (var w = target; w is not null; w = w.Parent)
+        {
+            if (!w.Resizable || w.Parent is null) continue;
+            int e = w.ResizeEdgeAt(x, y);
+            if (e == 0) break;      // edge chain ends here
+            owner = w;
+            edge = e;
+        }
+        return owner;
+    }
 
     private void ReleasePressed()
     {
@@ -855,14 +874,16 @@ public sealed class App : IDisposable
                 if (!_changedNodes.Contains(widget.Node))
                     continue;
 
-                var prev = widget.Node.PreviousRect;
-                if (!prev.Equals(default(Rect)) && !prev.Equals(widget.Rect))
-                {
-                    _back.FillRect(prev.X, prev.Y, prev.W, prev.H, Cell.Empty);
-                    if (Trace)
-                        _traceErases.Add($"{widget.GetType().Name}:{prev}");
-                }
+                // NO previous-rect erase here: cells the moved widget
+                // vacated are either owned by another widget (whose back
+                // pixels are already correct) or owned by nobody
+                // (ClearUncovered below handles them). Erasing blindly
+                // destroyed clean neighbours' pixels — a capped 8Hz
+                // panel then sat blank for up to a tick interval = blink.
+                if (Trace && !widget.Node.PreviousRect.Equals(widget.Rect))
+                    _traceErases.Add($"{widget.GetType().Name}:{widget.Node.PreviousRect}");
                 widget.Invalidate();
+                widget.ForceRenderNext(); // moved widgets repaint NOW, cap or not
             }
 
             // Clear everything no widget covers anymore (gap rows, vacated
