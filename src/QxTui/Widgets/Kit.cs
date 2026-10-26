@@ -272,8 +272,15 @@ public sealed class ModalWidget : Widget
 
     internal override void ApplyResizeSize(int w, int h)
     {
+        // the box is centered by default: resizing would re-center it and
+        // the grabbed edge would move at half cursor speed (feels
+        // inverted). Pin the top-left so edges track the cursor 1:1.
+        var before = BoxRect(Rect);
         ForceW = w;
         ForceH = h;
+        var after = BoxRect(Rect);
+        OffsetX += before.X - after.X;
+        OffsetY += before.Y - after.Y;
     }
 
     /// <summary>Blocking modals own the whole screen (dim click closes);

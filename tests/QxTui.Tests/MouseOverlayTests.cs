@@ -1300,11 +1300,11 @@ public class RightDragResizeTests
         var (app, term, target) = Make();
         int w0 = target.Rect.W;
 
-        Mouse(term, "\x1b[<2;10;3M");   // right-press mid-component
+        Mouse(term, "\x1b[<2;16;3M");  // right-press right of center
         app.RunFrame();
-        Mouse(term, "\x1b[<34;6;3M");   // drag left 4
+        Mouse(term, "\x1b[<34;12;3M"); // drag left 4 -> shrinks
         app.RunFrame();
-        Mouse(term, "\x1b[<2;6;3m");
+        Mouse(term, "\x1b[<2;12;3m");
         app.RunFrame();
 
         Assert.Equal(w0 - 4, target.Rect.W);
@@ -1362,11 +1362,11 @@ public class ResizeEdgeCaseTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        Mouse(term, "\x1b[<2;10;2M");   // inside the child
+        Mouse(term, "\x1b[<2;16;2M");  // inside the child, right of center
         app.RunFrame();
-        Mouse(term, "\x1b[<34;6;2M");   // dx -4 (grow would clamp at the
-        app.RunFrame();                  // container: flex cross-axis cap)
-        Mouse(term, "\x1b[<2;6;2m");
+        Mouse(term, "\x1b[<34;12;2M"); // dx -4 -> shrinks
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;12;2m");
         app.RunFrame();
 
         Assert.Equal(16, child.Rect.W); // 20 - 4
@@ -1435,5 +1435,37 @@ public class ResizeEdgeCaseTests
         public override void Render(CellBuffer buffer) =>
             buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
                 new Cell { Char = 'C', Fg = 7 });
+    }
+}
+
+public class ResizeSignTests
+{
+    [Fact]
+    public void GrabLeftHalf_DragLeft_Grows()
+    {
+        // outward on ANY side grows: the sign comes from which side of
+        // the element's center the grab started
+        var target = new ParserFuzzProbeWidget();
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        target.Node.Height = 5;
+        target.Node.Width = 20;   // fixed, inside a 40-wide viewport
+        root.Add(target.Node);
+        var term = new FakeTerminal(40, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        // grab at x=4 (left of center 10), drag left to x=1: grows +3
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<2;5;3M"))
+            term.QueueInput(b);
+        app.RunFrame();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<34;2;3M"))
+            term.QueueInput(b);
+        app.RunFrame();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<2;2;3m"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.Equal(23, target.Rect.W);
     }
 }

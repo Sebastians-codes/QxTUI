@@ -248,6 +248,7 @@ public abstract class Widget
     private int _rsEdges;           // 1 = right, 2 = bottom, 3 = corner
     private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
     private int _rsCurW, _rsCurH;
+    private int _rsSignX = 1, _rsSignY = 1;
 
     /// <summary>Bypass MaxRenderHz for the next frame: a relayout that
     /// moved this widget must not wait out a cap interval (blink).</summary>
@@ -269,6 +270,13 @@ public abstract class Widget
         _rsCurW = _rsStartW;
         _rsCurH = _rsStartH;
         _rsApplied = false;
+        // sign from the grab's side of the element's center: pulling
+        // OUTWARD on any side grows, pushing inward shrinks — without
+        // this, left-half grabs feel inverted (drag left = shrink)
+        int gx = ev.Px >= 0 && cellW > 0 ? ev.Px / cellW : ev.X;
+        int gy = ev.Py >= 0 && cellH > 0 ? ev.Py / cellH : ev.Y;
+        _rsSignX = gx >= Rect.X + Rect.W / 2 ? 1 : -1;
+        _rsSignY = gy >= Rect.Y + Rect.H / 2 ? 1 : -1;
         Node.Grow = 0f; // manual size wins over flex distribution
     }
 
@@ -293,8 +301,8 @@ public abstract class Widget
         int sx = ev.Px >= 0 && cellW > 0 ? _rsStartX / cellW : _rsStartX;
         int sy = ev.Py >= 0 && cellH > 0 ? _rsStartY / cellH : _rsStartY;
         int w = _rsCurW, h = _rsCurH;
-        if ((_rsEdges & 1) != 0) w = Math.Max(1, _rsStartW + (cx - sx));
-        if ((_rsEdges & 2) != 0) h = Math.Max(1, _rsStartH + (cy - sy));
+        if ((_rsEdges & 1) != 0) w = Math.Max(1, _rsStartW + _rsSignX * (cx - sx));
+        if ((_rsEdges & 2) != 0) h = Math.Max(1, _rsStartH + _rsSignY * (cy - sy));
         if (w == _rsCurW && h == _rsCurH && _rsApplied) return false;
         _rsCurW = w;
         _rsCurH = h;
