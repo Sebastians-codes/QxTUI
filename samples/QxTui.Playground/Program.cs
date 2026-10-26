@@ -122,7 +122,7 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
         {
             // offsets keep the boxes disjoint: overlapping floating
             // popups paint over each other's bodies every frame
-            foreach (var (hz, ox, oy) in new[] { (8, -40, -8), (30, 0, 0), (120, 40, 8) })
+            foreach (var (hz, ox, oy) in new[] { (8, -40, -10), (30, 0, 0), (120, 40, 10) })
                 app.PushOverlay(MakeBallRoomModal(hz, ox, oy));
         }),
         ("hwscroll", () =>
@@ -155,11 +155,12 @@ ModalWidget MakeConfirmModal() => new("confirm",
 // balls (shared signal)
 ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
 {
+    BallWidget? roomBall = null;
     var m = new ModalWidget(hz > 0 ? $"ball {hz}hz" : "ball room",
         () =>
         [
             hz > 0
-                ? $"ticks + repaints at {hz} Hz only"
+                ? $"steps: {roomBall?.Steps ?? 0} @ {hz} Hz"
                 : "a live ball sim inside",
             hz > 0
                 ? "— its own refresh window"
@@ -176,6 +177,7 @@ ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
     var b2 = new BallWidget(speed, tickHz: hz > 0 ? hz : null);
     b2.Node.Grow = 1;
     room.AddChild(b2);
+    roomBall = b2;
     var srow = new ContainerWidget();
     srow.Node.Height = 1;
     srow.AddChild(new SliderWidget(speed));
@@ -233,6 +235,38 @@ sliderRow.AddChild(speedLabel);
 speedLabel.Node.Width = 16;
 sliderRow.AddChild(speedSlider);
 speedSlider.Node.Grow = 1f;
+
+// ---- ball page: the sim + a multi-rate row ---------------------------------
+// three capped balls side by side: each repaints at its own Hz while the
+// page around them runs at full rate — independent refresh windows on
+// the BASE scene (overlays can't do per-body rates: stacked floaters
+// must repaint opaquely every frame to stay z-correct)
+var ballPage = new ContainerWidget();
+ballPage.Node.Direction = FlexDirection.Column;
+ballPage.Node.Gap = 1;
+ball.Node.Grow = 1f;
+ballPage.AddChild(ball);
+var rateRow = new ContainerWidget();
+rateRow.Node.Direction = FlexDirection.Row;
+rateRow.Node.Gap = 1;
+rateRow.Node.Height = 9;
+ballPage.AddChild(rateRow);
+foreach (var hz in new[] { 8, 30, 120 })
+{
+    var col = new ContainerWidget();
+    col.Node.Direction = FlexDirection.Column;
+    col.Node.Grow = 1f;
+    rateRow.AddChild(col);
+    var cap = hz;
+    BallWidget? capped = null;
+    col.AddChild(new LabelWidget(() =>
+        $"capped {cap} Hz · {capped?.RenderCount ?? 0}"));
+    col.Children[col.Children.Count - 1].Node.Height = 1;
+    var cb = new BallWidget(speed, tickHz: cap) { MaxRenderHz = cap };
+    cb.Node.Grow = 1f;
+    col.AddChild(cb);
+    capped = cb;
+}
 
 // ---- SPA-style pages behind a Router ---------------------------------------
 
@@ -317,7 +351,7 @@ bigList.Node.Grow = 1f;
 var router = new Router();
 router.Register("widgets", () => widgetsPage)
       .Register("text", () => textPage)
-      .Register("ball", () => ball)
+      .Register("ball", () => ballPage)
       .Register("list", () => listPage);
 router.Switch("widgets");
 

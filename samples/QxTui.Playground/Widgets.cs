@@ -82,6 +82,11 @@ internal sealed class BallWidget : Widget
     public int SurfacePixelHeight => _probeHeight;
     private int _probeHeight;
 
+    /// <summary>Physics steps taken — the honest per-instance rate counter
+    /// (repaints inside overlays run at app fps for z-correctness).</summary>
+    public long Steps => _steps;
+    private long _steps;
+
     /// <param name="tickHz">Fixed physics/repaint rate for this instance.
     /// Null = follow the app's fps target (TickPerFrame). Different rates
     /// per instance showcase independent refresh windows.</param>
@@ -89,10 +94,44 @@ internal sealed class BallWidget : Widget
     {
         _speed = speed;
         Node.ChildInset = 1; // frame ring; children (slider row) live inside
+        // physics steps in TICK, never in Render: something else may
+        // invalidate us (a modal repainting its body, a neighbour's
+        // damage) and renders must never advance the sim — otherwise
+        // every ball secretly runs at app fps and tickHz is a lie
         if (tickHz is int hz)
-            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
+            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Step());
         else
-            TickPerFrame(); // refresh follows the app's fps target
+            Tick(TimeSpan.FromMilliseconds(1), _ => Step());
+    }
+
+    private int _bx, _by;
+    private int _probeWidth;
+
+    private void Step()
+    {
+        long now = Environment.TickCount64;
+        double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);
+        _lastTs = now;
+
+        // substep at high multipliers: without this, 100x moves ~1 screen
+        // per step and the ball tunnels through walls instead of bouncing
+        float m = Mult;
+        double travel = 0.8 * m * dt;
+        int steps = Math.Clamp((int)Math.Ceiling(travel / 0.02), 1, 128);
+        double sdt = m * dt / steps;
+        for (int sub = 0; sub < steps; sub++)
+        {
+            _px += _vx * (float)sdt;
+            _py += _vy * (float)sdt;
+            if (_px is < 0 or > 1) { _vx = -_vx; _px = Math.Clamp(_px, 0, 1); }
+            if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
+        }
+
+        _bx = (int)(_px * Math.Max(1, _probeWidth - 1));
+        _by = (int)(_py * Math.Max(1, _probeHeight - 1));
+        _trail.Enqueue((_bx, _by, now));
+        _steps++;
+        Invalidate();
     }
 
     /// <summary>0..1 slider → 0.2x..100x, piecewise-exponential with 1.0x
@@ -120,28 +159,11 @@ internal sealed class BallWidget : Widget
         if (rebuilt)
             _trail.Clear();
         _probeHeight = surface.PixelHeight;
+        _probeWidth = surface.PixelWidth;
 
+        // Render is pure drawing: physics lives in Step(), gated by this
+        // instance's tick rate
         long now = Environment.TickCount64;
-        double dt = Math.Min(0.1, (now - _lastTs) / 1000.0);
-        _lastTs = now;
-
-        // substep at high multipliers: without this, 100x moves ~1 screen
-        // per frame and the ball tunnels through walls instead of bouncing
-        float m = Mult;
-        double travel = 0.8 * m * dt;                 // worst-case fraction this frame
-        int steps = Math.Clamp((int)Math.Ceiling(travel / 0.02), 1, 128);
-        double sdt = m * dt / steps;
-        for (int sub = 0; sub < steps; sub++)
-        {
-            _px += _vx * (float)sdt;
-            _py += _vy * (float)sdt;
-            if (_px is < 0 or > 1) { _vx = -_vx; _px = Math.Clamp(_px, 0, 1); }
-            if (_py is < 0 or > 1) { _vy = -_vy; _py = Math.Clamp(_py, 0, 1); }
-        }
-
-        int bx = (int)(_px * (surface.PixelWidth - 1));
-        int by = (int)(_py * (surface.PixelHeight - 1));
-        _trail.Enqueue((bx, by, now));
         while (_trail.Count > 0 && now - _trail.Peek().TsMs > TrailMs)
             _trail.Dequeue();
 
@@ -153,7 +175,7 @@ internal sealed class BallWidget : Widget
             int c = 252 - (age * (252 - 236)) / TrailMs;
             surface.SetPixel(tx, ty, Math.Clamp(c, 236, 252));
         }
-        surface.SetPixel(bx, by, 255);
+        surface.SetPixel(_bx, _by, 255);
         surface.Draw();
 
         // opaque strip where the child slider row lives: the ball must read

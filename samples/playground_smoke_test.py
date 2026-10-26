@@ -29,6 +29,9 @@ script = [
     (3.0, b"t"),        # theme → Amber
     (4.0, b"]"),        # fps 120 → 240
     (5.0, b"o"),        # open floating popup
+    (5.15, b"\x1b[<0;31;13M"),  # grab popup title bar
+    (5.25, b"\x1b[<32;61;16M"), # drag it right+down
+    (5.35, b"\x1b[<0;61;16m"),  # release
     (5.4, b"9"),        # popup action 9: hwscroll on
     (5.6, b"9"),        # ...and off again (opt-in feature exercised)
     (6.0, b"7"),        # popup action 7: stack confirm modal
@@ -128,6 +131,7 @@ checks = {
     "modal stack":      "second modal" in text and "third level" in text,
     "ball room":        "ball room" in text,
     "ball rooms x3":    "ball 8hz" in text and "ball 30hz" in text and "ball 120hz" in text,
+    "rate caps row":    "capped 8 Hz" in text and "capped 120 Hz" in text,
     "popup closes":     "modals swallow" not in screen,
     "clean exit":       "\x1b[?1049l" in text,
 }

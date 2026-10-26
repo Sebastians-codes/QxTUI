@@ -207,9 +207,13 @@ public sealed class ModalWidget : Widget
         _dim = dim;
         _actions = actions ?? [];
         Clickable = true;
+        CapturesMouse = true; // title-bar drags survive leaving the box
         BlocksBaseRendering = dim; // floating popups keep the background live
         Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
     }
+
+    private bool _dragging;
+    private int _grabDX, _grabDY;
 
     /// <summary>Optional live widget tree hosted inside the box (between
     /// the text lines and the action chips) — animated content in an
@@ -353,6 +357,37 @@ public sealed class ModalWidget : Widget
 
     public override bool OnMouse(MouseEvent ev)
     {
+        var box0 = BoxRect(Rect);
+        bool onXChip = ev.Y == box0.Y &&
+                       ev.X >= box0.Right - 4 && ev.X < box0.Right - 1;
+        if (ev.Kind == MouseKind.Press && ev.Y == box0.Y &&
+            ev.X >= box0.X && ev.X < box0.Right && !onXChip)
+        {
+            // title bar = window-manager-style drag handle
+            _dragging = true;
+            _grabDX = ev.X - box0.X;
+            _grabDY = ev.Y - box0.Y;
+            return true;
+        }
+        if (ev.Kind == MouseKind.Motion && _dragging)
+        {
+            int nw = box0.W, nh = box0.H;
+            int nx = Math.Clamp(ev.X - _grabDX, 0, Math.Max(0, Rect.W - nw));
+            int ny = Math.Clamp(ev.Y - _grabDY, 0, Math.Max(0, Rect.H - nh));
+            int cx = (Rect.W - nw) / 2, cy = (Rect.H - nh) / 2;
+            int ox = nx - cx, oy = ny - cy;
+            if (ox != OffsetX || oy != OffsetY)
+            {
+                App?.EraseInvalidate(box0); // old box vanishes; base repaints
+                OffsetX = ox;
+                OffsetY = oy;
+                Invalidate();
+            }
+            return true;
+        }
+        if (ev.Kind == MouseKind.Release)
+            _dragging = false;
+
         // per-button hover for the chip highlight
         var box = BoxRect(Rect);
         int idx = -1;
@@ -397,21 +432,11 @@ public sealed class ModalWidget : Widget
             buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
 
         var box = BoxRect(screen);
-        var panel = new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) };
-        // fill in strips AROUND the hosted body: the body's pixels must
-        // survive this repaint or its own tick rate is meaningless
-        var inner = BodyInner(box);
-        if (inner.W > 0 && inner.H > 0)
-        {
-            buffer.FillRect(box.X, box.Y, box.W, Math.Max(0, inner.Y - box.Y), panel);
-            buffer.FillRect(box.X, inner.Bottom, box.W, Math.Max(0, box.Bottom - inner.Bottom), panel);
-            buffer.FillRect(box.X, inner.Y, Math.Max(0, inner.X - box.X), inner.H, panel);
-            buffer.FillRect(inner.Right, inner.Y, Math.Max(0, box.Right - inner.Right), inner.H, panel);
-        }
-        else
-        {
-            buffer.FillRect(box.X, box.Y, box.W, box.H, panel);
-        }
+        // opaque box, every frame: preserved body regions let LOWER
+        // windows' pixels leak through wherever boxes overlap — full
+        // repaint is the only z-correct choice for stacked floaters
+        buffer.FillRect(box.X, box.Y, box.W, box.H,
+            new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
         Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Double,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
         // [x] as a filled chip, same language as the action buttons
@@ -433,8 +458,8 @@ public sealed class ModalWidget : Widget
             {
                 body.Node.SetRect(want);
                 body.Node.LayoutChildren(); // overlays skip the root pass
-                body.Invalidate();
             }
+            body.Invalidate(); // body repaints with the modal every frame
         }
 
         // action chips: key hint + filled button, wrapped inside the box

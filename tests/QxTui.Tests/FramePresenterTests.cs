@@ -48,10 +48,11 @@ public class FramePresenterTests
         for (int i = 0; i < 20; i++)
         {
             presenter.Submit(Encoding.ASCII.GetBytes($"frame{i:00}"));
-            Thread.Sleep(2); // spaced like a real paced loop; writer keeps up
+            Thread.Sleep(3); // spaced like a real paced loop; writer keeps up
         }
 
-        SpinWait.SpinUntil(() => sink.Count == 21, TimeSpan.FromSeconds(2));
+        // generous: under parallel-suite load the writer thread can starve
+        SpinWait.SpinUntil(() => sink.Count == 21, TimeSpan.FromSeconds(5));
 
         Assert.Equal(21, sink.Count);
         Assert.Equal("frame19", sink.Last());

@@ -459,6 +459,23 @@ public sealed class App : IDisposable
 
     private bool IsOverlay(Widget w) => _overlays.Contains(w);
 
+    /// <summary>Move the overlay owning `w` (or `w` itself) to top of the
+    /// z-stack. Overlays repaint every frame, so a reorder needs no extra
+    /// invalidation — the next frame composes the new order.</summary>
+    private void RaiseOverlayOf(Widget w)
+    {
+        Widget? ov = w;
+        while (ov is not null && !IsOverlay(ov))
+            ov = ov.Parent;
+        if (ov is null || _overlays.Count < 2 || _overlays[^1] == ov)
+            return;
+        _overlays.Remove(ov);
+        _overlays.Add(ov);
+        _roots.Remove(ov);
+        _roots.Add(ov);
+        RebuildFlat();
+    }
+
     private int _cellPixW;
     private int _cellPixH;
     private bool _pixelMouse;
@@ -520,6 +537,11 @@ public sealed class App : IDisposable
             target.Invalidate();
         }
 
+        // click-to-raise: clicking anywhere in a floating window (or its
+        // hosted body) brings it to the top of the stack, like a WM
+        if (ev.Kind == MouseKind.Press && target is not null)
+            RaiseOverlayOf(target);
+
         if (ev.Kind == MouseKind.Press && target is { Focusable: true })
             Focus(target); // click-to-focus
         else if (ev.Kind == MouseKind.Release)
@@ -558,6 +580,22 @@ public sealed class App : IDisposable
             p.Pressed = false;
             p.Invalidate();
             _pressed = null;
+        }
+    }
+
+    /// <summary>Erase a rect from the back buffer and re-dirty every
+    /// registered widget under it — used when a floating overlay MOVES:
+    /// its old box must vanish and the base beneath must repaint.</summary>
+    public void EraseInvalidate(Rect r)
+    {
+        _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+        for (int i = 0; i < _widgets.Count; i++)
+        {
+            var w = _widgets[i];
+            if (IsOverlay(w)) continue;
+            var wr = w.Rect;
+            if (wr.X < r.Right && r.X < wr.Right && wr.Y < r.Bottom && r.Y < wr.Bottom)
+                w.Invalidate();
         }
     }
 

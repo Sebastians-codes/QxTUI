@@ -250,14 +250,17 @@ public abstract class Widget
     public bool SurvivesParentRepaint { get; set; }
 
     public double MaxRenderHz { get; set; }
-    private long _lastRenderTs = long.MinValue / 2;
+    private long _lastRenderTs;
 
     internal bool RenderTracked(CellBuffer buffer)
     {
         if (MaxRenderHz > 0)
         {
             long now = Environment.TickCount64;
-            if ((now - _lastRenderTs) * MaxRenderHz < 1000)
+            // double math: long elapsed * Hz overflowed on the first check
+            // (elapsed ~ 4.6e18 from a MinValue sentinel) and deferred
+            // capped widgets FOREVER
+            if ((now - _lastRenderTs) * MaxRenderHz < 1000.0)
                 return false; // too soon: stay dirty, skip this frame
             _lastRenderTs = now;
         }

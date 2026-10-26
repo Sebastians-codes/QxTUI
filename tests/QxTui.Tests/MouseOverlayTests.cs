@@ -861,43 +861,89 @@ public class OverlayBodyTests
 
 public class MultiRateOverlayTests
 {
-    private sealed class HzWidget : Widget
-    {
-        private HzWidget(int hz) =>
-            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
-        public static HzWidget At(int hz) => new(hz);
-
-        public override void Render(CellBuffer buffer) =>
-            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
-                new Cell { Char = 'x', Fg = 7 });
-    }
-
     [Fact]
-    public void CoexistingOverlays_RefreshAtIndependentRates()
+    public void CoexistingWidgets_RefreshAtIndependentRates()
     {
-        var slow = HzWidget.At(10);
-        var fast = HzWidget.At(60);
-        var m1 = new ModalWidget("slow", () => ["s"], dim: false)
-            { BodyRows = 3, Body = slow, OffsetX = -20 };
-        var m2 = new ModalWidget("fast", () => ["f"], dim: false)
-            { BodyRows = 3, Body = fast, OffsetX = 20 };
-
+        // base-scene rate windows: MaxRenderHz defers repaints without
+        // dropping dirtiness (overlays can't do this — stacked floaters
+        // repaint opaquely every frame for z-correctness)
+        var slow = new HzWidget2(10);
+        var fast = new HzWidget2(60);
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
-        var term = new FakeTerminal(60, 14);
+        slow.Node.Height = 2;
+        fast.Node.Height = 2;
+        root.Add(slow.Node);
+        root.Add(fast.Node);
+        var term = new FakeTerminal(30, 6);
         using var app = new App(term, root, targetFps: 240, asyncPresenting: false);
-        app.RunFrame();
-        app.PushOverlay(m1);
-        app.PushOverlay(m2);
 
         var end = DateTime.UtcNow.AddMilliseconds(600);
         while (DateTime.UtcNow < end)
             app.RunFrame();
 
-        // separate refresh windows: the 60Hz body repaints ~6x the 10Hz one
         Assert.True(fast.RenderCount > slow.RenderCount * 2,
             $"fast={fast.RenderCount} slow={slow.RenderCount}");
         Assert.True(slow.RenderCount > 0);
+    }
+
+    private sealed class HzWidget2 : Widget
+    {
+        public HzWidget2(int hz)
+        {
+            MaxRenderHz = hz;
+            Tick(TimeSpan.FromMilliseconds(4), _ => Invalidate());
+        }
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'x', Fg = 7 });
+    }
+}
+
+public class ModalDragTests
+{
+    private sealed class BgFill(char c) : Widget
+    {
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = c, Fg = 7 });
+    }
+
+    [Fact]
+    public void TitleBarDrag_MovesModal_AndBaseRepaintsUnderOldBox()
+    {
+        var bg = new BgFill('B');
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        bg.Node.Grow = 1;
+        root.Add(bg.Node);
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var modal = new ModalWidget("drag", () => ["dd"], dim: false);
+        app.PushOverlay(modal);
+        app.RunFrame();
+        long bgBefore = bg.RenderCount;
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+
+        // box: w=24,h=5 at (3,2); grab title at (5,2), drag to (15,5)
+        Mouse("\x1b[<0;6;3M");
+        app.RunFrame();
+        Mouse("\x1b[<32;16;6M");
+        app.RunFrame();
+        Mouse("\x1b[<0;16;6m");
+        app.RunFrame();
+
+        Assert.True(modal.OffsetX != 0 || modal.OffsetY != 0,
+            "title-bar drag must move the modal");
+        Assert.True(bg.RenderCount > bgBefore,
+            "base under the old box must repaint (no ghost box)");
     }
 }
 
@@ -1103,5 +1149,63 @@ public class OverlayZAndRestoreTests
             buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
                 new Cell { Char = 'S', Fg = 7 });
         }
+    }
+}
+
+public class ClickToRaiseTests
+{
+    private sealed class Fill2(char c) : Widget
+    {
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = c, Fg = 7 });
+    }
+
+    [Fact]
+    public void ClickingLowerPopup_RaisesItAboveTheRest()
+    {
+        var lowerBody = new Fill2('L');
+        lowerBody.Node.Grow = 1;
+        var lower = new ModalWidget("lower", () => ["ll"], dim: false)
+        {
+            BodyRows = 3,
+            Body = lowerBody,
+            OffsetX = -6,
+        };
+        var topBody = new Fill2('T');
+        topBody.Node.Grow = 1;
+        var top = new ModalWidget("top", () => ["tt"], dim: false)
+        {
+            BodyRows = 3,
+            Body = topBody,
+            OffsetX = 6,
+        };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(60, 14);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+
+        // overlap cell: top wins before the click
+        var lb = lowerBody.Rect;
+        var tb = topBody.Rect;
+        int ox = System.Math.Max(lb.X, tb.X) + 1;
+        int oy = System.Math.Max(lb.Y, tb.Y) + 1;
+        Assert.True(ox < System.Math.Min(lb.Right, tb.Right), "bodies must overlap");
+        app.RunFrame();
+        Assert.Equal('T', app.Back[ox, oy].Char);
+
+        // click inside the LOWER body -> it raises
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(
+                     $"\x1b[<0;{lb.X + 2};{lb.Y + 1}M\x1b[<0;{lb.X + 2};{lb.Y + 1}m"))
+            term.QueueInput(b);
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.Same(lower, app.Overlay);
+        Assert.Equal('L', app.Back[ox, oy].Char);
     }
 }
