@@ -73,7 +73,9 @@ internal sealed class BallWidget : Widget
     // time-based trail: a frame-count trail shrinks as fps rises (24 points
     // = 0.2s at 120fps but 0.024s at 1000fps). Age-based expiry keeps the
     // tail the same LENGTH IN TIME at any frame rate.
-    private readonly Queue<(int X, int Y, long TsMs)> _trail = new();
+    // normalized coords: a surface rebuild (resize) must not wipe the
+    // trail — losing it read as the animation restarting/speed changing
+    private readonly Queue<(float X, float Y, long TsMs)> _trail = new();
     private const int TrailMs = 250;
     private long _lastTs = Environment.TickCount64;
     private readonly Signal<float> _speed;
@@ -81,6 +83,9 @@ internal sealed class BallWidget : Widget
     /// <summary>Test hook: pixel-canvas height in square pixels.</summary>
     public int SurfacePixelHeight => _probeHeight;
     private int _probeHeight;
+
+    /// <summary>Test hook: live trail length (must survive resizes).</summary>
+    public int TrailCount => _trail.Count;
 
     /// <summary>Physics steps taken — the honest per-instance rate counter
     /// (repaints inside overlays run at app fps for z-correctness).</summary>
@@ -129,7 +134,6 @@ internal sealed class BallWidget : Widget
 
         _bx = (int)(_px * Math.Max(1, _probeWidth - 1));
         _by = (int)(_py * Math.Max(1, _probeHeight - 1));
-        _trail.Enqueue((_bx, _by, now));
         _steps++;
         Invalidate();
     }
@@ -156,8 +160,6 @@ internal sealed class BallWidget : Widget
         // bounces off the UI strip instead of sliding underneath it
         var (surface, rebuilt) = Pixels(new Rect(r.X, r.Y, r.W, r.H - 1),
             new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
-        if (rebuilt)
-            _trail.Clear();
         _probeHeight = surface.PixelHeight;
         _probeWidth = surface.PixelWidth;
 
@@ -167,13 +169,20 @@ internal sealed class BallWidget : Widget
         while (_trail.Count > 0 && now - _trail.Peek().TsMs > TrailMs)
             _trail.Dequeue();
 
+        // trail points are enqueued here (post-surface) in normalized space
+        _trail.Enqueue((_px, _py, now));
+        while (_trail.Count > 0 && now - _trail.Peek().TsMs > TrailMs)
+            _trail.Dequeue();
+
         surface.Clear();
-        foreach (var (tx, ty, ts) in _trail)
+        foreach (var (fx, fy, ts) in _trail)
         {
             // fade by AGE: oldest dim → newest bright, identical at any fps
             int age = (int)(now - ts);
             int c = 252 - (age * (252 - 236)) / TrailMs;
-            surface.SetPixel(tx, ty, Math.Clamp(c, 236, 252));
+            surface.SetPixel((int)(fx * (surface.PixelWidth - 1)),
+                             (int)(fy * (surface.PixelHeight - 1)),
+                             Math.Clamp(c, 236, 252));
         }
         surface.SetPixel(_bx, _by, 255);
         surface.Draw();

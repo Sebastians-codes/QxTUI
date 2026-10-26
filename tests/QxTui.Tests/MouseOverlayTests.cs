@@ -1469,3 +1469,74 @@ public class ResizeSignTests
         Assert.Equal(23, target.Rect.W);
     }
 }
+
+public class RelayoutGhostTests
+{
+    [Fact]
+    public void VacatedCells_OverCleanCappedWidget_GetRepainted_NotGhosted()
+    {
+        // the ghost-stack bug: a moved widget vacates cells inside a
+        // CLEAN capped neighbour; without erase+force-render those cells
+        // keep the mover's pixels forever
+        var mover = new ParserFuzzProbeWidget();   // paints '#'
+        var capped = new ResizeSignCapped('C');
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
+        mover.Node.Width = 14;
+        capped.Node.Grow = 1;
+        root.Add(mover.Node);
+        root.Add(capped.Node);
+        var term = new FakeTerminal(20, 6);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Thread.Sleep(150);
+        app.RunFrame();
+
+        // shrink the mover: its vacated columns land inside capped's rect
+        mover.Node.Width = 6;
+        app.RunFrame();
+
+        for (int x = capped.Rect.X; x < capped.Rect.Right; x++)
+            for (int y = 0; y < 6; y++)
+                Assert.Equal('C', app.Back[x, y].Char);
+    }
+}
+
+public class TrailSurvivesResizeTests
+{
+    [Fact]
+    public void BallTrail_SurvivesSurfaceRebuild()
+    {
+        var ball = new QxTui.Playground.BallWidget(new QxTui.Reactive.Signal<float>(0.5f));
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
+        ball.Node.Grow = 1;
+        root.Add(ball.Node);
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 120, asyncPresenting: false);
+        var end = DateTime.UtcNow.AddMilliseconds(300);
+        while (DateTime.UtcNow < end)
+        {
+            Thread.Sleep(10);
+            app.RunFrame();
+        }
+        Assert.True(ball.TrailCount > 3, "trail must accumulate");
+
+        // resize -> surface rebuild: trail must REMAP, not vanish
+        term.SimulateResize(24, 10);
+        app.RunFrame();
+        Assert.True(ball.TrailCount > 3,
+            $"trail must survive rebuild, got {ball.TrailCount}");
+    }
+}
+
+internal sealed class ResizeSignCapped : Widget
+{
+    private readonly char _c;
+    public ResizeSignCapped(char c)
+    {
+        _c = c;
+        MaxRenderHz = 5; // deliberately slow: the blink/ghost amplifier
+        Tick(TimeSpan.FromMilliseconds(200), _ => Invalidate());
+    }
+    public override void Render(CellBuffer buffer) =>
+        buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, new Cell { Char = _c, Fg = 7 });
+}

@@ -874,14 +874,29 @@ public sealed class App : IDisposable
                 if (!_changedNodes.Contains(widget.Node))
                     continue;
 
-                // NO previous-rect erase here: cells the moved widget
-                // vacated are either owned by another widget (whose back
-                // pixels are already correct) or owned by nobody
-                // (ClearUncovered below handles them). Erasing blindly
-                // destroyed clean neighbours' pixels — a capped 8Hz
-                // panel then sat blank for up to a tick interval = blink.
-                if (Trace && !widget.Node.PreviousRect.Equals(widget.Rect))
-                    _traceErases.Add($"{widget.GetType().Name}:{widget.Node.PreviousRect}");
+                var prevRect = widget.Node.PreviousRect;
+                if (!prevRect.Equals(default(Rect)) && !prevRect.Equals(widget.Rect))
+                {
+                    // vacated cells MUST be erased: they can sit inside a
+                    // clean neighbour whose last paint predates the write
+                    // that ghosted them (containers paint nothing at all).
+                    // Erasing alone caused the blink, so everyone touched
+                    // by the erase is forced to repaint THIS frame.
+                    _back.FillRect(prevRect.X, prevRect.Y, prevRect.W, prevRect.H, Cell.Empty);
+                    if (Trace)
+                        _traceErases.Add($"{widget.GetType().Name}:{prevRect}");
+                    for (int k = 0; k < _widgets.Count; k++)
+                    {
+                        var wk = _widgets[k];
+                        var wr = wk.Rect;
+                        if (wr.X < prevRect.Right && prevRect.X < wr.Right &&
+                            wr.Y < prevRect.Bottom && prevRect.Y < wr.Bottom)
+                        {
+                            wk.Invalidate();
+                            wk.ForceRenderNext(); // no cap-interval blank
+                        }
+                    }
+                }
                 widget.Invalidate();
                 widget.ForceRenderNext(); // moved widgets repaint NOW, cap or not
             }
