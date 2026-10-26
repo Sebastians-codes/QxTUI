@@ -36,7 +36,7 @@ public readonly record struct KeyEvent(Key Key, char Char)
 /// </summary>
 public sealed class KeyParser
 {
-    private enum State { Ground, Esc, Csi, Ss3 }
+    private enum State { Ground, Esc, Csi, Ss3, Dcs, DcsEsc }
 
     private readonly Queue<KeyEvent> _keys = new(4);
     private readonly Queue<MouseEvent> _mouse = new(4);
@@ -68,6 +68,10 @@ public sealed class KeyParser
                         break;
                     case (byte)'O':
                         _state = State.Ss3;
+                        break;
+                    case (byte)'P':
+                        _dcsLen = 0;
+                        _state = State.Dcs; // XTVERSION et al: DCS ... ST
                         break;
                     default:
                         _state = State.Ground;
@@ -112,6 +116,27 @@ public sealed class KeyParser
                     if (ev.Key != Key.None)
                         _keys.Enqueue(ev);
                 }
+                break;
+
+            case State.Dcs:
+                if (b == 0x18 || b == 0x1a)
+                    _state = State.Ground; // CAN/SUB: VT-standard abort
+                else if (b == 0x1b)
+                    _state = State.DcsEsc;
+                else if (_dcsLen < _dcsBuf.Length)
+                    _dcsBuf[_dcsLen++] = (char)b;
+                break;
+
+            case State.DcsEsc:
+                if (b == (byte)'\\')
+                {
+                    FinalizeDcs();       // ST: end of device string
+                    _state = State.Ground;
+                }
+                else if (b == 0x18 || b == 0x1a)
+                    _state = State.Ground;
+                else
+                    _state = State.Dcs;  // lone ESC inside the string
                 break;
 
             case State.Ss3:
@@ -159,6 +184,19 @@ public sealed class KeyParser
 
     public bool TryReadKey(out KeyEvent ev) => _keys.TryDequeue(out ev);
     public bool TryReadMouse(out MouseEvent ev) => _mouse.TryDequeue(out ev);
+
+    private readonly char[] _dcsBuf = new char[96];
+    private int _dcsLen;
+
+    /// <summary>Terminal identity from the XTVERSION reply (DCS > | name ST),
+    /// e.g. "foot 1.14.0". Null until the terminal answers.</summary>
+    public string? TerminalName { get; private set; }
+
+    private void FinalizeDcs()
+    {
+        if (_dcsLen > 2 && _dcsBuf[0] == '>' && _dcsBuf[1] == '|')
+            TerminalName = new string(_dcsBuf, 2, _dcsLen - 2);
+    }
 
     /// <summary>Cell size in pixels (CSI 16 t reply). Enables pixel-precision
     /// mouse math: 0 until the terminal answers the query.</summary>

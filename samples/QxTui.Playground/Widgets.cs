@@ -82,11 +82,17 @@ internal sealed class BallWidget : Widget
     public int SurfacePixelHeight => _probeHeight;
     private int _probeHeight;
 
-    public BallWidget(Signal<float> speed)
+    /// <param name="tickHz">Fixed physics/repaint rate for this instance.
+    /// Null = follow the app's fps target (TickPerFrame). Different rates
+    /// per instance showcase independent refresh windows.</param>
+    public BallWidget(Signal<float> speed, int? tickHz = null)
     {
         _speed = speed;
         Node.ChildInset = 1; // frame ring; children (slider row) live inside
-        TickPerFrame(); // refresh follows the app's fps target, whatever it is
+        if (tickHz is int hz)
+            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
+        else
+            TickPerFrame(); // refresh follows the app's fps target
     }
 
     /// <summary>0..1 slider → 0.2x..100x, piecewise-exponential with 1.0x

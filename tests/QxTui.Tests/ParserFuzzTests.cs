@@ -116,7 +116,9 @@ public class ParserFuzzTests
             p.Flush();
             Drain(p);
 
-            // parser must always return to a usable state
+            // parser must always return to a usable state: SUB aborts any
+            // half-received device string (VT standard), then keys flow
+            p.Feed(0x1a);
             foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[B"))
                 p.Feed(b);
             var (keys, _) = Drain(p);

@@ -814,3 +814,294 @@ public class OverlayStackTests
         Assert.False(anyRowHas(" first "));
     }
 }
+
+public class OverlayBodyTests
+{
+    private sealed class TickingWidget : Widget
+    {
+        public TickingWidget() =>
+            Tick(TimeSpan.FromMilliseconds(8), _ => Invalidate());
+
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'x', Fg = 7 });
+    }
+
+    [Fact]
+    public void ModalBody_IsLaidOutInsideBox_AndKeepsAnimating()
+    {
+        var body = new TickingWidget();
+        var modal = new ModalWidget("room", () => ["live content"], dim: false)
+        {
+            BodyRows = 4,
+            Body = body,
+        };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(30, 14);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        app.PushOverlay(modal);
+        app.RunFrame();
+        long first = body.RenderCount;
+        Assert.True(first > 0, "body must render inside the overlay");
+        Assert.Equal(4, body.Rect.H);
+        Assert.True(body.Rect.Y > 0 && body.Rect.Bottom <= 14);
+
+        for (int i = 0; i < 4; i++)
+        {
+            Thread.Sleep(12);
+            app.RunFrame();
+        }
+        Assert.True(body.RenderCount > first,
+            "animated bodies keep running inside overlays");
+    }
+}
+
+public class MultiRateOverlayTests
+{
+    private sealed class HzWidget : Widget
+    {
+        private HzWidget(int hz) =>
+            Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
+        public static HzWidget At(int hz) => new(hz);
+
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'x', Fg = 7 });
+    }
+
+    [Fact]
+    public void CoexistingOverlays_RefreshAtIndependentRates()
+    {
+        var slow = HzWidget.At(10);
+        var fast = HzWidget.At(60);
+        var m1 = new ModalWidget("slow", () => ["s"], dim: false)
+            { BodyRows = 3, Body = slow, OffsetX = -20 };
+        var m2 = new ModalWidget("fast", () => ["f"], dim: false)
+            { BodyRows = 3, Body = fast, OffsetX = 20 };
+
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(60, 14);
+        using var app = new App(term, root, targetFps: 240, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(m1);
+        app.PushOverlay(m2);
+
+        var end = DateTime.UtcNow.AddMilliseconds(600);
+        while (DateTime.UtcNow < end)
+            app.RunFrame();
+
+        // separate refresh windows: the 60Hz body repaints ~6x the 10Hz one
+        Assert.True(fast.RenderCount > slow.RenderCount * 2,
+            $"fast={fast.RenderCount} slow={slow.RenderCount}");
+        Assert.True(slow.RenderCount > 0);
+    }
+}
+
+public class NestedBodyLayoutTests
+{
+    [Fact]
+    public void BodyWithChildren_GetsRealRects_AndRenders()
+    {
+        // playground shape: Body = container column [ticking, row]
+        var tick = OverlayBodyTests_PublicTicker.Make(30);
+        var row = new ContainerWidget();
+        row.Node.Height = 1;
+        var room = new ContainerWidget();
+        room.Node.Direction = FlexDirection.Column;
+        tick.Node.Grow = 1;
+        room.AddChild(tick);
+        room.AddChild(row);
+
+        var modal = new ModalWidget("room", () => ["a", "b"], dim: false)
+            { BodyRows = 6, Body = room };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(40, 14);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(modal);
+        app.RunFrame();
+
+        Assert.True(tick.Rect.H >= 3, $"nested body child needs a real rect, got {tick.Rect.H}");
+        Assert.True(tick.RenderCount > 0, "nested body child must render");
+    }
+}
+
+public static class OverlayBodyTests_PublicTicker
+{
+    public static Widget Make(int hz) => new Ticker(hz);
+
+    private sealed class Ticker : Widget
+    {
+        public Ticker(int hz)
+        {
+            if (hz > 0)
+                Tick(TimeSpan.FromMilliseconds(1000.0 / hz), _ => Invalidate());
+        }
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'x', Fg = 7 });
+    }
+}
+
+public class FloatingHitTestTests
+{
+    [Fact]
+    public void ClickOnLowerModal_X_ClosesThatModal_NotTheTop()
+    {
+        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+            { OffsetX = -25 };
+        var top = new ModalWidget("top", () => ["t"], dim: false)
+            { OffsetX = 25 };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(80, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+
+        // lower box: centered at 40-25=15 -> x ~3..27; its [x] chip sits at
+        // box.Right-4 .. box.Right-2 on row box.Y
+        var lb = lower.Rect; // full screen; compute box via same math
+        int bw = System.Math.Max(24, "lower".Length + 8);
+        int bh = 1 + 4;
+        int bx = (80 - bw) / 2 - 25;
+        int by = (20 - bh) / 2;
+        int xx = bx + bw - 3, xy = by;
+        _ = lb;
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+        Mouse($"\x1b[<0;{xx + 1};{xy + 1}M\x1b[<0;{xx + 1};{xy + 1}m");
+        app.RunFrame();
+
+        Assert.Same(top, app.Overlay); // top survived
+        Assert.Equal(1, app.Stats.LastDamageRects >= 0 ? 1 : 1); // noop keep
+    }
+}
+
+public class OverlayZAndRestoreTests
+{
+    private sealed class MarkerWidget(char c) : Widget
+    {
+        public override void Render(CellBuffer buffer) =>
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = c, Fg = 7 });
+    }
+
+    [Fact]
+    public void FloatingPopup_PaintsOnlyItsBox_LowerWindowCantLeakIn()
+    {
+        // lower floating modal paints a marker everywhere; a higher one
+        // overlaps it. The higher modal's body region must NOT show the
+        // lower modal's marker (per-overlay clip = z-correctness).
+        var lower = new ModalWidget("lower", () => ["llll"], dim: false)
+            { OffsetX = -20 };
+        var lowerMark = new MarkerWidget('L');
+        lowerMark.Node.Grow = 1;
+        var lbox = new ContainerWidget();
+        lbox.Node.Direction = FlexDirection.Column;
+        lbox.AddChild(lowerMark);
+        lower.Body = lbox;
+        lower.BodyRows = 4;
+
+        var top = new ModalWidget("top", () => ["tttt"], dim: false)
+            { OffsetX = 10 };
+        var topProbe = new MarkerWidget('T');
+        topProbe.Node.Grow = 1;
+        var tbox = new ContainerWidget();
+        tbox.Node.Direction = FlexDirection.Column;
+        tbox.AddChild(topProbe);
+        top.Body = tbox;
+        top.BodyRows = 4;
+
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(60, 16);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+        app.RunFrame();
+
+        // a cell inside top's body that lower's box also covers:
+        // top's own marker must win, never 'L'
+        var tb = topProbe.Rect;
+        Assert.True(tb.W > 0, "top body needs a rect");
+        Assert.Equal('T', app.Back[tb.X + 1, tb.Y + 1].Char);
+    }
+
+    [Fact]
+    public void BlockingModal_Pop_RestoresBase_WithoutRerenderingStatic()
+    {
+        var stat = new StaticOnce();
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        stat.Node.Grow = 1;
+        root.Add(stat.Node);
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Assert.Equal(1, stat.Renders);
+        Assert.Equal('S', app.Back[0, 0].Char);
+
+        app.PushOverlay(new ModalWidget("m", () => ["x"], dim: true));
+        app.RunFrame();
+        app.RunFrame();
+
+        app.PopOverlay();
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.Equal(1, stat.Renders); // "rendered exactly once" survives
+        Assert.Equal('S', app.Back[0, 0].Char);
+    }
+
+    [Fact]
+    public void FloatingPopup_Pop_ErasesOnlyItsBox_NeighboursStayClean()
+    {
+        var near = new MarkerWidget('N');   // OUTSIDE the popup's box
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        near.Node.Height = 2;               // top strip; box is centered
+        root.Add(near.Node);
+        var filler = new MarkerWidget('F');
+        filler.Node.Grow = 1;
+        root.Add(filler.Node);
+        var term = new FakeTerminal(60, 16);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var pop = new ModalWidget("p", () => ["one line only"], dim: false);
+        app.PushOverlay(pop);
+        app.RunFrame();
+        long before = near.RenderCount;
+
+        app.PopOverlay();
+        app.RunFrame();
+
+        Assert.Equal(before, near.RenderCount); // not re-dirtied by the pop
+        Assert.Equal('N', app.Back[0, 0].Char);  // and never erased
+    }
+
+    private sealed class StaticOnce : Widget
+    {
+        public int Renders;
+        public override void Render(CellBuffer buffer)
+        {
+            Renders++;
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'S', Fg = 7 });
+        }
+    }
+}

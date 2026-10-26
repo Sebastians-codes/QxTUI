@@ -29,28 +29,36 @@ script = [
     (3.0, b"t"),        # theme → Amber
     (4.0, b"]"),        # fps 120 → 240
     (5.0, b"o"),        # open floating popup
-    (5.4, b"8"),        # popup action 8: hwscroll on
-    (5.6, b"8"),        # ...and off again (opt-in feature exercised)
-    (6.0, b"7"),        # modal action 7: stack confirm modal
-    (6.6, b"1"),        # confirm action 1: stack fps modal (3rd level)
-    (7.2, b"3"),        # fps modal action 3: 240fps
-    (7.8, b"\x1b"),    # pop level 3
-    (8.2, b"\x1b"),    # pop level 2
-    (8.6, b"\x1b"),    # pop level 1
-    (9.5, b"2"),        # tab: text page (unicode wrap)
-    (10.5, b"3"),       # tab: ball page (slider + speed label)
-    (11.5, b"1"),       # back to widgets
-    (12.0, b"3"),       # ball page, then resize while it runs
-    (12.2, ("resize", 30, 90)),
-    (12.8, ("resize", 40, 120)),
-    (13.4, b"4"),       # tab: virtualized list
-    (14.0, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
-    (14.6, b"1"),
-    (16.0, b"q"),
+    (5.4, b"9"),        # popup action 9: hwscroll on
+    (5.6, b"9"),        # ...and off again (opt-in feature exercised)
+    (6.0, b"7"),        # popup action 7: stack confirm modal
+    (6.5, b"2"),        # confirm action 2: ball room (live sim in overlay)
+    (7.5, b"\x1b"),    # pop ball room
+    (8.0, b"1"),        # confirm action 1: stack fps modal (3rd level)
+    (8.6, b"3"),        # fps modal action 3: 240fps
+    (9.1, b"\x1b"),    # pop level 3
+    (9.5, b"\x1b"),    # pop level 2
+    (9.9, b"\x1b"),    # pop level 1
+    (10.2, b"o"),       # popup again
+    (10.5, b"8"),       # popup action 8: three ball rooms at 8/30/120 Hz
+    (11.3, b"\x1b"),   # pop room 120
+    (11.6, b"\x1b"),   # pop room 30
+    (11.9, b"\x1b"),   # pop room 8
+    (12.2, b"\x1b"),   # pop popup
+    (12.8, b"2"),       # tab: text page (unicode wrap)
+    (13.8, b"3"),       # tab: ball page (slider + speed label)
+    (14.8, b"1"),       # back to widgets
+    (15.3, b"3"),       # ball page, then resize while it runs
+    (15.5, ("resize", 30, 90)),
+    (16.1, ("resize", 40, 120)),
+    (16.7, b"4"),       # tab: virtualized list
+    (17.3, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
+    (17.9, b"1"),
+    (19.2, b"q"),
 ]
 si = 0
 try:
-    while time.time() - start < 22:
+    while time.time() - start < 26:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
             try:
@@ -118,6 +126,8 @@ checks = {
     "popup opens":      "modals swallow" in text,
     "popup fps buttons": "240fps" in text,
     "modal stack":      "second modal" in text and "third level" in text,
+    "ball room":        "ball room" in text,
+    "ball rooms x3":    "ball 8hz" in text and "ball 30hz" in text and "ball 120hz" in text,
     "popup closes":     "modals swallow" not in screen,
     "clean exit":       "\x1b[?1049l" in text,
 }

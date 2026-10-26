@@ -140,7 +140,9 @@ public sealed class LayoutNode
     private int IntrinsicHeight(Size available) =>
         Measure is { } m ? Math.Min(m(available).Height, available.Height) : available.Height;
 
-    private void LayoutChildren()
+    /// <summary>Internal: overlays live outside the root layout tree, so
+    /// hand-placed subtrees (modal bodies) lay themselves out via this.</summary>
+    internal void LayoutChildren()
     {
         if (_children is null || _children.Count == 0)
             return;

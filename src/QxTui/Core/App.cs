@@ -59,6 +59,7 @@ public sealed class App : IDisposable
     private CellBuffer _back;
     private Renderer _renderer;
     private CellBuffer? _lastSubmitted;
+    private readonly Stack<(Widget Owner, CellBuffer Buf)> _dimSnaps = new();
     private CellBuffer? _snapA;
     private CellBuffer? _snapB;
     private long _snapIdA = long.MinValue;
@@ -241,7 +242,8 @@ public sealed class App : IDisposable
         Dirty(child);
     }
 
-    internal void DetachSubtree(Widget child, bool dispose = true)
+    internal void DetachSubtree(Widget child, bool dispose = true,
+        bool erase = true)
     {
         // remember what the subtree painted BEFORE unregistering: those
         // pixels must be erased from the back buffer or they ghost forever
@@ -249,7 +251,7 @@ public sealed class App : IDisposable
         var rects = new List<Layout.Rect>();
         void Collect(Widget w)
         {
-            rects.Add(w.Rect);
+            w.CollectPaintedRects(rects);
             for (int i = 0; i < w.Children.Count; i++)
                 Collect(w.Children[i]);
         }
@@ -281,15 +283,17 @@ public sealed class App : IDisposable
         if (focusedDetached)
             Focus(null);
 
-        for (int i = 0; i < rects.Count; i++)
-        {
-            var r = rects[i];
-            _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
-        }
+        if (erase)
+            for (int i = 0; i < rects.Count; i++)
+            {
+                var r = rects[i];
+                _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+            }
 
         // erasing also destroys pixels of widgets that STAY registered
         // (anything the detached subtree overlapped): they must repaint or
         // the intersection stays a hole
+        if (!erase) return;
         for (int i = 0; i < _widgets.Count; i++)
         {
             var w = _widgets[i];
@@ -333,37 +337,71 @@ public sealed class App : IDisposable
     public void PushOverlay(Widget overlay)
     {
         _overlays.Add(overlay);
-        if (_registered.Add(overlay))
+        if (!_roots.Contains(overlay))
+            _roots.Add(overlay);   // appended = top of the z-order
+        AttachSubtree(overlay);    // subtree too: hosted bodies must mount
+        if (overlay.BlocksBaseRendering)
         {
-            overlay.Mount(this);
-            _widgets.Add(overlay); // appended = top of the z-order
+            // freeze-frame the base: popping restores this instead of
+            // re-rendering the world (static panels stay "rendered once")
+            var buf = new CellBuffer(_back.Width, _back.Height);
+            _back.Cells.CopyTo(buf.Cells);
+            _dimSnaps.Push((overlay, buf));
         }
         ResetHover();
         overlay.Invalidate();
     }
 
-    /// <summary>Close the modal and repaint what it covered.</summary>
-    public void PopOverlay()
+    /// <summary>Close the top modal and repaint what it covered.</summary>
+    public void PopOverlay() =>
+        PopOverlay(_overlays.Count > 0 ? _overlays[^1] : null!);
+
+    /// <summary>Close a SPECIFIC modal (its own [x] chip): a lower window's
+    /// close button must not pop the window above it.</summary>
+    public void PopOverlay(Widget ov)
     {
-        if (_overlays.Count == 0) return;
+        if (_overlays.Count == 0 || ov is null || !_overlays.Contains(ov))
+            return;
 
-        var ov = _overlays[^1];
-        _overlays.RemoveAt(_overlays.Count - 1);
-        _widgets.Remove(ov);
-        _roots.Remove(ov);
-        _registered.Remove(ov);
-        ov.Dispose();
+        _overlays.Remove(ov);
+        _roots.Remove(ov);                // or RebuildFlat walks it back in
+
+        bool restored = false;
+        if (ov.BlocksBaseRendering)
+        {
+            if (_dimSnaps.Count > 0 && _dimSnaps.Peek().Owner == ov &&
+                _dimSnaps.Peek().Buf.Width == _back.Width &&
+                _dimSnaps.Peek().Buf.Height == _back.Height)
+            {
+                // restore the freeze-frame: base widgets stay CLEAN (a
+                // static panel must not re-render because a modal opened
+                // and closed); the diff vs the dimmed prev emits exactly
+                // the restore — no resync, no InvalidateAll, no blink
+                using var buf = _dimSnaps.Pop().Buf;
+                buf.Cells.CopyTo(_back.Cells);
+                DetachSubtree(ov, dispose: true, erase: false);
+                restored = true;
+            }
+            else
+            {
+                // out-of-order pop of a blocking modal (its [x] under a
+                // newer one): snapshots above it are stale — sledgehammer
+                while (_dimSnaps.Count > 0)
+                    _dimSnaps.Pop().Buf.Dispose();
+            }
+        }
+
+        if (!restored)
+        {
+            DetachSubtree(ov, dispose: true); // erase painted rects only
+            if (ov.BlocksBaseRendering)
+            {
+                _back.Clear();
+                _renderer.Resync(); // terminal shows dim: repaint EVERY cell
+                InvalidateAll();
+            }
+        }
         ResetHover();
-
-        // The dim covered gaps/uncovered regions no widget repaints. Clear
-        // the back buffer but KEEP the renderer's prev frame holding the
-        // dim: the diff then emits erases for every uncovered cell plus
-        // repaints for widget rects. (Syncing prev to the cleared back —
-        // the previous attempt — told the diff "nothing changed" and left
-        // dim pixels on the terminal forever.)
-        _back.Clear();
-        _renderer.Resync(); // terminal still shows the dim: repaint EVERY cell
-        InvalidateAll();
     }
 
     /// <summary>The widget receiving keyboard input, if any.</summary>
@@ -397,10 +435,14 @@ public sealed class App : IDisposable
         // a dragging widget captures all mouse events until release
         if (_pressed is { CapturesMouse: true } cap)
             return cap;
-        if (_overlays.Count > 0)
-            return _overlays[^1];
+        // top-down, hit-test aware: floating popups only own their box, so
+        // a click beside the top window reaches the window underneath
+        // (the X of a lower modal closes THAT modal, not the top one)
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+            if (_overlays[i].HitTest(x, y))
+                return _overlays[i];
         for (int i = _widgets.Count - 1; i >= 0; i--)
-            if (_widgets[i].Rect.Contains(x, y))
+            if (_widgets[i].HitTest(x, y))
                 return _widgets[i];
         return null;
     }
@@ -429,10 +471,19 @@ public sealed class App : IDisposable
     /// <summary>Opt-in hardware scrolling (DECSTBM+SU/SD): repaints only
     /// exposed rows on scroll. Off by default — SU/SD semantics vary
     /// between emulators and a mismatch desyncs the front buffer.</summary>
+    /// <summary>Terminal identity (XTVERSION), null until it answers.</summary>
+    public string? TerminalName => _termName;
+    private string? _termName;
+    private bool _hwScrollUserSet;
+
     public bool HardwareScroll
     {
         get => _renderer.HardwareScroll;
-        set => _renderer.HardwareScroll = value;
+        set
+        {
+            _renderer.HardwareScroll = value;
+            _hwScrollUserSet = true; // manual toggle beats the caps table
+        }
     }
 
     internal void SetCellPixelSize(int w, int h)
@@ -648,6 +699,13 @@ public sealed class App : IDisposable
                 _running = false;
         }
 
+        if (_termName is null && _keyParser.TerminalName is { } name)
+        {
+            _termName = name;
+            if (!_hwScrollUserSet)
+                _renderer.HardwareScroll = Terminal.TerminalCaps.HardwareScrollSafe(name);
+        }
+
         if (_cellPixH == 0 && _keyParser.CellPixH > 0)
         {
             SetCellPixelSize(_keyParser.CellPixW, _keyParser.CellPixH);
@@ -693,6 +751,8 @@ public sealed class App : IDisposable
             _back.Resize(w, h, preserve: false);
             _lastSubmitted?.Dispose();
             _lastSubmitted = null; // size changes; recreated on next submit
+            while (_dimSnaps.Count > 0)
+                _dimSnaps.Pop().Buf.Dispose(); // stale size after resize
             _snapA?.Dispose(); _snapA = null;
             _snapB?.Dispose(); _snapB = null;
             _snapIdA = _snapIdB = long.MinValue;
@@ -782,7 +842,8 @@ public sealed class App : IDisposable
                     // pixels: children must repaint in the same frame (they come
                     // later in pre-order), or they'd blink/vanish
                     for (int c = 0; c < widget.Children.Count; c++)
-                        widget.Children[c].Invalidate();
+                        if (!widget.Children[c].SurvivesParentRepaint)
+                            widget.Children[c].Invalidate();
                 }
             }
         }
@@ -1023,6 +1084,8 @@ public sealed class App : IDisposable
         _lastSubmitted?.Dispose();
         _snapA?.Dispose();
         _snapB?.Dispose();
+        while (_dimSnaps.Count > 0)
+            _dimSnaps.Pop().Buf.Dispose();
         _renderer.Dispose();
         _terminal.Dispose();
     }

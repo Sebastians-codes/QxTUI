@@ -211,11 +211,73 @@ public sealed class ModalWidget : Widget
         Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
     }
 
+    /// <summary>Optional live widget tree hosted inside the box (between
+    /// the text lines and the action chips) — animated content in an
+    /// overlay: overlays repaint every frame, so sims/tickers run fine.
+    /// The body is laid out by hand (overlays live outside the flexbox
+    /// tree); BodyRows reserves its height.</summary>
+    public Widget? Body
+    {
+        get => _body;
+        set
+        {
+            _body = value;
+            if (value is not null)
+            {
+                value.SurvivesParentRepaint = true; // own tick = own rate
+                if (value.Parent is null)
+                    AddChild(value);
+            }
+        }
+    }
+    private Widget? _body;
+
+    public int BodyRows { get; set; }
+
+    /// <summary>Shift the box off-center (floating popups that coexist
+    /// side by side instead of perfectly overlapping).</summary>
+    public int OffsetX { get; set; }
+    public int OffsetY { get; set; }
+
+    /// <summary>Blocking modals own the whole screen (dim click closes);
+    /// floating popups own only their box.</summary>
+    public override bool HitTest(int x, int y)
+    {
+        if (BlocksBaseRendering)
+            return Rect.Contains(x, y);
+        var b = BoxRect(Rect);
+        return x >= b.X && x < b.Right && y >= b.Y && y < b.Bottom;
+    }
+
+    /// <summary>Floating popups paint ONLY inside their box: without this,
+    /// a lower window's lines land inside a higher window's preserved
+    /// body region and show through as glitch pixels.</summary>
+    public override RenderClip Clip
+    {
+        get
+        {
+            var c = base.Clip;
+            if (BlocksBaseRendering) return c;
+            var b = BoxRect(Rect);
+            int x = Math.Max(c.X, b.X), y = Math.Max(c.Y, b.Y);
+            return new RenderClip(x, y,
+                Math.Max(0, Math.Min(c.Right, b.Right) - x),
+                Math.Max(0, Math.Min(c.Bottom, b.Bottom) - y));
+        }
+    }
+
+    internal override void CollectPaintedRects(List<Rect> dst)
+    {
+        // erase-on-detach must match what was painted, or popping a
+        // floating popup wipes the whole screen (the blink you saw)
+        dst.Add(BlocksBaseRendering ? Rect : BoxRect(Rect));
+    }
+
     public override bool HandleKey(KeyEvent ev)
     {
         if (ev.Key == Key.Escape)
         {
-            App?.PopOverlay();
+            App?.PopOverlay(this);
             return true;
         }
         if (ev.Key == Key.Char && ev.Char >= '1' && ev.Char <= '9')
@@ -241,8 +303,19 @@ public sealed class ModalWidget : Widget
         // chips wrap inside the clamped width; the box grows vertically
         int actionRows = _actions.Length == 0 ? 0 : ActionRows(w - 4);
         int h = Math.Min(screen.H - 2,
-            lines.Length + 4 + (actionRows > 0 ? actionRows + 1 : 0));
-        return new Rect((screen.W - w) / 2, (screen.H - h) / 2, w, h);
+            lines.Length + 4 + (actionRows > 0 ? actionRows + 1 : 0)
+            + (BodyRows > 0 ? BodyRows + 1 : 0));
+        int x = Math.Clamp((screen.W - w) / 2 + OffsetX, 0, Math.Max(0, screen.W - w));
+        int y = Math.Clamp((screen.H - h) / 2 + OffsetY, 0, Math.Max(0, screen.H - h));
+        return new Rect(x, y, w, h);
+    }
+
+    private Rect BodyInner(Rect box)
+    {
+        var lines = _lines();
+        return BodyRows > 0
+            ? new Rect(box.X + 2, box.Y + 2 + lines.Length + 1, box.W - 4, BodyRows)
+            : default;
     }
 
     private int ActionRows(int innerW)
@@ -314,7 +387,7 @@ public sealed class ModalWidget : Widget
         // [x] button sits at the box top-right; outside the box closes
         bool closeBtn = local.X >= box.Right - 4 && local.X < box.Right - 1 && local.Y == box.Y;
         if (!insideBox || closeBtn)
-            App?.PopOverlay();
+            App?.PopOverlay(this);
     }
 
     public override void Render(CellBuffer buffer)
@@ -324,8 +397,21 @@ public sealed class ModalWidget : Widget
             buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
 
         var box = BoxRect(screen);
-        buffer.FillRect(box.X, box.Y, box.W, box.H,
-            new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
+        var panel = new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) };
+        // fill in strips AROUND the hosted body: the body's pixels must
+        // survive this repaint or its own tick rate is meaningless
+        var inner = BodyInner(box);
+        if (inner.W > 0 && inner.H > 0)
+        {
+            buffer.FillRect(box.X, box.Y, box.W, Math.Max(0, inner.Y - box.Y), panel);
+            buffer.FillRect(box.X, inner.Bottom, box.W, Math.Max(0, box.Bottom - inner.Bottom), panel);
+            buffer.FillRect(box.X, inner.Y, Math.Max(0, inner.X - box.X), inner.H, panel);
+            buffer.FillRect(inner.Right, inner.Y, Math.Max(0, box.Right - inner.Right), inner.H, panel);
+        }
+        else
+        {
+            buffer.FillRect(box.X, box.Y, box.W, box.H, panel);
+        }
         Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Double,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
         // [x] as a filled chip, same language as the action buttons
@@ -337,6 +423,19 @@ public sealed class ModalWidget : Widget
             buffer.WriteTextClipped(Clip, box.X + 2, box.Y + 2 + i,
                 QxTui.Render.Text.Ellipsize(lines[i], box.W - 4),
                 fg: Theme.Get(ThemeRole.Text), bg: Theme.Get(ThemeRole.PanelBg));
+
+        // hosted body: hand-laid rect between lines and chips; children
+        // paint after the parent in pre-order, so it lands inside the box
+        if (_body is { } body && BodyRows > 0)
+        {
+            var want = BodyInner(box);
+            if (!body.Rect.Equals(want))
+            {
+                body.Node.SetRect(want);
+                body.Node.LayoutChildren(); // overlays skip the root pass
+                body.Invalidate();
+            }
+        }
 
         // action chips: key hint + filled button, wrapped inside the box
         foreach (var (r, _, i) in LayoutActions(box))

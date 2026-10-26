@@ -99,7 +99,8 @@ string[] PopupLines() =>
     $"target:  {app.TargetFps} fps",
     $"bytes/f: {app.Stats.LastBytesWritten:N0}",
     $"mouse:   {(app.CellPixelH > 0 ? $"pixel {app.CellPixelW}x{app.CellPixelH}" : "cell")}",
-    $"hwscroll: {(app.HardwareScroll ? "on" : "off")} (experimental)",
+    $"hwscroll: {(app.HardwareScroll ? "on" : "off")} (auto per terminal)",
+    $"term:    {app.TerminalName ?? "unknown (no XTVERSION reply)"}",
     "",
     "modals swallow all keys;",
     "esc / [x] / dim click closes.",
@@ -117,6 +118,13 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
         ("480fps", () => SetFps(480)),
         ("1000fps", () => SetFps(1000)),
         ("stack", () => app.PushOverlay(MakeConfirmModal())),
+        ("rooms", () =>
+        {
+            // offsets keep the boxes disjoint: overlapping floating
+            // popups paint over each other's bodies every frame
+            foreach (var (hz, ox, oy) in new[] { (8, -40, -8), (30, 0, 0), (120, 40, 8) })
+                app.PushOverlay(MakeBallRoomModal(hz, ox, oy));
+        }),
         ("hwscroll", () =>
         {
             app.HardwareScroll = !app.HardwareScroll;
@@ -125,6 +133,8 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
     ]);
 
 // popover-on-popover: confirm modal opens a third level with fps settings
+// stacked levels don't dim: the base is already dimmed by level 1 —
+// dimming a dimmed scene is just murk
 ModalWidget MakeConfirmModal() => new("confirm",
     () =>
     [
@@ -132,12 +142,47 @@ ModalWidget MakeConfirmModal() => new("confirm",
         "of the first — esc pops",
         "one level at a time.",
     ],
-    dim: true,
+    dim: false,
     actions:
     [
         ("fps settings", () => app.PushOverlay(MakeFpsModal())),
+        ("ball room", () => app.PushOverlay(MakeBallRoomModal())),
         ("close", () => app.PopOverlay()),
     ]);
+
+// a LIVE ball sim inside the overlay stack: overlays repaint every
+// frame, so animated bodies run at full rate; the slider drives both
+// balls (shared signal)
+ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
+{
+    var m = new ModalWidget(hz > 0 ? $"ball {hz}hz" : "ball room",
+        () =>
+        [
+            hz > 0
+                ? $"ticks + repaints at {hz} Hz only"
+                : "a live ball sim inside",
+            hz > 0
+                ? "— its own refresh window"
+                : "the overlay stack — the",
+            hz > 0
+                ? "inside the overlay stack."
+                : "slider drives BOTH balls.",
+        ],
+        dim: false,
+        actions: [("close", () => app.PopOverlay())])
+    { BodyRows = 10, OffsetX = ox, OffsetY = oy };
+    var room = new ContainerWidget();
+    room.Node.Direction = FlexDirection.Column;
+    var b2 = new BallWidget(speed, tickHz: hz > 0 ? hz : null);
+    b2.Node.Grow = 1;
+    room.AddChild(b2);
+    var srow = new ContainerWidget();
+    srow.Node.Height = 1;
+    srow.AddChild(new SliderWidget(speed));
+    room.AddChild(srow);
+    m.Body = room;
+    return m;
+}
 
 ModalWidget MakeFpsModal() => new("fps settings",
     () =>
@@ -148,7 +193,7 @@ ModalWidget MakeFpsModal() => new("fps settings",
         $"effective: {app.TargetFps} fps (may adapt down)",
         $"presented: {app.Stats.PresentedFps.ToString("F0")} fps",
     ],
-    dim: true,
+    dim: false,
     actions:
     [
         ("30", () => SetFps(30)),

@@ -42,8 +42,15 @@ public abstract class Widget
 
     public Rect Rect => Node.Rect;
 
-    /// <summary>Clip region for painting: widgets must never draw outside it.</summary>
-    public RenderClip Clip => new(Rect.X, Rect.Y, Rect.W, Rect.H);
+    /// <summary>Clip region for painting: widgets must never draw outside it.
+    /// Overridable: floating overlays clip to their box so lower windows
+    /// can't paint into a higher window's territory (z-correctness without
+    /// full-scene recomposition).</summary>
+    public virtual RenderClip Clip => new(Rect.X, Rect.Y, Rect.W, Rect.H);
+
+    /// <summary>Rects this widget actually PAINTS (for erase-on-detach).
+    /// Default: the whole rect; floating modals paint only their box.</summary>
+    internal virtual void CollectPaintedRects(List<Rect> dst) => dst.Add(Rect);
 
     /// <summary>The app this widget is mounted in; null before AddWidget.</summary>
     public App? App { get; private set; }
@@ -231,6 +238,17 @@ public abstract class Widget
     /// widget whose last paint is newer than 1/Hz stays dirty and paints
     /// on the next eligible frame — deferred, never dropped. Lets a HUD
     /// tick at 5Hz while a ball animates at 120Hz in the same scene.</summary>
+    /// <summary>Mouse hit-test. Overlays override this: a floating popup
+    /// only owns clicks inside its box, so clicks beside it reach the
+    /// window underneath instead of being swallowed by the top layer.</summary>
+    public virtual bool HitTest(int x, int y) => Rect.Contains(x, y);
+
+    /// <summary>Set when this widget's pixels SURVIVE its parent's repaint
+    /// (the parent paints around them): the parent-repaint cascade then
+    /// leaves it alone and its own tick rate governs its refresh —
+    /// independent refresh windows inside a live parent.</summary>
+    public bool SurvivesParentRepaint { get; set; }
+
     public double MaxRenderHz { get; set; }
     private long _lastRenderTs = long.MinValue / 2;
 

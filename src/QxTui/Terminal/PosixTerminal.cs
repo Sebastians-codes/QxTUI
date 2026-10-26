@@ -87,6 +87,7 @@ public sealed class PosixTerminal : ITerminal
         // would break all input otherwise
         WriteRaw("\x1b[16t");    // cell size in px
         WriteRaw("\x1b[14t");    // window size in px (fallback cell probe)
+        WriteRaw("\x1b[>q");     // XTVERSION: who are we talking to?
         WriteRaw("\x1b[2J");      // clear
     }
 
