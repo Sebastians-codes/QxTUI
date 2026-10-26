@@ -260,7 +260,11 @@ foreach (var hz in new[] { 8, 30, 120 })
     var cap = hz;
     BallWidget? capped = null;
     col.AddChild(new LabelWidget(() =>
-        $"capped {cap} Hz · {capped?.RenderCount ?? 0}"));
+        // renders pause off-tab BY DESIGN (detached pages cost zero —
+        // the damage-isolation contract); steps keep running because
+        // ticks survive detach. Showing both makes the pause honest.
+        $"capped {cap} Hz · {capped?.RenderCount ?? 0} renders"
+        + $" · {capped?.Steps ?? 0} steps"));
     col.Children[col.Children.Count - 1].Node.Height = 1;
     var cb = new BallWidget(speed, tickHz: cap) { MaxRenderHz = cap };
     cb.Node.Grow = 1f;
