@@ -1243,7 +1243,7 @@ public class RightDragResizeTests
 {
     private static (App app, FakeTerminal term, Widget target) Make()
     {
-        var target = new QxTui.Tests.ParserFuzzProbeWidget();
+        var target = new QxTui.Tests.ParserFuzzProbeWidget { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
@@ -1320,7 +1320,7 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void SiblingResize_ShiftsTheNeighbour()
     {
-        var a = new ParserFuzzProbeWidget();
+        var a = new ParserFuzzProbeWidget { Resizable = true };
         var b = new ParserFuzzProbeWidget();
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
         a.Node.Grow = 1;
@@ -1348,7 +1348,7 @@ public class ResizeEdgeCaseTests
         var col = new ContainerWidget();
         col.Node.Direction = FlexDirection.Column;
         col.Node.Height = 5;
-        var child = new ParserFuzzProbeWidget();
+        var child = new ParserFuzzProbeWidget { Resizable = true };
         child.Node.Grow = 1;
         col.AddChild(child);
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1446,7 +1446,7 @@ public class ResizeSignTests
     {
         // grab-side sign: left-of-center grab means the LEFT edge follows
         // the cursor — dragging left grows
-        var target = new ParserFuzzProbeWidget();
+        var target = new ParserFuzzProbeWidget { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
@@ -1609,7 +1609,7 @@ public class ResizePropagationTests
     [Fact]
     public void ResizingChild_GrowsFixedAncestors_AndStealsFromSiblings()
     {
-        var child = new ParserFuzzProbeWidget();
+        var child = new ParserFuzzProbeWidget { Resizable = true };
         child.Node.Height = 4;
         var col = new ContainerWidget();
         col.Node.Direction = FlexDirection.Column;
@@ -1636,5 +1636,30 @@ public class ResizePropagationTests
         Assert.Equal(15, col.Rect.W);    // ancestor propagated the delta
         Assert.True(other.Rect.W < other0,
             $"sibling must yield, was {other0} now {other.Rect.W}");
+    }
+}
+
+public class ResizeOptInTests
+{
+    [Fact]
+    public void RightDrag_DoesNothing_UnlessOptedIn()
+    {
+        var target = new ParserFuzzProbeWidget(); // Resizable defaults false
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        target.Node.Height = 5;
+        root.Add(target.Node);
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        int w0 = target.Rect.W;
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(
+                     "\x1b[<2;16;3M\x1b[<34;12;3M\x1b[<2;12;3m"))
+            term.QueueInput(b);
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.Equal(w0, target.Rect.W); // opt-in respected
     }
 }

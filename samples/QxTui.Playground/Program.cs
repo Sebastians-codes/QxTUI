@@ -361,6 +361,12 @@ router.Switch("widgets");
 
 var tabBar = new TabBarWidget(router, ["widgets", "text", "ball", "list"]);
 
+// resize is OPT-IN: the playground opts its showcase components in so
+// the gesture is discoverable without making every leaf a target
+foreach (var w in new Widget[]
+         { staticPanel, stats, themeBtn, filledDemo, openBtn, ball, bigList })
+    w.Resizable = true;
+
 app.SetRoot(UI.Column(1,
     hud.Height(1),
     tabBar.Height(1),

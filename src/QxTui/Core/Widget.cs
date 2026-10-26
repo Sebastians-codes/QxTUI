@@ -238,10 +238,11 @@ public abstract class Widget
     /// widget whose last paint is newer than 1/Hz stays dirty and paints
     /// on the next eligible frame — deferred, never dropped. Lets a HUD
     /// tick at 5Hz while a ball animates at 120Hz in the same scene.</summary>
-    /// <summary>Right-click-drag on the right/bottom edge (or corner)
-    /// resizes the element by pinning explicit flex sizes. Opt-out for
-    /// widgets whose rect is managed elsewhere (overlays).</summary>
-    public bool Resizable { get; set; } = true;
+    /// <summary>OPT-IN: right-click-drag resizes the element (grab-side
+    /// edge follows the cursor; flow siblings absorb the delta). Default
+    /// false — a component is resizable only when its author says so.
+    /// ModalWidget opts in at class level (windows are resizable).</summary>
+    public bool Resizable { get; set; }
 
     private bool _resizing;
     private bool _rsApplied;
