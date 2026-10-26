@@ -43,24 +43,24 @@ script = [
     (9.5, b"\x1b"),    # pop level 2
     (9.9, b"\x1b"),    # pop level 1
     (10.2, b"o"),       # popup again
-    (10.5, b"8"),       # popup action 8: three ball rooms at 8/30/120 Hz
-    (11.3, b"\x1b"),   # pop room 120
-    (11.6, b"\x1b"),   # pop room 30
-    (11.9, b"\x1b"),   # pop room 8
-    (12.2, b"\x1b"),   # pop popup
-    (12.8, b"2"),       # tab: text page (unicode wrap)
-    (13.8, b"3"),       # tab: ball page (slider + speed label)
-    (14.8, b"1"),       # back to widgets
-    (15.3, b"3"),       # ball page, then resize while it runs
-    (15.5, ("resize", 30, 90)),
-    (16.1, ("resize", 40, 120)),
-    (16.7, b"4"),       # tab: virtualized list
-    (17.3, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
-    (17.9, b"1"),
-    (18.2, b"\x1b[<2;104;37M"),   # right-press stats panel right edge
-    (18.4, b"\x1b[<34;110;37M"),  # drag wider
-    (18.6, b"\x1b[<2;110;37m"),   # release
-    (19.2, b"q"),
+    (10.4, b"\x1b[<2;60;20M"),   # right-press inside the popup
+    (10.5, b"\x1b[<34;70;24M"),  # drag: resize the popup (opt-in demo)
+    (10.6, b"\x1b[<2;70;24m"),   # release
+    (10.8, b"8"),       # popup action 8: three ball rooms at 8/30/120 Hz
+    (11.6, b"\x1b"),   # pop room 120
+    (11.9, b"\x1b"),   # pop room 30
+    (12.2, b"\x1b"),   # pop room 8
+    (12.5, b"\x1b"),   # pop popup
+    (13.1, b"2"),       # tab: text page (unicode wrap)
+    (14.1, b"3"),       # tab: ball page (slider + speed label)
+    (15.1, b"1"),       # back to widgets
+    (15.6, b"3"),       # ball page, then resize while it runs
+    (15.8, ("resize", 30, 90)),
+    (16.4, ("resize", 40, 120)),
+    (17.0, b"4"),       # tab: virtualized list
+    (17.6, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
+    (18.2, b"1"),
+    (19.5, b"q"),
 ]
 si = 0
 try:

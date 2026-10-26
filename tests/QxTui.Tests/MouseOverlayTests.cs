@@ -1398,7 +1398,8 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void Modal_RightDrag_ResizesItsBox()
     {
-        var modal = new ModalWidget("box", () => ["one line"], dim: false);
+        var modal = new ModalWidget("box", () => ["one line"], dim: false)
+            { Resizable = true };
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -1551,7 +1552,7 @@ public class ModalResizeTests
     {
         var body = new ResizeSignCapped('B');
         var modal = new ModalWidget("box", () => ["one"], dim: false)
-            { BodyRows = 3, Body = body };
+            { BodyRows = 3, Body = body, Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         var term = new FakeTerminal(40, 20);
@@ -1577,7 +1578,8 @@ public class ModalResizeTests
     public void ResizedModal_LeavesNoGhostOfItsOldBox()
     {
         var bg = new ResizeSignCapped('G');
-        var modal = new ModalWidget("box", () => ["one"], dim: false);
+        var modal = new ModalWidget("box", () => ["one"], dim: false)
+            { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         bg.Node.Grow = 1;

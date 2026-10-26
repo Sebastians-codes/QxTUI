@@ -108,7 +108,11 @@ string[] PopupLines() =>
 
 void SetFps(int v) => app.SetTargetFps(v); // TargetFpsSignal updates HUDs
 
-ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
+// the one resizable component in the playground: the popup spawned by
+// the open-popup button — everything else keeps Resizable = false
+ModalWidget MakePopup()
+{
+    var m = new ModalWidget("popup", PopupLines, dim: false,
     actions:
     [
         ("30fps", () => SetFps(30)),
@@ -131,6 +135,9 @@ ModalWidget MakePopup() => new("popup", PopupLines, dim: false,
             app.InvalidateAll();
         }),
     ]);
+    m.Resizable = true; // the one resizable component in the playground
+    return m;
+}
 
 // popover-on-popover: confirm modal opens a third level with fps settings
 // stacked levels don't dim: the base is already dimmed by level 1 —
@@ -360,12 +367,6 @@ router.Register("widgets", () => widgetsPage)
 router.Switch("widgets");
 
 var tabBar = new TabBarWidget(router, ["widgets", "text", "ball", "list"]);
-
-// resize is OPT-IN: the playground opts its showcase components in so
-// the gesture is discoverable without making every leaf a target
-foreach (var w in new Widget[]
-         { staticPanel, stats, themeBtn, filledDemo, openBtn, ball, bigList })
-    w.Resizable = true;
 
 app.SetRoot(UI.Column(1,
     hud.Height(1),
