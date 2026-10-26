@@ -14,17 +14,28 @@ public sealed class LabelWidget : Widget
     private readonly ThemeRole _fg;
     private readonly ThemeRole? _bg;
 
-    public LabelWidget(Func<string> text, ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
+    private LabelWidget(Func<string> text, ThemeRole fg, ThemeRole? bg, bool live)
     {
         _text = text;
         _fg = fg;
         _bg = bg;
+        // a provider is only evaluated WHEN we render: without a heartbeat
+        // a Func label paints once and its text is stale pixels forever
+        // (the "counters don't increase until I hover it" bug)
+        if (live)
+            Tick(TimeSpan.FromMilliseconds(250), _ => Invalidate());
     }
 
-    /// <summary>Signal-bound: re-renders whenever the source changes.</summary>
+    public LabelWidget(Func<string> text, ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
+        : this(text, fg, bg, live: true)
+    {
+    }
+
+    /// <summary>Signal-bound: re-renders whenever the source changes —
+    /// event-driven, no heartbeat needed.</summary>
     public LabelWidget(Signal<float> source, Func<float, string> format,
         ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
-        : this(() => format(source.Value), fg, bg)
+        : this(() => format(source.Value), fg, bg, live: false)
     {
         OnSignal(source);
     }

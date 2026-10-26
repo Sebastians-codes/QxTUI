@@ -1209,3 +1209,32 @@ public class ClickToRaiseTests
         Assert.Equal('L', app.Back[ox, oy].Char);
     }
 }
+
+public class LiveLabelTests
+{
+    [Fact]
+    public void FuncLabel_RepaintsPeriodically_TextNeverStale()
+    {
+        int n = 0;
+        var label = new LabelWidget(() => $"count {n}");
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        label.Node.Height = 1;
+        root.Add(label.Node);
+        var term = new FakeTerminal(20, 3);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        var row0 = string.Concat(Enumerable.Range(0, 20).Select(x => app.Back[x, 0].Char));
+        Assert.Contains("count 0", row0);
+
+        n = 7;
+        var end = DateTime.UtcNow.AddMilliseconds(400);
+        while (DateTime.UtcNow < end)
+        {
+            Thread.Sleep(20);
+            app.RunFrame();
+        }
+        var row1 = string.Concat(Enumerable.Range(0, 20).Select(x => app.Back[x, 0].Char));
+        Assert.Contains("count 7", row1); // heartbeat repainted it
+    }
+}
