@@ -1238,3 +1238,71 @@ public class LiveLabelTests
         Assert.Contains("count 7", row1); // heartbeat repainted it
     }
 }
+
+public class RightDragResizeTests
+{
+    private static (App app, FakeTerminal term, Widget target) Make()
+    {
+        var target = new QxTui.Tests.ParserFuzzProbeWidget();
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        target.Node.Height = 5;
+        root.Add(target.Node);
+        var term = new FakeTerminal(20, 10);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        return (app, term, target);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void RightDragOnRightEdge_Widens()
+    {
+        var (app, term, target) = Make();
+        int w0 = target.Rect.W;
+
+        Mouse(term, "\x1b[<2;20;3M");    // right press on right edge (x=19)
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;16;3M");   // drag left 4 cells, button 2 held
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;16;3m");    // release
+        app.RunFrame();
+
+        Assert.Equal(w0 - 4, target.Rect.W);
+    }
+
+    [Fact]
+    public void RightDragOnCorner_ResizesBothAxes()
+    {
+        var (app, term, target) = Make();
+        int w0 = target.Rect.W, h0 = target.Rect.H;
+
+        Mouse(term, "\x1b[<2;20;5M");    // corner (x=19, y=4 bottom row)
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;17;8M");  // +? left 3, down 3
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;17;8m");
+        app.RunFrame();
+
+        Assert.Equal(w0 - 3, target.Rect.W);
+        Assert.Equal(h0 + 3, target.Rect.H);
+    }
+
+    [Fact]
+    public void RightPressAwayFromEdges_DoesNotResize()
+    {
+        var (app, term, target) = Make();
+        int w0 = target.Rect.W;
+
+        Mouse(term, "\x1b[<2;10;3M\x1b[<34;6;3M\x1b[<2;6;3m");
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.Equal(w0, target.Rect.W);
+    }
+}

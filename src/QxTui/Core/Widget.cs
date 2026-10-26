@@ -238,6 +238,61 @@ public abstract class Widget
     /// widget whose last paint is newer than 1/Hz stays dirty and paints
     /// on the next eligible frame — deferred, never dropped. Lets a HUD
     /// tick at 5Hz while a ball animates at 120Hz in the same scene.</summary>
+    /// <summary>Right-click-drag on the right/bottom edge (or corner)
+    /// resizes the element by pinning explicit flex sizes. Opt-out for
+    /// widgets whose rect is managed elsewhere (overlays).</summary>
+    public bool Resizable { get; set; } = true;
+
+    private bool _resizing;
+    private int _rsEdges;           // 1 = right, 2 = bottom, 3 = corner
+    private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
+
+    /// <summary>Which resize edges contain the point (0 = none).</summary>
+    internal int ResizeEdgeAt(int x, int y)
+    {
+        var r = Rect;
+        int e = 0;
+        if (x == r.Right - 1) e |= 1;
+        if (y == r.Bottom - 1) e |= 2;
+        return e;
+    }
+
+    internal void BeginResize(MouseEvent ev, int edges, int cellW, int cellH)
+    {
+        _resizing = true;
+        _rsEdges = edges;
+        _rsStartX = ev.Px >= 0 && cellW > 0 ? ev.Px : ev.X;
+        _rsStartY = ev.Py >= 0 && cellH > 0 ? ev.Py : ev.Y;
+        _rsStartW = Rect.W;
+        _rsStartH = Rect.H;
+        Node.Grow = 0f; // manual size wins over flex distribution
+    }
+
+    internal bool ApplyResize(MouseEvent ev, int cellW, int cellH,
+        Action layoutDirty)
+    {
+        if (!_resizing) return false;
+        int cx = ev.Px >= 0 && cellW > 0 ? ev.Px / cellW : ev.X;
+        int cy = ev.Py >= 0 && cellH > 0 ? ev.Py / cellH : ev.Y;
+        int sx = ev.Px >= 0 && cellW > 0 ? _rsStartX / cellW : _rsStartX;
+        int sy = ev.Py >= 0 && cellH > 0 ? _rsStartY / cellH : _rsStartY;
+        bool changed = false;
+        if ((_rsEdges & 1) != 0)
+        {
+            int w = Math.Max(1, _rsStartW + (cx - sx));
+            if (w != Node.Width) { Node.Width = w; changed = true; }
+        }
+        if ((_rsEdges & 2) != 0)
+        {
+            int h = Math.Max(1, _rsStartH + (cy - sy));
+            if (h != Node.Height) { Node.Height = h; changed = true; }
+        }
+        if (changed) layoutDirty();
+        return changed;
+    }
+
+    internal void EndResize() => _resizing = false;
+
     /// <summary>Mouse hit-test. Overlays override this: a floating popup
     /// only owns clicks inside its box, so clicks beside it reach the
     /// window underneath instead of being swallowed by the top layer.</summary>

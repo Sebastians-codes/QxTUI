@@ -537,6 +537,32 @@ public sealed class App : IDisposable
             target.Invalidate();
         }
 
+        // right-drag on an element's edge/corner = resize gesture
+        if (target is not null && ev.Kind == MouseKind.Press && ev.Button == 2)
+        {
+            int edge = target.Resizable ? target.ResizeEdgeAt(ev.X, ev.Y) : 0;
+            if (edge != 0)
+            {
+                _resizing = target;
+                target.BeginResize(ev, edge, _cellPixW, _cellPixH);
+                return;
+            }
+        }
+        if (_resizing is { } rw)
+        {
+            if (ev.Kind == MouseKind.Motion)
+            {
+                rw.ApplyResize(ev, _cellPixW, _cellPixH, () => _needsLayout = true);
+                return;
+            }
+            if (ev.Kind == MouseKind.Release)
+            {
+                rw.EndResize();
+                _resizing = null;
+                return;
+            }
+        }
+
         // click-to-raise: clicking anywhere in a floating window (or its
         // hosted body) brings it to the top of the stack, like a WM
         if (ev.Kind == MouseKind.Press && target is not null)
@@ -572,6 +598,7 @@ public sealed class App : IDisposable
     }
 
     private Widget? _pressed;
+    private Widget? _resizing;
 
     private void ReleasePressed()
     {

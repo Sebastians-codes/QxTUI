@@ -57,6 +57,9 @@ script = [
     (16.7, b"4"),       # tab: virtualized list
     (17.3, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
     (17.9, b"1"),
+    (18.2, b"\x1b[<2;104;37M"),   # right-press stats panel right edge
+    (18.4, b"\x1b[<34;110;37M"),  # drag wider
+    (18.6, b"\x1b[<2;110;37m"),   # release
     (19.2, b"q"),
 ]
 si = 0

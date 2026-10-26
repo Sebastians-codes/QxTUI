@@ -219,6 +219,7 @@ public sealed class ModalWidget : Widget
         _actions = actions ?? [];
         Clickable = true;
         CapturesMouse = true; // title-bar drags survive leaving the box
+        Resizable = false;    // rect is hand-managed per frame
         BlocksBaseRendering = dim; // floating popups keep the background live
         Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
     }
