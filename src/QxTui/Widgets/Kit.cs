@@ -225,6 +225,7 @@ public sealed class ModalWidget : Widget
 
     private bool _dragging;
     private int _grabDX, _grabDY;
+    private Rect _lastBox;
 
     /// <summary>Optional live widget tree hosted inside the box (between
     /// the text lines and the action chips) — animated content in an
@@ -270,18 +271,22 @@ public sealed class ModalWidget : Widget
         return (b.W, b.H);
     }
 
+
     internal override void ApplyResizeSize(int w, int h)
     {
-        // the box is centered by default: resizing would re-center it and
-        // the grabbed edge would move at half cursor speed (feels
-        // inverted). Pin the top-left so edges track the cursor 1:1.
-        var before = BoxRect(Rect);
+        // center-mirrored: the box re-centers as it grows — that mirror
+        // motion IS the intended feel, so no pinning
         ForceW = w;
         ForceH = h;
-        var after = BoxRect(Rect);
-        OffsetX += before.X - after.X;
-        OffsetY += before.Y - after.Y;
     }
+
+    internal override (int X, int Y) ResizeCenter()
+    {
+        var b = BoxRect(Rect);
+        return (b.X + b.W / 2, b.Y + b.H / 2);
+    }
+
+    internal override bool CenterMirroredResize => true; // free-floating
 
     /// <summary>Blocking modals own the whole screen (dim click closes);
     /// floating popups own only their box.</summary>
@@ -358,10 +363,15 @@ public sealed class ModalWidget : Widget
 
     private Rect BodyInner(Rect box)
     {
+        // body height is DERIVED from the box, so a right-drag resize
+        // grows the body with its parent instead of leaving a gap
         var lines = _lines();
-        return BodyRows > 0
-            ? new Rect(box.X + 2, box.Y + 2 + lines.Length + 1, box.W - 4, BodyRows)
-            : default;
+        int actionRows = _actions.Length == 0 ? 0 : ActionRows(box.W - 4);
+        int top = box.Y + 2 + lines.Length + 1;
+        // gap + border, plus the chip zone (rows + its gap) when present
+        int bottomZone = 2 + (actionRows > 0 ? actionRows + 1 : 0);
+        int h = Math.Max(0, box.Bottom - bottomZone - top);
+        return h > 0 ? new Rect(box.X + 2, top, box.W - 4, h) : default;
     }
 
     private int ActionRows(int innerW)
@@ -474,6 +484,12 @@ public sealed class ModalWidget : Widget
             buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
 
         var box = BoxRect(screen);
+        // a moved/resized box leaves its old pixels behind (the overlay's
+        // own rect never changes, so no relayout erase covers it): erase
+        // and repaint what's underneath in the same frame
+        if (_lastBox != default && !_lastBox.Equals(box))
+            App?.EraseInvalidate(_lastBox, this);
+        _lastBox = box;
         // opaque box, every frame: preserved body regions let LOWER
         // windows' pixels leak through wherever boxes overlap — full
         // repaint is the only z-correct choice for stacked floaters

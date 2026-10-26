@@ -77,9 +77,14 @@ public sealed class LayoutNode
     /// <summary>Arbitrary payload (widget attachment point).</summary>
     public object? Tag { get; set; }
 
+    /// <summary>Parent node, set on Add. Needed for resize propagation:
+    /// a resized child must grow its fixed-size ancestors to take space.</summary>
+    public LayoutNode? Parent { get; private set; }
+
     public LayoutNode Add(LayoutNode child)
     {
         (_children ??= []).Add(child);
+        child.Parent = this;
         return this;
     }
 

@@ -1264,50 +1264,48 @@ public class RightDragResizeTests
     public void RightDragOnRightEdge_Widens()
     {
         var (app, term, target) = Make();
-        int w0 = target.Rect.W;
 
-        Mouse(term, "\x1b[<2;20;3M");    // right press on right edge (x=19)
+        // center-mirrored: grab at x=19 (dist 9 from center 10, corr +1),
+        // move to x=15 -> half=6 -> W=12
+        Mouse(term, "\x1b[<2;20;3M");
         app.RunFrame();
-        Mouse(term, "\x1b[<34;16;3M");   // drag left 4 cells, button 2 held
+        Mouse(term, "\x1b[<34;16;3M");
         app.RunFrame();
-        Mouse(term, "\x1b[<2;16;3m");    // release
+        Mouse(term, "\x1b[<2;16;3m");
         app.RunFrame();
 
-        Assert.Equal(w0 - 4, target.Rect.W);
+        Assert.Equal(16, target.Rect.W);
     }
 
     [Fact]
     public void RightDragOnCorner_ResizesBothAxes()
     {
         var (app, term, target) = Make();
-        int w0 = target.Rect.W, h0 = target.Rect.H;
 
-        Mouse(term, "\x1b[<2;20;5M");    // corner (x=19, y=4 bottom row)
+        Mouse(term, "\x1b[<2;20;5M");
         app.RunFrame();
-        Mouse(term, "\x1b[<34;17;8M");  // +? left 3, down 3
+        Mouse(term, "\x1b[<34;16;8M");
         app.RunFrame();
-        Mouse(term, "\x1b[<2;17;8m");
+        Mouse(term, "\x1b[<2;16;8m");
         app.RunFrame();
 
-        Assert.Equal(w0 - 3, target.Rect.W);
-        Assert.Equal(h0 + 3, target.Rect.H);
+        Assert.Equal(16, target.Rect.W);
+        Assert.Equal(8, target.Rect.H); // 5 + dy 3
     }
 
     [Fact]
     public void RightDragAnywhereInside_Resizes()
     {
-        // anywhere-inside semantics: no edge hunting required
         var (app, term, target) = Make();
-        int w0 = target.Rect.W;
 
-        Mouse(term, "\x1b[<2;16;3M");  // right-press right of center
+        Mouse(term, "\x1b[<2;16;3M");
         app.RunFrame();
-        Mouse(term, "\x1b[<34;12;3M"); // drag left 4 -> shrinks
+        Mouse(term, "\x1b[<34;12;3M");
         app.RunFrame();
         Mouse(term, "\x1b[<2;12;3m");
         app.RunFrame();
 
-        Assert.Equal(w0 - 4, target.Rect.W);
+        Assert.Equal(16, target.Rect.W); // delta: 20 - 4
     }
 }
 
@@ -1332,24 +1330,21 @@ public class ResizeEdgeCaseTests
         var term = new FakeTerminal(20, 6);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
-        int aw = a.Rect.W, bx = b.Rect.X;
 
-        Mouse(term, "\x1b[<2;10;3M");   // a's right edge (a = 0..9)
+        Mouse(term, "\x1b[<2;10;3M");   // inside a, right of its center
         app.RunFrame();
-        Mouse(term, "\x1b[<34;6;3M");   // drag left 4
+        Mouse(term, "\x1b[<34;6;3M");   // toward center: a shrinks to 2
         app.RunFrame();
         Mouse(term, "\x1b[<2;6;3m");
         app.RunFrame();
 
-        Assert.Equal(aw - 4, a.Rect.W);
-        Assert.Equal(bx - 4, b.Rect.X); // neighbour followed
+        Assert.Equal(6, a.Rect.W);
+        Assert.Equal(6, b.Rect.X);       // neighbour followed
     }
 
     [Fact]
     public void RightDragInsideChild_ResizesTheChildComponent()
     {
-        // anywhere-inside semantics: the component under the cursor is
-        // the one that resizes, stretched child or not
         var col = new ContainerWidget();
         col.Node.Direction = FlexDirection.Column;
         col.Node.Height = 5;
@@ -1362,14 +1357,14 @@ public class ResizeEdgeCaseTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        Mouse(term, "\x1b[<2;16;2M");  // inside the child, right of center
+        Mouse(term, "\x1b[<2;16;2M");
         app.RunFrame();
-        Mouse(term, "\x1b[<34;12;2M"); // dx -4 -> shrinks
+        Mouse(term, "\x1b[<34;12;2M");
         app.RunFrame();
         Mouse(term, "\x1b[<2;12;2m");
         app.RunFrame();
 
-        Assert.Equal(16, child.Rect.W); // 20 - 4
+        Assert.Equal(16, child.Rect.W); // delta, clamped by container 20
     }
 
     [Fact]
@@ -1440,33 +1435,35 @@ public class ResizeEdgeCaseTests
 
 public class ResizeSignTests
 {
-    [Fact]
-    public void GrabLeftHalf_DragLeft_Grows()
+    private static void MouseSeq(FakeTerminal term, string seq)
     {
-        // outward on ANY side grows: the sign comes from which side of
-        // the element's center the grab started
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void GrabLeftHalf_DragLeft_Shrinks()
+    {
+        // flow widgets: plain delta — leftward drag narrows from any
+        // grab point
         var target = new ParserFuzzProbeWidget();
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
-        target.Node.Width = 20;   // fixed, inside a 40-wide viewport
+        target.Node.Width = 20;
         root.Add(target.Node);
         var term = new FakeTerminal(40, 10);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        // grab at x=4 (left of center 10), drag left to x=1: grows +3
-        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<2;5;3M"))
-            term.QueueInput(b);
+        MouseSeq(term, "\x1b[<2;5;3M");
         app.RunFrame();
-        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<34;2;3M"))
-            term.QueueInput(b);
+        MouseSeq(term, "\x1b[<34;2;3M");
         app.RunFrame();
-        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<2;2;3m"))
-            term.QueueInput(b);
+        MouseSeq(term, "\x1b[<2;2;3m");
         app.RunFrame();
 
-        Assert.Equal(23, target.Rect.W);
+        Assert.Equal(17, target.Rect.W); // 20 - 3
     }
 }
 
@@ -1539,4 +1536,105 @@ internal sealed class ResizeSignCapped : Widget
     }
     public override void Render(CellBuffer buffer) =>
         buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, new Cell { Char = _c, Fg = 7 });
+}
+
+public class ModalResizeTests
+{
+    private static void MouseSeq(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void ResizedModal_BodyGrowsWithTheBox()
+    {
+        var body = new ResizeSignCapped('B');
+        var modal = new ModalWidget("box", () => ["one"], dim: false)
+            { BodyRows = 3, Body = body };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        var term = new FakeTerminal(40, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(modal);
+        app.RunFrame();
+        int h0 = body.Rect.H;
+
+        MouseSeq(term, "\x1b[<2;20;6M");   // title row
+        app.RunFrame();
+        MouseSeq(term, "\x1b[<34;20;17M"); // pull down: mirror grows H
+        app.RunFrame();
+        MouseSeq(term, "\x1b[<2;20;17m");
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.True(body.Rect.H > h0,
+            $"body must absorb the forced height, was {h0} now {body.Rect.H}");
+    }
+
+    [Fact]
+    public void ResizedModal_LeavesNoGhostOfItsOldBox()
+    {
+        var bg = new ResizeSignCapped('G');
+        var modal = new ModalWidget("box", () => ["one"], dim: false);
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = QxTui.Layout.FlexDirection.Column };
+        bg.Node.Grow = 1;
+        root.Add(bg.Node);
+        var term = new FakeTerminal(40, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(modal);
+        app.RunFrame();
+        app.RunFrame();
+
+        MouseSeq(term, "\x1b[<2;26;9M");   // right of box center
+        app.RunFrame();
+        MouseSeq(term, "\x1b[<34;20;9M");  // toward center: shrinks
+        app.RunFrame();
+
+        Assert.Equal('G', app.Back[30, 10].Char);
+    }
+}
+
+public class ResizePropagationTests
+{
+    private static void MouseSeq(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void ResizingChild_GrowsFixedAncestors_AndStealsFromSiblings()
+    {
+        var child = new ParserFuzzProbeWidget();
+        child.Node.Height = 4;
+        var col = new ContainerWidget();
+        col.Node.Direction = FlexDirection.Column;
+        col.Node.Width = 10;
+        col.AddChild(child);
+        var other = new ParserFuzzProbeWidget();
+        var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
+        root.Add(col.Node);
+        other.Node.Grow = 1;
+        root.Add(other.Node);
+        var term = new FakeTerminal(30, 8);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        int other0 = other.Rect.W;
+
+        MouseSeq(term, "\x1b[<2;8;2M");
+        app.RunFrame();
+        MouseSeq(term, "\x1b[<34;13;2M");
+        app.RunFrame();
+        MouseSeq(term, "\x1b[<2;13;2m");
+        app.RunFrame();
+
+        Assert.Equal(15, child.Rect.W);  // 10 + 5
+        Assert.Equal(15, col.Rect.W);    // ancestor propagated the delta
+        Assert.True(other.Rect.W < other0,
+            $"sibling must yield, was {other0} now {other.Rect.W}");
+    }
 }

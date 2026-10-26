@@ -632,17 +632,33 @@ public sealed class App : IDisposable
     /// <summary>Erase a rect from the back buffer and re-dirty every
     /// registered widget under it — used when a floating overlay MOVES:
     /// its old box must vanish and the base beneath must repaint.</summary>
-    public void EraseInvalidate(Rect r)
+    public void EraseInvalidate(Rect r, Widget? caller = null)
     {
         _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+        int callerZ = caller is null ? int.MaxValue : _overlays.IndexOf(caller);
         for (int i = 0; i < _widgets.Count; i++)
         {
             var w = _widgets[i];
-            if (IsOverlay(w)) continue;
+            // overlays ABOVE the caller keep their pixels (they paint
+            // after it anyway); overlays below and base widgets must
+            // repaint NOW or the erase shows as a one-frame blink
+            int z = _overlays.IndexOf(w);
+            if (z >= 0 && z >= callerZ) continue;
             var wr = w.Rect;
             if (wr.X < r.Right && r.X < wr.Right && wr.Y < r.Bottom && r.Y < wr.Bottom)
-                w.Invalidate();
+                RepaintSubtreeNow(w); // same frame: no blank, no ghost
         }
+    }
+
+    /// <summary>Render a subtree into the back buffer RIGHT NOW (bypassing
+    /// caps): used after erasing a region mid-frame, where waiting for the
+    /// next frame would show a blank flash.</summary>
+    private void RepaintSubtreeNow(Widget w)
+    {
+        w.ForceRenderNext();
+        w.RenderTracked(_back);
+        for (int i = 0; i < w.Children.Count; i++)
+            RepaintSubtreeNow(w.Children[i]);
     }
 
     /// <summary>Forward a hardware-scroll hint from a widget: the renderer

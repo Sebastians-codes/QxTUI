@@ -248,7 +248,9 @@ public abstract class Widget
     private int _rsEdges;           // 1 = right, 2 = bottom, 3 = corner
     private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
     private int _rsCurW, _rsCurH;
-    private int _rsSignX = 1, _rsSignY = 1;
+    private int _rsPrevX, _rsPrevY;
+    private int _rsCenterX, _rsCenterY;
+    private double _rsCorrW, _rsCorrH;
 
     /// <summary>Bypass MaxRenderHz for the next frame: a relayout that
     /// moved this widget must not wait out a cap interval (blink).</summary>
@@ -270,15 +272,35 @@ public abstract class Widget
         _rsCurW = _rsStartW;
         _rsCurH = _rsStartH;
         _rsApplied = false;
-        // sign from the grab's side of the element's center: pulling
-        // OUTWARD on any side grows, pushing inward shrinks — without
-        // this, left-half grabs feel inverted (drag left = shrink)
         int gx = ev.Px >= 0 && cellW > 0 ? ev.Px / cellW : ev.X;
         int gy = ev.Py >= 0 && cellH > 0 ? ev.Py / cellH : ev.Y;
-        _rsSignX = gx >= Rect.X + Rect.W / 2 ? 1 : -1;
-        _rsSignY = gy >= Rect.Y + Rect.H / 2 ? 1 : -1;
+        _rsPrevX = gx;
+        _rsPrevY = gy;
+        if (CenterMirroredResize)
+        {
+            // center-mirrored absolute (free-floating windows): size =
+            // 2 x distance(cursor, center) with a grab correction so the
+            // size at grab time is unchanged; the edge on the cursor's
+            // side tracks it 1:1, the opposite edge mirrors
+            var (ccx, ccy) = ResizeCenter();
+            _rsCenterX = ccx;
+            _rsCenterY = ccy;
+            _rsCorrW = _rsStartW / 2.0 - Math.Abs(gx - ccx);
+            _rsCorrH = _rsStartH / 2.0 - Math.Abs(gy - ccy);
+        }
         Node.Grow = 0f; // manual size wins over flex distribution
     }
+
+    /// <summary>Resize math: flow-layout components use plain cursor
+    /// deltas (drag right = wider, left = narrower); free-floating
+    /// windows (modals) use the center-mirrored absolute form.</summary>
+    internal virtual bool CenterMirroredResize => false;
+
+    /// <summary>Mirror axis for resize: the element's center (modals use
+    /// their box center — their Rect is the fullscreen overlay).</summary>
+    internal virtual (int X, int Y) ResizeCenter() =>
+        (Rect.X + Rect.W / 2, Rect.Y + Rect.H / 2);
+
 
     /// <summary>The size a resize grab starts from: the rect for normal
     /// widgets, the box for modals.</summary>
@@ -288,8 +310,21 @@ public abstract class Widget
     /// forced box sizes for modals.</summary>
     internal virtual void ApplyResizeSize(int w, int h)
     {
+        int dW = w - Rect.W;
+        int dH = h - Rect.H;
         Node.Width = w;
         Node.Height = h;
+        // propagate the delta up fixed-size ancestors so a child can
+        // actually TAKE space: a button inside a fixed-width column can
+        // never outgrow the column unless the column grows with it.
+        // Grow/auto ancestors need nothing (intrinsic sums absorb it),
+        // and flex shrink then steals the deficit from siblings.
+        for (var p = Node.Parent; p is not null; p = p.Parent)
+        {
+            if (dW != 0 && p.Width is int pw) p.Width = Math.Max(1, pw + dW);
+            if (dH != 0 && p.Height is int ph) p.Height = Math.Max(1, ph + dH);
+            if (p.Width is null && p.Height is null) break;
+        }
     }
 
     internal bool ApplyResize(MouseEvent ev, int cellW, int cellH,
@@ -298,11 +333,21 @@ public abstract class Widget
         if (!_resizing) return false;
         int cx = ev.Px >= 0 && cellW > 0 ? ev.Px / cellW : ev.X;
         int cy = ev.Py >= 0 && cellH > 0 ? ev.Py / cellH : ev.Y;
-        int sx = ev.Px >= 0 && cellW > 0 ? _rsStartX / cellW : _rsStartX;
-        int sy = ev.Py >= 0 && cellH > 0 ? _rsStartY / cellH : _rsStartY;
-        int w = _rsCurW, h = _rsCurH;
-        if ((_rsEdges & 1) != 0) w = Math.Max(1, _rsStartW + _rsSignX * (cx - sx));
-        if ((_rsEdges & 2) != 0) h = Math.Max(1, _rsStartH + _rsSignY * (cy - sy));
+        int w, h;
+        if (CenterMirroredResize)
+        {
+            double halfW = Math.Abs(cx - _rsCenterX) + _rsCorrW;
+            double halfH = Math.Abs(cy - _rsCenterY) + _rsCorrH;
+            w = Math.Max(1, (int)Math.Round(2 * halfW));
+            h = Math.Max(1, (int)Math.Round(2 * halfH));
+        }
+        else
+        {
+            w = Math.Max(1, _rsCurW + (cx - _rsPrevX));
+            h = Math.Max(1, _rsCurH + (cy - _rsPrevY));
+        }
+        _rsPrevX = cx;
+        _rsPrevY = cy;
         if (w == _rsCurW && h == _rsCurH && _rsApplied) return false;
         _rsCurW = w;
         _rsCurH = h;
