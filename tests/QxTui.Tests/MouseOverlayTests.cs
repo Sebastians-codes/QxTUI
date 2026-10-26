@@ -1290,7 +1290,7 @@ public class RightDragResizeTests
         app.RunFrame();
 
         Assert.Equal(16, target.Rect.W);
-        Assert.Equal(8, target.Rect.H); // 5 + dy 3
+        Assert.Equal(8, target.Rect.H); // grab below center: dy down grows
     }
 
     [Fact]
@@ -1442,10 +1442,10 @@ public class ResizeSignTests
     }
 
     [Fact]
-    public void GrabLeftHalf_DragLeft_Shrinks()
+    public void GrabLeftHalf_DragLeft_Grows()
     {
-        // flow widgets: plain delta — leftward drag narrows from any
-        // grab point
+        // grab-side sign: left-of-center grab means the LEFT edge follows
+        // the cursor — dragging left grows
         var target = new ParserFuzzProbeWidget();
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1463,7 +1463,7 @@ public class ResizeSignTests
         MouseSeq(term, "\x1b[<2;2;3m");
         app.RunFrame();
 
-        Assert.Equal(17, target.Rect.W); // 20 - 3
+        Assert.Equal(23, target.Rect.W); // 20 + 3
     }
 }
 

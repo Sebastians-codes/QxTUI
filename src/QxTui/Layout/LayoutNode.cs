@@ -81,6 +81,18 @@ public sealed class LayoutNode
     /// a resized child must grow its fixed-size ancestors to take space.</summary>
     public LayoutNode? Parent { get; private set; }
 
+    internal LayoutNode? NextSiblingOf(LayoutNode n) => SiblingOf(n, +1);
+    internal LayoutNode? PrevSiblingOf(LayoutNode n) => SiblingOf(n, -1);
+
+    private LayoutNode? SiblingOf(LayoutNode n, int dir)
+    {
+        if (_children is null) return null;
+        int i = _children.IndexOf(n);
+        if (i < 0) return null;
+        i += dir;
+        return i >= 0 && i < _children.Count ? _children[i] : null;
+    }
+
     public LayoutNode Add(LayoutNode child)
     {
         (_children ??= []).Add(child);

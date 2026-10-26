@@ -249,6 +249,7 @@ public abstract class Widget
     private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
     private int _rsCurW, _rsCurH;
     private int _rsPrevX, _rsPrevY;
+    private int _rsSignX = 1, _rsSignY = 1;
     private int _rsCenterX, _rsCenterY;
     private double _rsCorrW, _rsCorrH;
 
@@ -288,7 +289,20 @@ public abstract class Widget
             _rsCorrW = _rsStartW / 2.0 - Math.Abs(gx - ccx);
             _rsCorrH = _rsStartH / 2.0 - Math.Abs(gy - ccy);
         }
-        Node.Grow = 0f; // manual size wins over flex distribution
+        // pin the CURRENT size before dropping grow: zeroing grow alone
+        // collapsed the element to its intrinsic size on press and made
+        // every sibling jump — the 'surroundings move too much' feel
+        Node.Width = Rect.W;
+        Node.Height = Rect.H;
+        Node.Grow = 0f; // manual size wins from here on
+        // flow widgets: the edge nearest the grab follows the cursor —
+        // grab the top half and drag down = push that edge down (shrink)
+        if (!CenterMirroredResize)
+        {
+            var (ccx, ccy) = ResizeCenter();
+            _rsSignX = gx >= ccx ? 1 : -1;
+            _rsSignY = gy >= ccy ? 1 : -1;
+        }
     }
 
     /// <summary>Resize math: flow-layout components use plain cursor
@@ -314,16 +328,40 @@ public abstract class Widget
         int dH = h - Rect.H;
         Node.Width = w;
         Node.Height = h;
-        // propagate the delta up fixed-size ancestors so a child can
-        // actually TAKE space: a button inside a fixed-width column can
-        // never outgrow the column unless the column grows with it.
-        // Grow/auto ancestors need nothing (intrinsic sums absorb it),
-        // and flex shrink then steals the deficit from siblings.
-        for (var p = Node.Parent; p is not null; p = p.Parent)
+        AbsorbDelta(Node, dW, dH);
+    }
+
+    /// <summary>Split-pane absorption: a resize moves the grabbed element
+    /// and as little else as possible — the immediate fixed sibling takes
+    /// the main-axis delta (grow siblings let flex handle it), and fixed
+    /// ancestors grow ONLY when the child no longer fits.</summary>
+    private static void AbsorbDelta(LayoutNode node, int dW, int dH)
+    {
+        var p = node.Parent;
+        if (p is null) return;
+        bool row = p.Direction == FlexDirection.Row;
+        int dMain = row ? dW : dH;
+        int dCross = row ? dH : dW;
+
+        if (dMain != 0)
         {
-            if (dW != 0 && p.Width is int pw) p.Width = Math.Max(1, pw + dW);
-            if (dH != 0 && p.Height is int ph) p.Height = Math.Max(1, ph + dH);
-            if (p.Width is null && p.Height is null) break;
+            var sib = p.NextSiblingOf(node) ?? p.PrevSiblingOf(node);
+            if (sib is not null)
+            {
+                if (row && sib.Width is int sw) sib.Width = Math.Max(1, sw - dMain);
+                else if (!row && sib.Height is int sh) sib.Height = Math.Max(1, sh - dMain);
+            }
+        }
+
+        if (dCross != 0)
+        {
+            int? cp = row ? p.Height : p.Width;
+            if (cp is int cv)
+            {
+                if (row) p.Height = Math.Max(1, cv + dCross);
+                else p.Width = Math.Max(1, cv + dCross);
+                AbsorbDelta(p, row ? 0 : dCross, row ? dCross : 0);
+            }
         }
     }
 
@@ -343,8 +381,8 @@ public abstract class Widget
         }
         else
         {
-            w = Math.Max(1, _rsCurW + (cx - _rsPrevX));
-            h = Math.Max(1, _rsCurH + (cy - _rsPrevY));
+            w = Math.Max(1, _rsCurW + _rsSignX * (cx - _rsPrevX));
+            h = Math.Max(1, _rsCurH + _rsSignY * (cy - _rsPrevY));
         }
         _rsPrevX = cx;
         _rsPrevY = cy;
