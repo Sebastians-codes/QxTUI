@@ -266,6 +266,7 @@ public sealed class App : IDisposable
             _registered.Remove(w);
             for (int i = 0; i < w.Children.Count; i++)
                 Un(w.Children[i]);
+            w.OnDetach();          // lifecycle first: still fully wired here
             if (dispose)
                 w.Dispose();
         }
@@ -647,6 +648,31 @@ public sealed class App : IDisposable
             _widgets[i].Invalidate();
     }
 
+    // ---- authoring API: the message channel ---------------------------------
+
+    /// <summary>Register the update function for a message type: the single
+    /// place intents become state (Elm-style). One handler per type;
+    /// re-registering replaces. Runs on the frame thread, in the input
+    /// phase that emitted the message.</summary>
+    public void OnMessage<TMsg>(Action<TMsg> update)
+    {
+        (_handlers ??= new Dictionary<Type, Action<object>>())[typeof(TMsg)] =
+            m => update((TMsg)m); // wrap once at registration: sends stay alloc-free
+    }
+
+    /// <summary>Emit an intent from the composition root (key handlers,
+    /// startup sequencing). Widgets use the protected Widget.Send.</summary>
+    public void Send<TMsg>(TMsg msg) => Dispatch(msg);
+
+    internal void Dispatch(object? msg)
+    {
+        if (msg is null || _handlers is null) return; // unhandled intents are inert
+        if (_handlers.TryGetValue(msg.GetType(), out var update))
+            update(msg);
+    }
+
+    private Dictionary<Type, Action<object>>? _handlers;
+
     /// <summary>Install the layout root. Allows building widgets (which need
     /// the scheduler) before the tree that references their nodes exists.</summary>
     public void SetRoot(LayoutNode root)
@@ -964,6 +990,12 @@ public sealed class App : IDisposable
             }
             _layersChanged = false;
         }
+
+        // 5c) lifecycle: report rect changes (terminal resize, relayout,
+        //     modal body relayout). Fires only on frames where a rect
+        //     actually moved — discrete, like the message channel.
+        for (int i = 0; i < _widgets.Count; i++)
+            _widgets[i].FireRectHook();
 
         // 6) diff → damage → serialize → ONE submit. Idle wakeups (nothing
         //    rendered, no relayout, no layer change) skip the diff AND the

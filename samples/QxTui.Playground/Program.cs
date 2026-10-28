@@ -107,30 +107,31 @@ string[] PopupLines() =>
     "click closes THIS one (opt-in).",
 ];
 
-void SetFps(int v) => app.SetTargetFps(v); // TargetFpsSignal updates HUDs
-
 // the one resizable component in the playground: the popup spawned by
-// the open-popup button — everything else keeps Resizable = false
+// the open-popup button — everything else keeps Resizable = false.
+// The fps chips are PURE INTENT (ChipAction.Msg): the modal knows
+// nothing about this program; the update function at the top of this
+// file is the only place that interprets the messages.
 ModalWidget MakePopup()
 {
     var m = new ModalWidget("popup", PopupLines, dim: false,
-    actions:
+    chips:
     [
-        ("30fps", () => SetFps(30)),
-        ("60fps", () => SetFps(60)),
-        ("120fps", () => SetFps(120)),
-        ("240fps", () => SetFps(240)),
-        ("480fps", () => SetFps(480)),
-        ("1000fps", () => SetFps(1000)),
-        ("stack", () => app.PushOverlay(MakeConfirmModal())),
-        ("rooms", () =>
+        new("30fps", Msg: new FpsMsg(30)),
+        new("60fps", Msg: new FpsMsg(60)),
+        new("120fps", Msg: new FpsMsg(120)),
+        new("240fps", Msg: new FpsMsg(240)),
+        new("480fps", Msg: new FpsMsg(480)),
+        new("1000fps", Msg: new FpsMsg(1000)),
+        new("stack", Act: () => app.PushOverlay(MakeConfirmModal())),
+        new("rooms", Act: () =>
         {
             // offsets keep the boxes disjoint: overlapping floating
             // popups paint over each other's bodies every frame
             foreach (var (hz, ox, oy) in new[] { (8, -40, -10), (30, 0, 0), (120, 40, 10) })
                 app.PushOverlay(MakeBallRoomModal(hz, ox, oy));
         }),
-        ("hwscroll", () =>
+        new("hwscroll", Act: () =>
         {
             app.HardwareScroll = !app.HardwareScroll;
             app.InvalidateAll();
@@ -205,24 +206,24 @@ ModalWidget MakeFpsModal() => new("fps settings",
         $"presented: {app.Stats.PresentedFps.ToString("F0")} fps",
     ],
     dim: false,
-    actions:
+    chips:
     [
-        ("30", () => SetFps(30)),
-        ("120", () => SetFps(120)),
-        ("240", () => SetFps(240)),
-        ("1000", () => SetFps(1000)),
+        new("30", Msg: new FpsMsg(30)),
+        new("120", Msg: new FpsMsg(120)),
+        new("240", Msg: new FpsMsg(240)),
+        new("1000", Msg: new FpsMsg(1000)),
     ]);
 
 ButtonWidget? openBtn = null;
-openBtn = new ButtonWidget(() => " open popup ", () => app.PushOverlay(MakePopup()),
-    style: ButtonStyle.Rounded);
-
-var themeBtn = new ButtonWidget(() => " theme ", () =>
+openBtn = new ButtonWidget(() => " open popup ", style: ButtonStyle.Rounded)
 {
-    themeIdx = (themeIdx + 1) % themes.Length;
-    app.Theme = themes[themeIdx];
-    app.InvalidateAll();
-}, style: ButtonStyle.Outline);
+    EmitOnClick = new OpenPopupMsg(), // pure intent: no app reference
+};
+
+var themeBtn = new ButtonWidget(() => " theme ", style: ButtonStyle.Outline)
+{
+    EmitOnClick = new ThemeMsg(),
+};
 
 
 
@@ -385,16 +386,30 @@ app.SetRoot(UI.Column(1,
 
 // ---- keys: theme cycle + runtime fps control --------------------------------
 
+// authoring API: the update function — the ONE place intents become state.
+// Components (chips, buttons) and keys emit the same message vocabulary;
+// nothing below here mutates app state directly anymore.
+void CycleTheme()
+{
+    themeIdx = (themeIdx + 1) % themes.Length;
+    app.Theme = themes[themeIdx];
+    app.InvalidateAll(); // theme change = full repaint, by design
+}
+
+app.OnMessage<FpsMsg>(m => app.SetTargetFps(m.Value));
+app.OnMessage<ThemeMsg>(_ => CycleTheme());
+app.OnMessage<OpenPopupMsg>(_ => app.PushOverlay(MakePopup()));
+
 int[] fpsPresets = [30, 60, 120, 240, 480, 1000];
 
 app.OnKey = ev =>
 {
     switch (ev.Key)
     {
+        // composition-root intents: keys speak the same message vocabulary
+        // as the components, so every state change flows through ONE update fn
         case Key.Char when ev.Char is 't' or 'T':
-            themeIdx = (themeIdx + 1) % themes.Length;
-            app.Theme = themes[themeIdx];
-            app.InvalidateAll(); // theme change = full repaint, by design
+            app.Send(new ThemeMsg());
             return true;
 
         case Key.Char when ev.Char is ']':
@@ -402,7 +417,7 @@ app.OnKey = ev =>
         {
             int i = Array.IndexOf(fpsPresets, app.TargetFps);
             i = ev.Char == ']' ? Math.Min(i + 1, fpsPresets.Length - 1) : Math.Max(i - 1, 0);
-            app.SetTargetFps(fpsPresets[i]);
+            app.Send(new FpsMsg(fpsPresets[i]));
             return true;
         }
 
@@ -420,7 +435,7 @@ app.OnKey = ev =>
             return true;
 
         case Key.Char when ev.Char is 'o' or 'O':
-            app.PushOverlay(MakePopup()); // floating, no dim
+            app.Send(new OpenPopupMsg()); // floating, no dim
             return true;
 
         case Key.Char when ev.Char is 'q':
@@ -439,3 +454,12 @@ using (app)
 }
 
 return 0;
+
+// ---- intents (authoring API) ------------------------------------------------
+// The vocabulary components speak. A chip/button emits a message without
+// knowing this program exists; the update function registered at the top
+// is the single interpretation. New feature = new message + new handler,
+// never a closure wired through the component that emits it.
+internal record FpsMsg(int Value);
+internal record ThemeMsg;
+internal record OpenPopupMsg;

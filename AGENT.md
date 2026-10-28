@@ -51,6 +51,7 @@ Terminal  → platform interop ONLY; no framework logic
 ### Rendering pipeline (MUST follow exactly)
 
 ```
+intent (messages)  → ONE update fn per app (App.OnMessage<T>) → signal writes
 signals/animations → mark widgets dirty
 dirty widgets      → render into persistent back CellBuffer (retained scene)
 back vs prev       → per-cell diff → damage rects → coalesce
@@ -99,6 +100,14 @@ writer thread      → the ONLY place a blocking tty write may happen
   ONLY subscribing widgets dirty.
 - Animations write into signals. Animation completion MUST set the exact
   final value (no floating point drift).
+- **Intent flows on the message channel, state flows on signals.** Widgets
+  emit intents with `Send(msg)` WITHOUT referencing the app (reusable by
+  construction); the app's single update function (`App.OnMessage<T>`) is
+  the only place intents become state. Closures survive only as
+  app-specific policy at the composition root (`ChipAction.Act`).
+- **Lifecycle is hooks, not plumbing:** `OnMount(App)` / `OnDetach()` /
+  `OnRectChanged(old, new)` are the supported extension points; the
+  mount-action materialization stays internal.
 
 ### Layout rules (MUST)
 

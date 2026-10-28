@@ -126,7 +126,7 @@ public enum ButtonStyle
 public sealed class ButtonWidget : Widget
 {
     private readonly Func<string> _label;
-    private readonly Action _onClick;
+    private readonly Action? _onClick;
     private readonly ThemeRole _fg;
     private readonly ButtonStyle _style;
 
@@ -134,7 +134,13 @@ public sealed class ButtonWidget : Widget
     /// on, warning when off). Overrides <c>fg</c> while provided.</summary>
     public Func<ThemeRole>? RoleProvider { get; set; }
 
-    public ButtonWidget(Func<string> label, Action onClick,
+    /// <summary>Intent emitted on click (authoring API): a button that only
+    /// knows "I was clicked, this is my message" drops into any app — the
+    /// update function decides what the message means. Composes with
+    /// <c>onClick</c> (message first, then the callback).</summary>
+    public object? EmitOnClick { get; set; }
+
+    public ButtonWidget(Func<string> label, Action? onClick,
         ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
     {
         _label = label;
@@ -144,7 +150,16 @@ public sealed class ButtonWidget : Widget
         Clickable = true;
     }
 
-    public override void OnClick(Point local) => _onClick();
+    /// <summary>Pure-intent button: no callback at all, just EmitOnClick.</summary>
+    public ButtonWidget(Func<string> label,
+        ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
+        : this(label, null, fg, style) { }
+
+    public override void OnClick(Point local)
+    {
+        if (EmitOnClick is { } msg) Send(msg);
+        _onClick?.Invoke();
+    }
 
     public override void Render(CellBuffer buffer)
     {
@@ -195,6 +210,11 @@ public sealed class ButtonWidget : Widget
     }
 }
 
+/// <summary>A modal chip as intent (authoring API): a label plus EITHER a
+/// message (the modal emits, the app's update function decides — reusable
+/// modals) or a closure (app-specific policy at the composition root).</summary>
+public sealed record ChipAction(string Label, object? Msg = null, Action? Act = null);
+
 /// <summary>
 /// Modal popup: dims the screen, draws a centered box, consumes all keys
 /// (modal semantics). Esc and the [x] chip close; outside-press dismissal
@@ -205,7 +225,7 @@ public sealed class ModalWidget : Widget
     private readonly string _title;
     private readonly Func<string[]> _lines;
     private readonly bool _dim;
-    private readonly (string Label, Action Act)[] _actions;
+    private readonly ChipAction[] _actions;
 
     /// <param name="dim">Dim everything behind the box (classic modal).
     /// false = floating popup over live content.</param>
@@ -213,15 +233,32 @@ public sealed class ModalWidget : Widget
     /// bound to keys 1..n while the modal is open.</param>
     public ModalWidget(string title, Func<string[]> lines, bool dim = true,
         (string Label, Action Act)[]? actions = null)
+        : this(title, lines, dim, actions is null ? []
+               : Array.ConvertAll(actions, a => new ChipAction(a.Label, Act: a.Act)))
+    { }
+
+    /// <summary>Chips as pure intent: no closures inside the modal — it
+    /// emits messages and any app can host it.</summary>
+    public ModalWidget(string title, Func<string[]> lines, bool dim,
+        ChipAction[] chips)
     {
         _title = title;
         _lines = lines;
         _dim = dim;
-        _actions = actions ?? [];
+        _actions = chips;
         Clickable = true;
         CapturesMouse = true; // title-bar drags survive leaving the box
         BlocksBaseRendering = dim; // floating popups keep the background live
         Tick(TimeSpan.FromMilliseconds(250)); // reactive content (Func lines)
+    }
+
+    /// <summary>Chip dispatch, single source for keys 1..n and clicks:
+    /// message chips emit on the channel, closure chips run inline.</summary>
+    private void InvokeChip(int i)
+    {
+        var chip = _actions[i];
+        if (chip.Msg is { } msg) Send(msg);
+        else chip.Act?.Invoke();
     }
 
     private bool _dragging;
@@ -356,7 +393,7 @@ public sealed class ModalWidget : Widget
         {
             int idx = ev.Char - '1';
             if (idx < _actions.Length)
-                _actions[idx].Act();
+                InvokeChip(idx);
             return true;
         }
         return true; // modal: swallow everything else
@@ -411,9 +448,9 @@ public sealed class ModalWidget : Widget
 
     /// <summary>Chip rects wrapped inside the box; rows stack upward from
     /// the bottom edge. Single source for render + hit-testing.</summary>
-    private List<(Rect Rect, Action Act, int Idx)> LayoutActions(Rect box)
+    private List<(Rect Rect, int Idx)> LayoutActions(Rect box)
     {
-        var result = new List<(Rect, Action, int)>(_actions.Length);
+        var result = new List<(Rect, int)>(_actions.Length);
         int innerW = box.W - 4;
         int x = 0, row = 0;
         for (int i = 0; i < _actions.Length; i++)
@@ -422,7 +459,7 @@ public sealed class ModalWidget : Widget
             int need = btnW + 3;
             if (x + need > innerW && x > 0) { row++; x = 0; }
             int y = box.Bottom - 2 - row;
-            result.Add((new Rect(box.X + 2 + x + 2, y, btnW, 1), _actions[i].Act, i));
+            result.Add((new Rect(box.X + 2 + x + 2, y, btnW, 1), i));
             x += need;
         }
         return result;
@@ -436,7 +473,7 @@ public sealed class ModalWidget : Widget
     /// hover, press bookkeeping and click dispatch.</summary>
     private int ActionAt(int x, int y)
     {
-        foreach (var (r, _, i) in LayoutActions(BoxRect(Rect)))
+        foreach (var (r, i) in LayoutActions(BoxRect(Rect)))
             if (x >= r.X && x < r.Right && y == r.Y) return i;
         return -1;
     }
@@ -498,12 +535,12 @@ public sealed class ModalWidget : Widget
         var box = BoxRect(Rect);
 
         // action buttons first — only the chip the press STARTED on fires
-        foreach (var (r, act, i) in LayoutActions(box))
+        foreach (var (r, i) in LayoutActions(box))
         {
             if (i != _pressAction) continue;
             if (local.X >= r.X && local.X < r.Right && local.Y == r.Y)
             {
-                act();
+                InvokeChip(i);
                 return;
             }
         }
@@ -555,7 +592,7 @@ public sealed class ModalWidget : Widget
         }
 
         // action chips: key hint + filled button, wrapped inside the box
-        foreach (var (r, _, i) in LayoutActions(box))
+        foreach (var (r, i) in LayoutActions(box))
         {
             string label = _actions[i].Label;
             int bg = Theme.Get(i == _hoverAction ? ThemeRole.Title : ThemeRole.Accent);

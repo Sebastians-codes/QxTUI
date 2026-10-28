@@ -137,11 +137,50 @@ public abstract class Widget
                 mount(app);
             _mountActions = null;
         }
+        OnMount(app);
     }
 
     /// <summary>Mark for re-render on the next frame. Called by signal
     /// subscriptions, animations, layout changes.</summary>
     public void Invalidate() => Dirty = true;
+
+    // ---- authoring API: intent + lifecycle ----------------------------------
+
+    /// <summary>Emit an intent on the app's message channel (Elm-style).
+    /// The app's update function (<see cref="App.OnMessage{TMsg}"/>) is the
+    /// ONE place intents become state (signal writes, overlay pushes), so
+    /// components emit without knowing the app — reusable by construction.
+    /// Discrete/cold path: per-frame values belong in signals/animations.</summary>
+    protected void Send(object msg) => App?.Dispatch(msg);
+
+    /// <summary>Called when the widget mounts into an app, after declared
+    /// Tick/OnSignal hooks are bound. Override for setup that needs the
+    /// live app; constructors stay app-free.</summary>
+    public virtual void OnMount(App app) { }
+
+    /// <summary>Called when the widget's subtree detaches (page switch,
+    /// overlay pop) — before Dispose, and also for detaches that keep the
+    /// subtree alive for re-attachment. Release anything that assumes
+    /// "mounted"; Dispose still means destroyed.</summary>
+    public virtual void OnDetach() { }
+
+    /// <summary>Called after a frame in which this widget's layout rect
+    /// actually changed (terminal resize, relayout, modal body relayout).
+    /// The first rect after mount is recorded, not reported.</summary>
+    public virtual void OnRectChanged(Rect oldRect, Rect newRect) { }
+
+    private Rect _hookRect;
+    private bool _hookSeen;
+
+    internal void FireRectHook()
+    {
+        var r = Node.Rect;
+        if (!_hookSeen) { _hookSeen = true; _hookRect = r; return; }
+        if (r.Equals(_hookRect)) return;
+        var old = _hookRect;
+        _hookRect = r;
+        OnRectChanged(old, r);
+    }
 
     // ---- interaction -------------------------------------------------------
 
