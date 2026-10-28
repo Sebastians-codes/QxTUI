@@ -150,8 +150,17 @@ public abstract class Widget
     /// The app's update function (<see cref="App.OnMessage{TMsg}"/>) is the
     /// ONE place intents become state (signal writes, overlay pushes), so
     /// components emit without knowing the app — reusable by construction.
-    /// Discrete/cold path: per-frame values belong in signals/animations.</summary>
-    protected void Send(object msg) => App?.Dispatch(msg);
+    /// Discrete/cold path: per-frame values belong in signals/animations.
+    /// Returns whether some handler consumed the intent.</summary>
+    protected bool Send(object msg) => App?.Dispatch(msg) ?? false;
+
+    /// <summary>Run work off the frame thread; the returned message comes
+    /// back as a normal intent (see <see cref="App.Effect(Func{CancellationToken,Task{object}})"/>).
+    /// The supported way for a component to do I/O without stalling the loop.</summary>
+    protected void Effect(Func<CancellationToken, Task<object?>> work) => App?.Effect(work);
+
+    /// <summary>Fire-and-forget off-thread work (see App.Effect).</summary>
+    protected void Effect(Func<CancellationToken, Task> work) => App?.Effect(work);
 
     /// <summary>Called when the widget mounts into an app, after declared
     /// Tick/OnSignal hooks are bound. Override for setup that needs the

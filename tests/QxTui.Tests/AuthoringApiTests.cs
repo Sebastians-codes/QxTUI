@@ -197,3 +197,148 @@ public class LifecycleHookTests
         Assert.Equal(new Rect(0, 0, 30, 10), probe.RectChanges[0].New);
     }
 }
+
+public class EffectsAndDiagnosticsTests
+{
+    private static (App app, FakeTerminal term) MakeApp(LayoutNode root)
+    {
+        var term = new FakeTerminal(20, 10);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        return (app, term);
+    }
+
+    private static void PumpUntil(App app, Func<bool> done, int ms = 2000)
+    {
+        var end = DateTime.UtcNow.AddMilliseconds(ms);
+        while (!done() && DateTime.UtcNow < end)
+        {
+            app.RunFrame();
+            Thread.Sleep(1);
+        }
+    }
+
+    [Fact]
+    public void Post_FromBackgroundThread_IsDrainedSafelyByFrame()
+    {
+        // the thread-safe ingress: off-thread code never touches frame
+        // state directly, it queues an intent like any other
+        var level = new Signal<int>(0);
+        var (app, _) = MakeApp(new LayoutNode());
+        app.OnMessage<Bump>(m => level.Set(level.Value + m.By));
+
+        Task.Run(() => app.Post(new Bump(9)));
+        PumpUntil(app, () => level.Value != 0);
+
+        Assert.Equal(9, level.Value);
+    }
+
+    [Fact]
+    public void Effect_ResultArrivesAsMessage_OffThread()
+    {
+        var level = new Signal<int>(0);
+        int workerThread = -1;
+        var (app, _) = MakeApp(new LayoutNode());
+        app.OnMessage<Bump>(m => level.Set(level.Value + m.By));
+
+        app.Effect(async ct =>
+        {
+            await Task.Delay(5, ct);
+            workerThread = Environment.CurrentManagedThreadId;
+            return new Bump(4);
+        });
+        PumpUntil(app, () => level.Value != 0);
+
+        Assert.Equal(4, level.Value);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, workerThread);
+    }
+
+    [Fact]
+    public void Effect_Fault_BecomesMessage_NotACrashedLoop()
+    {
+        EffectFault? fault = null;
+        var (app, _) = MakeApp(new LayoutNode());
+        app.OnMessage<EffectFault>(f => fault = f);
+
+        app.Effect(ct => Task.FromException<object?>(new InvalidOperationException("boom")));
+        PumpUntil(app, () => fault is not null);
+
+        Assert.NotNull(fault);
+        Assert.IsType<InvalidOperationException>(fault!.Error);
+        Assert.Equal(0, app.Stats.UnhandledMessages); // fault WAS handled
+    }
+
+    [Fact]
+    public void UnhandledIntents_AreCounted_AndSendReportsThem()
+    {
+        var (app, _) = MakeApp(new LayoutNode());
+
+        Assert.False(app.Send(new Ping())); // nobody listens yet
+        Assert.Equal(1, app.Stats.UnhandledMessages);
+
+        app.OnMessage<Ping>(_ => { });
+        Assert.True(app.Send(new Ping()));
+        Assert.Equal(1, app.Stats.UnhandledMessages); // handled: no growth
+    }
+
+    [Fact]
+    public void Update_CatchAll_HandlesWhatTypedMisses_TypedWins()
+    {
+        int bumps = 0;
+        bool catchAllSawBump = false;
+        var (app, _) = MakeApp(new LayoutNode());
+
+        app.OnMessage<Bump>(_ => { }); // typed handler wins...
+        app.Update(m =>
+        {
+            catchAllSawBump |= m is Bump;
+            if (m is Bump b) { bumps += b.By; return true; }
+            return m is Ping; // catch-all claims pings, ignores the rest
+        });
+
+        Assert.True(app.Send(new Bump(2)));
+        Assert.False(catchAllSawBump);   // ...catch-all never sees it
+        Assert.Equal(0, bumps);
+
+        Assert.True(app.Send(new Ping()));    // typed misses → catch-all claims
+        Assert.False(app.Send(new LifecycleProbe())); // nobody claims → unhandled
+        Assert.Equal(1, app.Stats.UnhandledMessages);
+    }
+}
+
+public class HandlerLifetimeTests
+{
+    [Fact]
+    public void OnMessage_ReturnsSubscription_DisposeUnregisters()
+    {
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, new LayoutNode(), targetFps: 60, asyncPresenting: false);
+        int hits = 0;
+        var sub = app.OnMessage<Ping>(_ => hits++);
+
+        Assert.True(app.Send(new Ping()));
+        Assert.Equal(1, hits);
+
+        sub.Dispose();
+        Assert.False(app.Send(new Ping())); // nobody listens anymore
+        Assert.Equal(1, hits);
+        Assert.Equal(1, app.Stats.UnhandledMessages);
+
+        sub.Dispose(); // idempotent
+        Assert.Equal(1, app.Stats.UnhandledMessages);
+    }
+
+    [Fact]
+    public void Dispose_DoesNotRemoveALaterReplacement()
+    {
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, new LayoutNode(), targetFps: 60, asyncPresenting: false);
+        int first = 0, second = 0;
+        var sub1 = app.OnMessage<Ping>(_ => first++);
+        var sub2 = app.OnMessage<Ping>(_ => second++); // replaces sub1's handler
+
+        sub1.Dispose(); // must NOT take sub2's registration with it
+        app.Send(new Ping());
+        Assert.Equal(0, first);
+        Assert.Equal(1, second);
+    }
+}

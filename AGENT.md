@@ -105,6 +105,10 @@ writer thread      → the ONLY place a blocking tty write may happen
   construction); the app's single update function (`App.OnMessage<T>`) is
   the only place intents become state. Closures survive only as
   app-specific policy at the composition root (`ChipAction.Act`).
+- **Off-thread work enters ONLY as posted intents.** `App.Effect` runs I/O
+  on the pool and posts its result (or an `EffectFault`) through the
+  thread-safe inbox (`App.Post`); the frame thread stays single-threaded
+  and never blocks (see §2 pipeline and samples/QxTui.SysMon ProcWidget).
 - **Lifecycle is hooks, not plumbing:** `OnMount(App)` / `OnDetach()` /
   `OnRectChanged(old, new)` are the supported extension points; the
   mount-action materialization stays internal.

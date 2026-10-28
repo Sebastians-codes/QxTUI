@@ -6,6 +6,11 @@ using QxTui.Terminal;
 
 namespace QxTui.Core;
 
+/// <summary>Posted by <see cref="App.Effect(Func{CancellationToken,Task{object}})"/>
+/// when the off-thread work throws: faults arrive as intents, so apps log
+/// or retry them in the same update function instead of losing the thread.</summary>
+public sealed record EffectFault(Exception Error);
+
 /// <summary>Live frame statistics — surfaced on screen by the PoC demo
 /// as proof of the damage-isolation claim (AGENT.md §2).</summary>
 public sealed class FrameStats
@@ -35,6 +40,11 @@ public sealed class FrameStats
     /// <summary>Frames dropped by the mailbox because a newer frame replaced
     /// them before the writer thread could hand them to the terminal.</summary>
     public long DroppedFrames;
+
+    /// <summary>Intents nobody handled (no typed handler, catch-all returned
+    /// false, effect faults nobody listened to). Should stay 0: a growing
+    /// counter means a component speaks a message the app forgot to learn.</summary>
+    public long UnhandledMessages;
 }
 
 /// <summary>
@@ -653,25 +663,98 @@ public sealed class App : IDisposable
     /// <summary>Register the update function for a message type: the single
     /// place intents become state (Elm-style). One handler per type;
     /// re-registering replaces. Runs on the frame thread, in the input
-    /// phase that emitted the message.</summary>
-    public void OnMessage<TMsg>(Action<TMsg> update)
+    /// phase that emitted the message. The returned subscription removes
+    /// the handler again — components register in OnMount and dispose in
+    /// OnDetach so a detached widget never receives intents.</summary>
+    public IDisposable OnMessage<TMsg>(Action<TMsg> update)
     {
-        (_handlers ??= new Dictionary<Type, Action<object>>())[typeof(TMsg)] =
-            m => update((TMsg)m); // wrap once at registration: sends stay alloc-free
+        _handlers ??= new Dictionary<Type, Action<object>>();
+        Action<object> wrapped = m => update((TMsg)m); // wrap once: sends stay alloc-free
+        _handlers[typeof(TMsg)] = wrapped;
+        return new HandlerSubscription(() =>
+        {
+            // remove only if still ours: a later registration replaced it
+            if (_handlers is not null &&
+                _handlers.TryGetValue(typeof(TMsg), out var current) &&
+                ReferenceEquals(current, wrapped))
+                _handlers.Remove(typeof(TMsg));
+        });
     }
 
-    /// <summary>Emit an intent from the composition root (key handlers,
-    /// startup sequencing). Widgets use the protected Widget.Send.</summary>
-    public void Send<TMsg>(TMsg msg) => Dispatch(msg);
-
-    internal void Dispatch(object? msg)
+    private sealed class HandlerSubscription(Action remove) : IDisposable
     {
-        if (msg is null || _handlers is null) return; // unhandled intents are inert
-        if (_handlers.TryGetValue(msg.GetType(), out var update))
+        private int _done;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _done, 1) == 0) remove();
+        }
+    }
+
+    /// <summary>Catch-all update for switch-style apps: runs only when no
+    /// typed handler matched. Return false to leave the intent unhandled
+    /// (it lands in <see cref="FrameStats.UnhandledMessages"/>).</summary>
+    public void Update(Func<object, bool> update) => _update = update;
+
+    /// <summary>Emit an intent from the composition root (key handlers,
+    /// startup sequencing). Widgets use the protected Widget.Send.
+    /// Returns whether some handler consumed it.</summary>
+    public bool Send<TMsg>(TMsg msg) => Dispatch(msg);
+
+    /// <summary>Thread-safe ingress: queue an intent from ANY thread
+    /// (background effects, OS callbacks). Drained in the input phase of
+    /// the next frame — the only safe way into frame-thread state from
+    /// off-thread. This is what effects post their results to.</summary>
+    public void Post<TMsg>(TMsg msg) => _inbox.Enqueue(msg!);
+
+    /// <summary>Run work OFF the frame thread (AGENT.md §2: the loop must
+    /// never block). The returned message — if any — is posted back
+    /// through the thread-safe inbox and arrives like any other intent.
+    /// Exceptions become <see cref="EffectFault"/> messages instead of
+    /// killing the loop.</summary>
+    public void Effect(Func<CancellationToken, Task<object?>> work)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var msg = await work(_effectCts.Token);
+                if (msg is not null) Post(msg);
+            }
+            catch (OperationCanceledException) { } // app shutting down
+            catch (Exception ex)
+            {
+                Post(new EffectFault(ex));
+            }
+        });
+    }
+
+    /// <summary>Fire-and-forget variant for effects with no result message.</summary>
+    public void Effect(Func<CancellationToken, Task> work) =>
+        Effect(async ct => { await work(ct); return null; });
+
+    internal bool Dispatch(object? msg)
+    {
+        if (msg is null) return false;
+        bool handled = false;
+        if (_handlers is not null && _handlers.TryGetValue(msg.GetType(), out var update))
+        {
             update(msg);
+            handled = true;
+        }
+        else if (_update is not null)
+            handled = _update(msg);
+        if (!handled)
+        {
+            Stats.UnhandledMessages++;
+            TraceLine($"unhandled intent: {msg.GetType().Name}");
+        }
+        return handled;
     }
 
     private Dictionary<Type, Action<object>>? _handlers;
+    private Func<object, bool>? _update;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<object> _inbox = new();
+    private readonly CancellationTokenSource _effectCts = new();
 
     /// <summary>Install the layout root. Allows building widgets (which need
     /// the scheduler) before the tree that references their nodes exists.</summary>
@@ -764,6 +847,12 @@ public sealed class App : IDisposable
             _keyParser.Feed(b);
             _rawBatch.Add(b);
         }
+
+        // 1b) thread-safe ingress: intents posted from effects / background
+        //     threads join the same vocabulary as keys and clicks, in the
+        //     same phase — frame-thread state stays single-threaded
+        while (_inbox.TryDequeue(out var posted))
+            Dispatch(posted);
 
         // a lone ESC left pending after the whole batch is a keypress,
         // not a sequence prefix (arrows arrive in one batch) — release it
@@ -1224,6 +1313,8 @@ public sealed class App : IDisposable
 
     public void Dispose()
     {
+        _effectCts.Cancel();
+        _effectCts.Dispose();
         foreach (var w in _roots)
             w.Dispose(); // cascades to children
         for (int oi = 0; oi < _overlays.Count; oi++)

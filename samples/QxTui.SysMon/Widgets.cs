@@ -260,12 +260,16 @@ internal sealed class NetWidget : Widget
     }
 }
 
+internal record ProcRowsMsg(System.Collections.Generic.List<LinuxProc.ProcRow> Rows);
+
 internal sealed class ProcWidget : Widget
 {
     private readonly Dictionary<int, long> _prevTicks = new(256);
     private readonly Dictionary<int, double> _smoothCpu = new(256);
     private List<LinuxProc.ProcRow> _rows = [];
     private long _lastSampleTs;
+    private int _scanning;
+    private IDisposable? _rowsSub;
     private readonly ListView _list;
     public bool Paused;
 
@@ -294,7 +298,74 @@ internal sealed class ProcWidget : Widget
         headerSpacer.Node.Height = 2;
         AddChild(_list);
         _list.Node.Grow = 1f;
-        Tick(TimeSpan.FromSeconds(1)); // 1Hz: /proc scan is the dominant cost
+        // 1Hz: the /proc scan is the dominant cost — and it now runs OFF the
+        // frame thread as an effect (it used to sit inside Render: hundreds
+        // of open+read calls stalling the loop once a second)
+        Tick(TimeSpan.FromSeconds(1), _ => Refresh());
+    }
+
+    public override void OnMount(App app)
+    {
+        // a component owns its own intent vocabulary: the scan result is a
+        // message like any other, handled right here — and unsubscribed on
+        // detach so a detached page never receives scans
+        _rowsSub = app.OnMessage<ProcRowsMsg>(m =>
+        {
+            _rows = m.Rows;
+            _list.Invalidate();
+            Invalidate();
+        });
+        Refresh(); // first sample immediately, don't wait a second
+    }
+
+    public override void OnDetach()
+    {
+        _rowsSub?.Dispose();
+        _rowsSub = null;
+    }
+
+    private void Refresh()
+    {
+        if (Paused || App is null) return;
+        // one scan in flight at most: a slow /proc walk must not pile up
+        if (Interlocked.Exchange(ref _scanning, 1) == 1) return;
+
+        long now = Environment.TickCount64;
+        double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
+        _lastSampleTs = now;
+
+        Effect(ct => Task.Run(() =>
+        {
+            try
+            {
+                // ALL /proc I/O + smoothing + sorting: pool thread, never
+                // the frame loop; the finished rows travel back as intent
+                var mem = LinuxProc.ReadMem();
+                var raw = LinuxProc.ReadProcesses(_prevTicks, dt, mem.TotalKb);
+
+                const double alpha = 0.3;
+                var seen = new HashSet<int>(raw.Count);
+                foreach (var row in raw)
+                {
+                    seen.Add(row.Pid);
+                    double prev = _smoothCpu.GetValueOrDefault(row.Pid, row.CpuPercent);
+                    _smoothCpu[row.Pid] = prev + (row.CpuPercent - prev) * alpha;
+                }
+                foreach (var pid in _smoothCpu.Keys.ToList())
+                    if (!seen.Contains(pid))
+                        _smoothCpu.Remove(pid);
+
+                var rows = raw
+                    .Select(row => row with { CpuPercent = _smoothCpu.GetValueOrDefault(row.Pid) })
+                    .OrderByDescending(row => row.CpuPercent)
+                    .ToList();
+                return (object)new ProcRowsMsg(rows);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _scanning, 0); // faults included: never wedge
+            }
+        }, ct));
     }
 
     public override void Render(CellBuffer buffer)
@@ -303,33 +374,7 @@ internal sealed class ProcWidget : Widget
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
         Panel.Frame(buffer, r, Paused ? "PROCESSES (paused)" : "PROCESSES", Theme.Title, Theme);
 
-        long now = Environment.TickCount64;
-        double dt = Math.Max(1, now - _lastSampleTs) / 1000.0;
-        _lastSampleTs = now;
-
-        if (!Paused)
-        {
-            var mem = LinuxProc.ReadMem();
-            var raw = LinuxProc.ReadProcesses(_prevTicks, dt, mem.TotalKb);
-
-            const double alpha = 0.3;
-            var seen = new HashSet<int>(raw.Count);
-            foreach (var row in raw)
-            {
-                seen.Add(row.Pid);
-                double prev = _smoothCpu.GetValueOrDefault(row.Pid, row.CpuPercent);
-                _smoothCpu[row.Pid] = prev + (row.CpuPercent - prev) * alpha;
-            }
-            foreach (var pid in _smoothCpu.Keys.ToList())
-                if (!seen.Contains(pid))
-                    _smoothCpu.Remove(pid);
-
-            _rows = raw
-                .Select(row => row with { CpuPercent = _smoothCpu.GetValueOrDefault(row.Pid) })
-                .OrderByDescending(row => row.CpuPercent)
-                .ToList();
-            _list.Invalidate();
-        }
+        // pure drawing: the sample arrived as a message; Render never blocks
 
         // header row inside the frame, list lives below it
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
