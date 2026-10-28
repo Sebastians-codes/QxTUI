@@ -286,6 +286,24 @@ public class BallStripCollisionTests
         // rect h=12 → inner rows 10 → surface rows must be 9 (strip excluded)
         Assert.Equal(9 * 2, ball.SurfacePixelHeight);
     }
+
+    [Fact]
+    public void NoChildRow_SurfaceReachesBottomBorder()
+    {
+        // regression: the strip row was reserved unconditionally, so
+        // childless balls (the capped 8/30/120Hz playground panels) bounced
+        // off an invisible floor one row short of the window border
+        var speed = new Signal<float>(0.5f);
+        var ball = new QxTui.Playground.BallWidget(speed);
+
+        var root = UI.Column(0, ball.Grow(1));
+        var term = new FakeTerminal(30, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        // rect h=12 → inner rows 10 → no child row: surface owns all 10
+        Assert.Equal(10 * 2, ball.SurfacePixelHeight);
+    }
 }
 
 public class HalfRowThumbTests

@@ -103,7 +103,8 @@ string[] PopupLines() =>
     $"term:    {app.TerminalName ?? "unknown (no XTVERSION reply)"}",
     "",
     "modals swallow all keys;",
-    "esc / [x] / dim click closes.",
+    "esc / [x] closes; outside",
+    "click closes THIS one (opt-in).",
 ];
 
 void SetFps(int v) => app.SetTargetFps(v); // TargetFpsSignal updates HUDs
@@ -136,6 +137,7 @@ ModalWidget MakePopup()
         }),
     ]);
     m.Resizable = true; // the one resizable component in the playground
+    m.OutsideClickCloses = true; // demo the opt-in outside-press dismissal
     return m;
 }
 

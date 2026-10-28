@@ -1033,6 +1033,46 @@ public class FloatingHitTestTests
         Assert.Same(top, app.Overlay); // top survived
         Assert.Equal(1, app.Stats.LastDamageRects >= 0 ? 1 : 1); // noop keep
     }
+
+    [Fact]
+    public void PressOnLowerCloseChip_DoesNotRaiseItBeforeClosing()
+    {
+        // regression: click-to-raise fired on the [x] press too, so closing
+        // a popup sitting BEHIND others blinked it in front of the stack
+        // for one frame on its way out
+        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+            { OffsetX = -25 };
+        var top = new ModalWidget("top", () => ["t"], dim: false)
+            { OffsetX = 25 };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(80, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+
+        int bw = System.Math.Max(24, "lower".Length + 8);
+        int bx = (80 - bw) / 2 - 25;
+        int by = (20 - (1 + 4)) / 2;
+        int xx = bx + bw - 3, xy = by;
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+
+        Mouse($"\x1b[<0;{xx + 1};{xy + 1}M"); // press ONLY
+        app.RunFrame();
+        Assert.Same(top, app.Overlay); // no raise on the way out
+
+        Mouse($"\x1b[<0;{xx + 1};{xy + 1}m"); // release closes lower
+        app.RunFrame();
+        Assert.Same(top, app.Overlay);
+        Assert.Equal(' ', app.Back[bx + 2, by + 1].Char); // lower is gone
+    }
 }
 
 public class OverlayZAndRestoreTests
@@ -1085,6 +1125,44 @@ public class OverlayZAndRestoreTests
         var tb = topProbe.Rect;
         Assert.True(tb.W > 0, "top body needs a rect");
         Assert.Equal('T', app.Back[tb.X + 1, tb.Y + 1].Char);
+    }
+
+    [Fact]
+    public void MovedFloatingPopup_BodyPixelsAtOldBox_DoNotSurvive()
+    {
+        // regression: EraseInvalidate force-repaints every widget under the
+        // erased rect — the popup's OWN hosted body included, which still
+        // holds the OLD rect at erase time. That repainted the body into
+        // the just-erased region and its pixels survived forever (the
+        // "dirty pixels" seen while dragging/resizing popups).
+        var mark = new MarkerWidget('L');
+        mark.Node.Grow = 1;
+        var lbox = new ContainerWidget();
+        lbox.Node.Direction = FlexDirection.Column;
+        lbox.AddChild(mark);
+
+        var pop = new ModalWidget("p", () => ["llll"], dim: false)
+            { Body = lbox, BodyRows = 4 };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(60, 16);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(pop);
+        app.RunFrame();
+        app.RunFrame();
+
+        var oldBody = mark.Rect;
+        Assert.True(oldBody.W > 4, "body needs a real rect");
+
+        pop.OffsetX = 18; // same box jump a title-bar drag produces
+        app.RunFrame();
+        app.RunFrame();
+
+        // cells the old body owned that the new box does NOT cover must be
+        // empty — no resurrected 'L' anywhere in the vacated strip
+        for (int x = oldBody.X; x < oldBody.X + 4; x++)
+            Assert.Equal(' ', app.Back[x, oldBody.Y + 1].Char);
     }
 
     [Fact]
@@ -1663,5 +1741,134 @@ public class ResizeOptInTests
         app.RunFrame();
 
         Assert.Equal(w0, target.Rect.W); // opt-in respected
+    }
+}
+
+public class OutsideClickClosesTests
+{
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void DragInsideThenReleaseOutside_DoesNotClose()
+    {
+        // regression: OnClick closed whenever the RELEASE landed outside
+        // the box — modals capture the mouse, so every drag that left the
+        // box (body drag, title drag) dismissed the window on release
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var pop = new ModalWidget("p", () => ["x"], dim: false);
+        app.PushOverlay(pop);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;13;6M");  // press inside the body
+        app.RunFrame();
+        Mouse(term, "\x1b[<32;3;11M"); // drag out of the box
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;3;11m");  // release outside
+        app.RunFrame();
+
+        Assert.Same(pop, app.Overlay); // a drag is not a dismissal
+    }
+
+    [Fact]
+    public void OutsidePress_DefaultOff_BlockingModalStaysOpen()
+    {
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var modal = new ModalWidget("m", () => ["x"], dim: true);
+        app.PushOverlay(modal);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;2;2M\x1b[<0;2;2m"); // press+release on the dim
+        app.RunFrame();
+
+        Assert.Same(modal, app.Overlay); // opt-in only: default stays open
+    }
+
+    [Fact]
+    public void OutsidePress_OptIn_ClosesAndConsumesThePress()
+    {
+        var baseW = new ClickTarget();
+        var root = UI.Column(0, baseW.Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var modal = new ModalWidget("m", () => ["x"], dim: true)
+            { OutsideClickCloses = true };
+        app.PushOverlay(modal);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;2;2M"); // press on the dim: dismissal
+        app.RunFrame();
+        Assert.Null(app.Overlay);
+
+        Mouse(term, "\x1b[<0;2;2m"); // release of the dismissing press
+        app.RunFrame();
+        Assert.Null(baseW.Clicked); // consumed: base never saw the click
+    }
+
+    [Fact]
+    public void PressInsideHigherOverlay_DoesNotDismissOptInLower()
+    {
+        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+            { OffsetX = -25, OutsideClickCloses = true };
+        var top = new ModalWidget("top", () => ["t"], dim: false)
+            { OffsetX = 25 };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(80, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;61;10M\x1b[<0;61;10m"); // inside TOP's box
+        app.RunFrame();
+        Assert.Same(top, app.Overlay);
+
+        term.QueueInput((byte)'\x1b'); // esc pops top...
+        app.RunFrame();               // esc still ambiguous...
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        app.RunFrame();               // ...settled -> delivered
+        Assert.Same(lower, app.Overlay); // ...lower survived the press
+    }
+
+    [Fact]
+    public void PressOutsideEveryBox_DismissesOptInLower_UnderTop()
+    {
+        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+            { OffsetX = -25, OutsideClickCloses = true };
+        var top = new ModalWidget("top", () => ["t"], dim: false)
+            { OffsetX = 25 };
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(80, 20);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        app.PushOverlay(lower);
+        app.PushOverlay(top);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;41;11M\x1b[<0;41;11m"); // between the boxes
+        app.RunFrame();
+        Assert.Same(top, app.Overlay); // top untouched
+
+        term.QueueInput((byte)'\x1b'); // esc pops top...
+        app.RunFrame();               // esc still ambiguous...
+        Thread.Sleep(KeyParser.EscSettleMs + 20);
+        app.RunFrame();               // ...settled -> delivered
+        Assert.Null(app.Overlay);      // ...lower was already dismissed
     }
 }

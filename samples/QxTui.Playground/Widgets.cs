@@ -157,8 +157,12 @@ internal sealed class BallWidget : Widget
         // belongs to children, e.g. the slider)
         // framework-cached canvas, rebuilt on any rect change. Height is
         // r.H-1 so the surface STOPS ABOVE the slider strip: the ball
-        // bounces off the UI strip instead of sliding underneath it
-        var (surface, rebuilt) = Pixels(new Rect(r.X, r.Y, r.W, r.H - 1),
+        // bounces off the UI strip instead of sliding underneath it.
+        // Childless balls get EVERY inner row: reserving a strip for a
+        // child row that does not exist is an invisible floor the ball
+        // bounces off one row short of the border
+        int strip = Children.Count > 0 ? 1 : 0;
+        var (surface, rebuilt) = Pixels(new Rect(r.X, r.Y, r.W, r.H - strip),
             new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
         _probeHeight = surface.PixelHeight;
         _probeWidth = surface.PixelWidth;
@@ -188,9 +192,11 @@ internal sealed class BallWidget : Widget
         surface.Draw();
 
         // opaque strip where the child slider row lives: the ball must read
-        // as colliding with the UI, not sneaking behind transparent chrome
-        buffer.FillRect(r.X + 1, r.Bottom - 2, r.W - 2, 1,
-            new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
+        // as colliding with the UI, not sneaking behind transparent chrome.
+        // No child row = no strip (the canvas already owns those rows)
+        if (strip > 0)
+            buffer.FillRect(r.X + 1, r.Bottom - 2, r.W - 2, 1,
+                new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
 
         Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), "square pixels", Theme.Get(ThemeRole.Title));

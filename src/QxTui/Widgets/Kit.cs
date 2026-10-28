@@ -197,7 +197,8 @@ public sealed class ButtonWidget : Widget
 
 /// <summary>
 /// Modal popup: dims the screen, draws a centered box, consumes all keys
-/// (modal semantics). Esc closes; clicking the [x] or the dim area closes.
+/// (modal semantics). Esc and the [x] chip close; outside-press dismissal
+/// is opt-in via <see cref="Widget.OutsideClickCloses"/> (default off).
 /// </summary>
 public sealed class ModalWidget : Widget
 {
@@ -288,15 +289,34 @@ public sealed class ModalWidget : Widget
 
     internal override bool CenterMirroredResize => true; // free-floating
 
-    /// <summary>Blocking modals own the whole screen (dim click closes);
-    /// floating popups own only their box.</summary>
+    /// <summary>Blocking modals own the whole screen for routing (dim
+    /// presses reach them); floating popups own only their box.</summary>
     public override bool HitTest(int x, int y)
     {
         if (BlocksBaseRendering)
             return Rect.Contains(x, y);
+        return OwnsPoint(x, y);
+    }
+
+    /// <summary>"Inside the window" = inside the BOX, in both modes: a
+    /// press on the dim layer is an outside press (dismissal candidate).</summary>
+    internal override bool OwnsPoint(int x, int y)
+    {
         var b = BoxRect(Rect);
         return x >= b.X && x < b.Right && y >= b.Y && y < b.Bottom;
     }
+
+    /// <summary>The [x] chip rect test, shared by drag-start exclusion,
+    /// raise suppression and the hover/click paths.</summary>
+    private bool OnCloseChip(MouseEvent ev)
+    {
+        var b = BoxRect(Rect);
+        return ev.Y == b.Y && ev.X >= b.Right - 4 && ev.X < b.Right - 1;
+    }
+
+    /// <summary>Pressing the [x] chip closes the window — raising it first
+    /// would blink it in front of the windows it sits behind.</summary>
+    internal override bool RaisesOnPress(MouseEvent ev) => !OnCloseChip(ev);
 
     /// <summary>Floating popups paint ONLY inside their box: without this,
     /// a lower window's lines land inside a higher window's preserved
@@ -406,12 +426,30 @@ public sealed class ModalWidget : Widget
     }
 
     private int _hoverAction = -1;
+    private bool _pressOnChip;
+    private int _pressAction = -1;
+
+    /// <summary>Action chip under the point, else -1. Single source for
+    /// hover, press bookkeeping and click dispatch.</summary>
+    private int ActionAt(int x, int y)
+    {
+        foreach (var (r, _, i) in LayoutActions(BoxRect(Rect)))
+            if (x >= r.X && x < r.Right && y == r.Y) return i;
+        return -1;
+    }
 
     public override bool OnMouse(MouseEvent ev)
     {
         var box0 = BoxRect(Rect);
-        bool onXChip = ev.Y == box0.Y &&
-                       ev.X >= box0.Right - 4 && ev.X < box0.Right - 1;
+        bool onXChip = OnCloseChip(ev);
+        if (ev.Kind == MouseKind.Press)
+        {
+            // a click is a press+release PAIR: chips and the [x] only fire
+            // when the press STARTED on them, so a drag that ends on a
+            // chip (or leaves the box) is a drag, never a close/click
+            _pressOnChip = onXChip;
+            _pressAction = ActionAt(ev.X, ev.Y);
+        }
         if (ev.Kind == MouseKind.Press && ev.Y == box0.Y &&
             ev.X >= box0.X && ev.X < box0.Right && !onXChip)
         {
@@ -430,7 +468,9 @@ public sealed class ModalWidget : Widget
             int ox = nx - cx, oy = ny - cy;
             if (ox != OffsetX || oy != OffsetY)
             {
-                App?.EraseInvalidate(box0); // old box vanishes; base repaints
+                // old box vanishes; base repaints. caller=this: our own
+                // subtree repaints at the new offset later this frame
+                App?.EraseInvalidate(box0, this);
                 OffsetX = ox;
                 OffsetY = oy;
                 Invalidate();
@@ -441,12 +481,7 @@ public sealed class ModalWidget : Widget
             _dragging = false;
 
         // per-button hover for the chip highlight
-        var box = BoxRect(Rect);
-        int idx = -1;
-        foreach (var (r, _, i) in LayoutActions(box))
-        {
-            if (ev.X >= r.X && ev.X < r.Right && ev.Y == r.Y) { idx = i; break; }
-        }
+        int idx = ActionAt(ev.X, ev.Y);
         if (idx != _hoverAction)
         {
             _hoverAction = idx;
@@ -459,9 +494,10 @@ public sealed class ModalWidget : Widget
     {
         var box = BoxRect(Rect);
 
-        // action buttons first
-        foreach (var (r, act, _) in LayoutActions(box))
+        // action buttons first — only the chip the press STARTED on fires
+        foreach (var (r, act, i) in LayoutActions(box))
         {
+            if (i != _pressAction) continue;
             if (local.X >= r.X && local.X < r.Right && local.Y == r.Y)
             {
                 act();
@@ -469,11 +505,12 @@ public sealed class ModalWidget : Widget
             }
         }
 
-        bool insideBox = local.X >= box.X && local.X < box.Right &&
-                         local.Y >= box.Y && local.Y < box.Bottom;
-        // [x] button sits at the box top-right; outside the box closes
+        // [x] chip, same pair semantics. Outside-press dismissal is NOT
+        // here anymore: a release outside the box after a drag that
+        // started inside used to close the window. Opt-in dismissal lives
+        // in App.RouteMouse (OutsideClickCloses) and keys off the PRESS.
         bool closeBtn = local.X >= box.Right - 4 && local.X < box.Right - 1 && local.Y == box.Y;
-        if (!insideBox || closeBtn)
+        if (closeBtn && _pressOnChip)
             App?.PopOverlay(this);
     }
 

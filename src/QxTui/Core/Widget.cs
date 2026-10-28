@@ -198,6 +198,18 @@ public abstract class Widget
     /// false so the background stays live behind them.</summary>
     public bool BlocksBaseRendering { get; set; }
 
+    /// <summary>Opt-in dismissal (default FALSE): while this overlay is
+    /// open, any mouse press that lands outside its box — and outside
+    /// every overlay above it — closes it, and that press is consumed
+    /// (while a modal is open it owns the screen: the dismissing press is
+    /// not a click on what sits underneath). Authors opt in per window.</summary>
+    public bool OutsideClickCloses { get; set; }
+
+    /// <summary>The region a press must land in to count as "inside" this
+    /// widget for <see cref="OutsideClickCloses"/>: modals use their BOX in
+    /// both modes — a press on the dim layer is OUTSIDE.</summary>
+    internal virtual bool OwnsPoint(int x, int y) => Rect.Contains(x, y);
+
     /// <summary>Raw mouse events hitting this widget's rect. Return true to
     /// consume (stop routing to widgets below).</summary>
     public virtual bool OnMouse(MouseEvent ev) => false;
@@ -402,6 +414,12 @@ public abstract class Widget
     /// only owns clicks inside its box, so clicks beside it reach the
     /// window underneath instead of being swallowed by the top layer.</summary>
     public virtual bool HitTest(int x, int y) => Rect.Contains(x, y);
+
+    /// <summary>Click-to-raise gate (WM feel). A press that will CLOSE the
+    /// window must not raise it first: the raise shows as a one-frame
+    /// blink where the dying window jumps in front of its neighbours on
+    /// its way out.</summary>
+    internal virtual bool RaisesOnPress(MouseEvent ev) => true;
 
     /// <summary>Set when this widget's pixels SURVIVE its parent's repaint
     /// (the parent paints around them): the parent-repaint cascade then

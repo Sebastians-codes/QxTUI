@@ -268,11 +268,16 @@ public sealed class App : IDisposable
 
         // focus must not survive detach: keys routed into an off-screen
         // widget get swallowed or mis-handled (the 'press 4, land on
-        // another tab' class of weird)
+        // another tab' class of weird). Same for an in-flight mouse
+        // gesture: a press/resize/hover on a disposed widget would keep
+        // routing events into dead state (pop mid-drag).
         bool focusedDetached = false;
         void CheckFocus(Widget w)
         {
             if (ReferenceEquals(Focused, w)) focusedDetached = true;
+            if (ReferenceEquals(_pressed, w)) _pressed = null;
+            if (ReferenceEquals(_resizing, w)) _resizing = null;
+            if (ReferenceEquals(_hovered, w)) _hovered = null;
             for (int i = 0; i < w.Children.Count; i++) CheckFocus(w.Children[i]);
         }
         CheckFocus(child);
@@ -524,6 +529,28 @@ public sealed class App : IDisposable
     private void RouteMouse(MouseEvent ev)
     {
         _mouseWindowEvents++;
+
+        // opt-in outside-press dismissal (OutsideClickCloses, default off):
+        // the first press no overlay above claims AND that lands outside an
+        // opt-in overlay's box closes it — and is consumed: while a modal
+        // is open it owns the screen, the dismissing press is not a click
+        // on what sits underneath. A press inside a higher overlay's box
+        // belongs to that overlay and dismisses nothing.
+        if (ev.Kind == MouseKind.Press)
+        {
+            for (int i = _overlays.Count - 1; i >= 0; i--)
+            {
+                var ov = _overlays[i];
+                bool owns = ov.OwnsPoint(ev.X, ev.Y);
+                if (ov.OutsideClickCloses && !owns)
+                {
+                    PopOverlay(ov);
+                    return;
+                }
+                if (owns) break;
+            }
+        }
+
         Widget? target = TopMostAt(ev.X, ev.Y);
 
         // press/release bookkeeping FIRST: widgets may consume the event in
@@ -564,8 +591,10 @@ public sealed class App : IDisposable
         }
 
         // click-to-raise: clicking anywhere in a floating window (or its
-        // hosted body) brings it to the top of the stack, like a WM
-        if (ev.Kind == MouseKind.Press && target is not null)
+        // hosted body) brings it to the top of the stack, like a WM —
+        // except presses that close it (the [x] chip): raising on the way
+        // out blinks the dying window in front of its neighbours
+        if (ev.Kind == MouseKind.Press && target is not null && target.RaisesOnPress(ev))
             RaiseOverlayOf(target);
 
         if (ev.Kind == MouseKind.Press && target is { Focusable: true })
@@ -644,10 +673,23 @@ public sealed class App : IDisposable
             // repaint NOW or the erase shows as a one-frame blink
             int z = _overlays.IndexOf(w);
             if (z >= 0 && z >= callerZ) continue;
+            // the caller's own subtree repaints LATER THIS FRAME at its
+            // new rect — force-rendering it here would paint its pixels
+            // back into the region we just erased (a hosted body still
+            // holds the OLD rect at erase time), leaving dirty pixels
+            // that nothing ever clears again
+            if (caller is not null && InSubtree(w, caller)) continue;
             var wr = w.Rect;
             if (wr.X < r.Right && r.X < wr.Right && wr.Y < r.Bottom && r.Y < wr.Bottom)
                 RepaintSubtreeNow(w); // same frame: no blank, no ghost
         }
+    }
+
+    private static bool InSubtree(Widget w, Widget root)
+    {
+        for (var p = w; p is not null; p = p.Parent)
+            if (ReferenceEquals(p, root)) return true;
+        return false;
     }
 
     /// <summary>Render a subtree into the back buffer RIGHT NOW (bypassing
