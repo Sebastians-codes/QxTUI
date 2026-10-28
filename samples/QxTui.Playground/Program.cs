@@ -333,11 +333,12 @@ controlsPanel.Node.Grow = 1f;
 controlsCol.AddChild(controlsPanel);
 var controlStack = new Container();
 controlStack.Node.Direction = FlexDirection.Column;
-controlStack.Node.Gap = 1;
+controlStack.Node.Gap = 0; // dense gallery: fits short terminals too
 controlsPanel.AddChild(controlStack);
 controlStack.AddChild(new Checkbox(darkMode, "dark mode"));
 controlStack.AddChild(new Segmented(mode, "day", "night", "auto"));
 controlStack.AddChild(new Dropdown(choice, "alpha", "beta", "gamma"));
+controlStack.AddChild(new Separator());
 var busyRow = new Container();
 busyRow.Node.Direction = FlexDirection.Row;
 busyRow.Node.Gap = 1;
@@ -437,7 +438,7 @@ void CycleTheme()
 app.OnMessage<FpsMsg>(m => app.SetTargetFps(m.Value));
 app.OnMessage<ThemeMsg>(_ => CycleTheme());
 app.OnMessage<OpenPopupMsg>(_ => app.PushOverlay(MakePopup()));
-app.OnMessage<ToastMsg>(m => app.Toast(m.Text));
+app.OnMessage<ToastMsg>(m => app.Toast(m.Text, ToastKind.Success));
 
 int[] fpsPresets = [30, 60, 120, 240, 480, 1000];
 

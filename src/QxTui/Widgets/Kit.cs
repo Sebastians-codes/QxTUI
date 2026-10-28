@@ -148,6 +148,7 @@ public sealed class Button : Widget
         _fg = fg;
         _style = style;
         Clickable = true;
+        Node.Height = 1; // sane default: a bare button is one row, not zero
     }
 
     /// <summary>Pure-intent button: no callback at all, just EmitOnClick.</summary>

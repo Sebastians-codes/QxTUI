@@ -215,4 +215,44 @@ public class KitControlsTests
         app.RunFrame();
         Assert.Null(app.Overlay);
     }
+
+    [Fact]
+    public void Button_HasOneRowByDefault_NotZero()
+    {
+        // regression: a leaf without Measure flexes to height 0 — a bare
+        // button was invisible until every call site set Height by hand
+        var btn = new Button(() => " toast ");
+        var (app, _, _) = MakeApp(UI.Column(0, btn));
+        app.RunFrame();
+        Assert.Equal(1, btn.Rect.H);
+        Assert.True(BackContains(app, "toast"));
+    }
+
+    [Fact]
+    public void Toast_KindOwnsItsFullColorPair()
+    {
+        var (app, _, _) = MakeApp(UI.Column(0, new Container().Grow(1)));
+        app.RunFrame();
+        app.Toast("boom", ToastKind.Error);
+        app.RunFrame();
+
+        // box: w=8 at x=16, h=3 at y=8; filled variant = kind pair edge to edge
+        Assert.Equal(196, app.Back[16, 9].Bg);   // error red fill
+        Assert.Equal('b', app.Back[18, 9].Char);
+        Assert.Equal(255, app.Back[18, 9].Fg);    // white ink on red
+        Assert.Equal(196, app.Back[18, 9].Bg);    // text keeps the fill: no holes
+    }
+
+    [Fact]
+    public void Toast_FrameOption_DrawsRoundedBorderInKindColor()
+    {
+        var (app, _, _) = MakeApp(UI.Column(0, new Container().Grow(1)));
+        app.RunFrame();
+        app.Toast("note", ToastKind.Info, frame: BoxStyles.Rounded);
+        app.RunFrame();
+
+        Assert.Equal('╭', app.Back[16, 8].Char); // rounded corner, info blue
+        Assert.Equal(33, app.Back[16, 8].Fg);
+        Assert.Equal(236, app.Back[20, 9].Bg);   // dark fill inside the frame
+    }
 }
