@@ -45,6 +45,11 @@ public static class NodeFluent
     public static LayoutNode Height(this LayoutNode n, int cells) { n.Height = cells; return n; }
     public static LayoutNode WidthPercent(this LayoutNode n, float fraction) { n.WidthPercent = fraction; return n; }
     public static LayoutNode HeightPercent(this LayoutNode n, float fraction) { n.HeightPercent = fraction; return n; }
+    public static LayoutNode MinWidth(this LayoutNode n, int cells) { n.MinWidth = cells; return n; }
+    public static LayoutNode MaxWidth(this LayoutNode n, int cells) { n.MaxWidth = cells; return n; }
+    public static LayoutNode MinHeight(this LayoutNode n, int cells) { n.MinHeight = cells; return n; }
+    public static LayoutNode MaxHeight(this LayoutNode n, int cells) { n.MaxHeight = cells; return n; }
+    public static LayoutNode Justify(this LayoutNode n, JustifyContent justify) { n.Justify = justify; return n; }
     public static LayoutNode Align(this LayoutNode n, AlignItems align) { n.Align = align; return n; }
     public static LayoutNode Gap(this LayoutNode n, int cells) { n.Gap = cells; return n; }
 
@@ -57,6 +62,11 @@ public static class NodeFluent
     public static LayoutNode Height(this Core.Widget w, int cells) => w.Node.Height(cells);
     public static LayoutNode WidthPercent(this Core.Widget w, float fraction) => w.Node.WidthPercent(fraction);
     public static LayoutNode HeightPercent(this Core.Widget w, float fraction) => w.Node.HeightPercent(fraction);
+    public static LayoutNode MinWidth(this Core.Widget w, int cells) => w.Node.MinWidth(cells);
+    public static LayoutNode MaxWidth(this Core.Widget w, int cells) => w.Node.MaxWidth(cells);
+    public static LayoutNode MinHeight(this Core.Widget w, int cells) => w.Node.MinHeight(cells);
+    public static LayoutNode MaxHeight(this Core.Widget w, int cells) => w.Node.MaxHeight(cells);
+    public static LayoutNode Justify(this Core.Widget w, JustifyContent justify) => w.Node.Justify(justify);
     public static LayoutNode Align(this Core.Widget w, AlignItems align) => w.Node.Align(align);
     public static LayoutNode Gap(this Core.Widget w, int cells) => w.Node.Gap(cells);
 }

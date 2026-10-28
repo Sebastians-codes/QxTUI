@@ -104,6 +104,13 @@ belongs there, not in `Dispose`.
 - DSL: `UI.Column(gap, a.Grow(1), b.Height(3))`; fluent on widgets too.
 - Sizes: fixed `Width/Height`, `WidthPercent/HeightPercent` (fraction of the
   parent's inner space), `Grow`/`Shrink`/`Basis` for flex contests.
+- Bounds: `MinWidth/MaxWidth/MinHeight/MaxHeight` are hard clamps applied
+  after flex distribution — "20% but never under 30 cols" is
+  `WidthPercent(0.2f).MinWidth(30)`. A capped grower's surplus flows to its
+  unconstrained siblings.
+- Packing: `Justify(SpaceBetween/SpaceAround/Center/End)` packs leftover
+  free space on the main axis (ignored while any child can still grow);
+  `Align` handles the cross axis.
 - Windows: `app.PushOverlay(modal)`; floating popups (`dim:false`) coexist;
   `OutsideClickCloses` opts into dismiss-on-outside-press; title bar drags,
   right-drag resizes (`Resizable = true`) come free. Z-order is structural

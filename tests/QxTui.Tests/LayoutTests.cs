@@ -253,3 +253,139 @@ public class LayoutTests
         Assert.True(b.Rect.H >= 0);
     }
 }
+
+public class LayoutConstraintTests
+{
+    private static LayoutNode Leaf(int? w = null, int? h = null) =>
+        new() { Width = w, Height = h };
+
+    [Fact]
+    public void MinWidth_FloorsAPercentChild_AndGrowTakesTheRest()
+    {
+        // "20% but never under 30 cols": 20% of 100 = 20 → floored to 30
+        var a = Leaf(); a.WidthPercent = 0.2f; a.MinWidth = 30;
+        var b = Leaf(); b.Grow = 1f;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(a).Add(b);
+
+        LayoutNode.Compute(root, 100, 10);
+
+        Assert.Equal(30, a.Rect.W);
+        Assert.Equal(70, b.Rect.W);
+    }
+
+    [Fact]
+    public void MaxWidth_CapsAGrowingChild_SurplusGoesToSibling()
+    {
+        // two equal growers, one capped: the cap's surplus is redistributed
+        var a = Leaf(); a.Grow = 1f; a.MaxWidth = 40;
+        var b = Leaf(); b.Grow = 1f;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(a).Add(b);
+
+        LayoutNode.Compute(root, 100, 10);
+
+        Assert.Equal(40, a.Rect.W);
+        Assert.Equal(60, b.Rect.W);
+    }
+
+    [Fact]
+    public void MinHeight_FloorsCrossAxis_InRow()
+    {
+        var a = Leaf(); // no cap: stretch wins
+        var root = new LayoutNode { Direction = FlexDirection.Row, Align = AlignItems.Stretch };
+        root.Add(a);
+
+        LayoutNode.Compute(root, 10, 8);
+        Assert.Equal(8, a.Rect.H); // stretch, no min: full height
+
+        var b = Leaf(); b.MaxHeight = 2;
+        var root2 = new LayoutNode { Direction = FlexDirection.Row, Align = AlignItems.Stretch };
+        root2.Add(b);
+        LayoutNode.Compute(root2, 10, 8);
+        Assert.Equal(2, b.Rect.H); // capped on the cross axis
+    }
+
+    [Fact]
+    public void Justify_SpaceBetween_PacksEdges()
+    {
+        var a = Leaf(w: 4); var b = Leaf(w: 4);
+        var root = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.SpaceBetween };
+        root.Add(a).Add(b);
+
+        LayoutNode.Compute(root, 20, 5);
+
+        Assert.Equal(new Rect(0, 0, 4, 5), a.Rect);
+        Assert.Equal(new Rect(16, 0, 4, 5), b.Rect);
+    }
+
+    [Fact]
+    public void Justify_Center_And_End_ExactRects()
+    {
+        var c = Leaf(w: 4); var d = Leaf(w: 4);
+        var center = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.Center };
+        center.Add(c).Add(d);
+        LayoutNode.Compute(center, 20, 5);
+        Assert.Equal(6, c.Rect.X);   // free 12 → lead 6
+        Assert.Equal(10, d.Rect.X);
+
+        var e = Leaf(w: 4); var f = Leaf(w: 4);
+        var end = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.End };
+        end.Add(e).Add(f);
+        LayoutNode.Compute(end, 20, 5);
+        Assert.Equal(12, e.Rect.X);
+        Assert.Equal(16, f.Rect.X);
+    }
+
+    [Fact]
+    public void Justify_SpaceAround_HalfEdges()
+    {
+        var a = Leaf(w: 4); var b = Leaf(w: 4);
+        var root = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.SpaceAround };
+        root.Add(a).Add(b);
+
+        LayoutNode.Compute(root, 20, 5);
+
+        // free 12, n=2: between = 6, lead = (12-6)/2 = 3
+        Assert.Equal(3, a.Rect.X);
+        Assert.Equal(13, b.Rect.X);
+    }
+
+    [Fact]
+    public void Justify_RemainderCells_GoToEarliestGaps_Deterministic()
+    {
+        var a = Leaf(w: 4); var b = Leaf(w: 4); var c = Leaf(w: 4);
+        var root = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.SpaceBetween };
+        root.Add(a).Add(b).Add(c);
+
+        LayoutNode.Compute(root, 21, 5); // free 9 over 2 gaps: 5 then 4
+
+        Assert.Equal(0, a.Rect.X);
+        Assert.Equal(9, b.Rect.X);   // 0 + 4 + gap 5
+        Assert.Equal(17, c.Rect.X);  // 9 + 4 + gap 4
+    }
+
+    [Fact]
+    public void Justify_IsIgnored_WhenGrowAbsorbsFreeSpace()
+    {
+        var a = Leaf(w: 4);
+        var g = Leaf(); g.Grow = 1f;
+        var root = new LayoutNode { Direction = FlexDirection.Row, Justify = JustifyContent.Center };
+        root.Add(a).Add(g);
+
+        LayoutNode.Compute(root, 20, 5);
+
+        Assert.Equal(0, a.Rect.X);   // grow ate the free space: start packing
+        Assert.Equal(16, g.Rect.W);
+    }
+
+    [Fact]
+    public void Root_MinMax_ClampAgainstViewport()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column, MaxWidth = 12 };
+        root.Add(Leaf(h: 2));
+
+        LayoutNode.Compute(root, 20, 10);
+        Assert.Equal(12, root.Rect.W);
+    }
+}

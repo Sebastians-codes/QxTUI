@@ -14,6 +14,17 @@ public enum AlignItems
     Stretch,
 }
 
+/// <summary>Main-axis packing of children when free space remains after
+/// flex distribution (grow absorbs free space first, like CSS).</summary>
+public enum JustifyContent
+{
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+}
+
 /// <summary>
 /// A node in the flexbox layout tree (AGENT.md §2 Layout rules).
 /// Pure data + pure math: no I/O, no global state, deterministic integer
@@ -46,10 +57,39 @@ public sealed class LayoutNode
     /// <summary>Flex basis in cells along the main axis. null = auto (content).</summary>
     public float? Basis { get; set; }
 
+    /// <summary>Hard floors/ceilings in cells, applied AFTER flex
+    /// distribution: a MaxWidth caps even a growing child, a MinWidth
+    /// floors even a shrinking one ("20% but never under 30 cols").
+    /// Space a clamped child gives up is redistributed once to
+    /// unconstrained siblings (deterministic single correction pass).</summary>
+    public int? MinWidth { get; set; }
+    public int? MaxWidth { get; set; }
+    public int? MinHeight { get; set; }
+    public int? MaxHeight { get; set; }
+
+    internal int ClampWidth(int w)
+    {
+        if (MinWidth is int mn && w < mn) w = mn;
+        if (MaxWidth is int mx && w > mx) w = mx;
+        return w;
+    }
+
+    internal int ClampHeight(int h)
+    {
+        if (MinHeight is int mn && h < mn) h = mn;
+        if (MaxHeight is int mx && h > mx) h = mx;
+        return h;
+    }
+
     // ---- container inputs ----------------------------------------------
 
     public FlexDirection Direction { get; set; } = FlexDirection.Column;
     public AlignItems Align { get; set; } = AlignItems.Start;
+
+    /// <summary>Main-axis packing of leftover free space (after grow and
+    /// min/max clamps). Ignored while any child can still grow.</summary>
+    public JustifyContent Justify { get; set; } = JustifyContent.Start;
+
     public int Gap { get; set; }
 
     /// <summary>Reserve a border ring: children are laid out inside the
@@ -137,19 +177,15 @@ public sealed class LayoutNode
             _children[i].CollectChanged(result);
     }
 
-    internal int ResolveWidth(Size available)
-    {
-        if (Width is int w) return w;
-        if (WidthPercent is float pw) return Math.Max(0, (int)(pw * available.Width));
-        return IntrinsicWidth(available);
-    }
+    internal int ResolveWidth(Size available) =>
+        ClampWidth(Width is int w ? w
+            : WidthPercent is float pw ? Math.Max(0, (int)(pw * available.Width))
+            : IntrinsicWidth(available));
 
-    internal int ResolveHeight(Size available)
-    {
-        if (Height is int h) return h;
-        if (HeightPercent is float ph) return Math.Max(0, (int)(ph * available.Height));
-        return IntrinsicHeight(available);
-    }
+    internal int ResolveHeight(Size available) =>
+        ClampHeight(Height is int h ? h
+            : HeightPercent is float ph ? Math.Max(0, (int)(ph * available.Height))
+            : IntrinsicHeight(available));
 
     private int IntrinsicWidth(Size available) =>
         Measure is { } m ? Math.Min(m(available).Width, available.Width) : available.Width;
@@ -253,14 +289,103 @@ public sealed class LayoutNode
             // get clipped by the renderer bounds checks. Acceptable for v1.
         }
 
+        // 2b) HARD min/max clamps on the flexed size, then one correction
+        //     pass: space a clamped child gave up goes to unconstrained
+        //     siblings (grow for surplus, shrink for deficit), re-clamped.
+        //     Deterministic integer layout beats CSS violation looping.
+        for (int i = 0; i < n; i++)
+            mainSizes[i] = row ? _children[i].ClampWidth(mainSizes[i])
+                               : _children[i].ClampHeight(mainSizes[i]);
+
+        used = totalGap;
+        for (int i = 0; i < n; i++) used += mainSizes[i];
+        free = availableMain - used;
+
+        if (free > 0)
+        {
+            float growSum2 = 0f;
+            for (int i = 0; i < n; i++)
+                if (_children[i].Grow > 0f && !AtMax(_children[i], mainSizes[i], row))
+                    growSum2 += _children[i].Grow;
+            if (growSum2 > 0f)
+            {
+                int distributed = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    var c = _children[i];
+                    if (c.Grow <= 0f || AtMax(c, mainSizes[i], row)) continue;
+                    int share = (int)(free * (c.Grow / growSum2));
+                    mainSizes[i] += share;
+                    distributed += share;
+                }
+                int rem = free - distributed;
+                for (int i = 0; rem > 0; i = (i + 1) % n)
+                    if (_children[i].Grow > 0f && !AtMax(_children[i], mainSizes[i], row))
+                    { mainSizes[i]++; rem--; }
+            }
+        }
+        else if (free < 0)
+        {
+            float shrinkSum2 = 0f;
+            for (int i = 0; i < n; i++)
+                if (!AtMin(_children[i], mainSizes[i], row))
+                    shrinkSum2 += _children[i].Shrink * mainSizes[i];
+            if (shrinkSum2 > 0f)
+            {
+                int deficit = -free;
+                for (int i = 0; i < n; i++)
+                {
+                    if (AtMin(_children[i], mainSizes[i], row)) continue;
+                    int reduction = (int)(deficit * (_children[i].Shrink * mainSizes[i] / shrinkSum2));
+                    mainSizes[i] = Math.Max(0, mainSizes[i] - reduction);
+                }
+            }
+        }
+        for (int i = 0; i < n; i++)
+            mainSizes[i] = row ? _children[i].ClampWidth(mainSizes[i])
+                               : _children[i].ClampHeight(mainSizes[i]);
+
+        // 2c) justify: pack the LEFTOVER free space (what grow and the
+        //     clamps did not absorb). Remainder cells go to the earliest
+        //     gaps — same determinism rule as grow distribution.
+        int usedJ = totalGap;
+        for (int i = 0; i < n; i++) usedJ += mainSizes[i];
+        int freeJ = Math.Max(0, availableMain - usedJ);
+        int lead = 0;
+        int gaps = Math.Max(0, n - 1);
+        Span<int> gapExtra = gaps <= 64 ? stackalloc int[64] : new int[gaps];
+        gapExtra = gapExtra[..gaps];
+        if (freeJ > 0)
+        {
+            switch (Justify)
+            {
+                case JustifyContent.Center: lead = freeJ / 2; break;
+                case JustifyContent.End: lead = freeJ; break;
+                case JustifyContent.SpaceBetween when gaps > 0:
+                {
+                    int baseG = freeJ / gaps, remG = freeJ % gaps;
+                    for (int g = 0; g < gaps; g++) gapExtra[g] = baseG + (g < remG ? 1 : 0);
+                    break;
+                }
+                case JustifyContent.SpaceAround:
+                {
+                    int between = freeJ / n;
+                    lead = (freeJ - between * gaps) / 2;
+                    for (int g = 0; g < gaps; g++) gapExtra[g] = between;
+                    break;
+                }
+            }
+        }
+
         // 3) cross sizes + placement
-        int offsetMain = 0;
+        int offsetMain = lead;
         for (int i = 0; i < n; i++)
         {
             var child = _children[i];
             int main = Math.Min(mainSizes[i], Math.Max(0, availableMain - offsetMain));
 
-            // cross axis: fixed > percent > stretch > intrinsic
+            // cross axis: fixed > percent > stretch > intrinsic, then the
+            // same hard min/max clamps as the main axis
             int? fixedCross = row ? child.Height : child.Width;
             float? pctCross = row ? child.HeightPercent : child.WidthPercent;
             int cross;
@@ -275,6 +400,7 @@ public sealed class LayoutNode
                 var avail = new Size(row ? main : availableCross, row ? availableCross : main);
                 cross = row ? child.IntrinsicHeight(avail) : child.IntrinsicWidth(avail);
             }
+            cross = row ? child.ClampHeight(cross) : child.ClampWidth(cross);
             cross = Math.Clamp(cross, 0, availableCross);
 
             int crossOffset = Align switch
@@ -297,9 +423,17 @@ public sealed class LayoutNode
             child.SetRect(new Rect(cx, cy, cw, ch));
             child.LayoutChildren();
 
-            offsetMain += main + Gap;
+            offsetMain += main + Gap + (i < gaps ? gapExtra[i] : 0);
         }
     }
+
+    private static bool AtMax(LayoutNode c, int size, bool row) =>
+        row ? c.MaxWidth is int mxW && size >= mxW
+            : c.MaxHeight is int mxH && size >= mxH;
+
+    private static bool AtMin(LayoutNode c, int size, bool row) =>
+        row ? c.MinWidth is int mnW && size <= mnW
+            : c.MinHeight is int mnH && size <= mnH;
 
     private static int SumIntrinsicMain(LayoutNode node, bool parentRow, int availableCross)
     {

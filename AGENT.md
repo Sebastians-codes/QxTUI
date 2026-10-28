@@ -121,6 +121,10 @@ writer thread      → the ONLY place a blocking tty write may happen
   moved/resized nodes are marked dirty.
 - Integer cell math: grow distributes leftover cells by weight; remainder
   cells go to the earliest children. Deterministic — same input, same rects.
+- Min/Max sizes are HARD clamps applied after flex distribution (a cap beats
+  grow, a floor beats shrink); space a clamped child gives up is redistributed
+  once to unconstrained siblings. `Justify` packs only what grow and the
+  clamps left over; justify remainder cells go to the earliest gaps.
 
 ## 3. Testing doctrine (MUST — "test everything from the start")
 

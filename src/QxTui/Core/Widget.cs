@@ -409,8 +409,10 @@ public abstract class Widget
             var sib = p.NextSiblingOf(node) ?? p.PrevSiblingOf(node);
             if (sib is not null)
             {
-                if (row && sib.Width is int sw) sib.Width = Math.Max(1, sw - dMain);
-                else if (!row && sib.Height is int sh) sib.Height = Math.Max(1, sh - dMain);
+                // the absorber's own min/max bounds are respected: a resize
+                // can never crush a sibling below its declared floor
+                if (row && sib.Width is int sw) sib.Width = sib.ClampWidth(Math.Max(1, sw - dMain));
+                else if (!row && sib.Height is int sh) sib.Height = sib.ClampHeight(Math.Max(1, sh - dMain));
             }
         }
 
