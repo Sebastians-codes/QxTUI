@@ -389,3 +389,32 @@ public class LayoutConstraintTests
         Assert.Equal(12, root.Rect.W);
     }
 }
+
+public class ChildInsetTests
+{
+    [Fact]
+    public void ChildInset_KeepsChildrenInsideTheBorderRing()
+    {
+        // the regression behind "the PROCESSES border renders wrong":
+        // a framed parent whose children ignore the ring paint over it
+        var child = new LayoutNode { Grow = 1f };
+        var root = new LayoutNode { Direction = FlexDirection.Column, ChildInset = 1 };
+        root.Add(child);
+
+        LayoutNode.Compute(root, 20, 10);
+
+        Assert.Equal(new Rect(1, 1, 18, 8), child.Rect);
+    }
+
+    [Fact]
+    public void NoInset_ChildrenOwnTheWholeRect()
+    {
+        var child = new LayoutNode { Grow = 1f };
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        root.Add(child);
+
+        LayoutNode.Compute(root, 20, 10);
+
+        Assert.Equal(new Rect(0, 0, 20, 10), child.Rect);
+    }
+}

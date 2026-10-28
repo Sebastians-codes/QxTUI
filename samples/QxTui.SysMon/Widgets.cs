@@ -292,10 +292,14 @@ internal sealed class ProcWidget : Widget
                 buffer.WriteTextClipped(clip, rect.X + 28, rect.Y, p.Name, fg: cpuColor);
             },
         };
-        // header occupies rows 0-1; spacer then virtualized list below
+        // the frame ring is ours: children lay out INSIDE it, or the list
+        // paints over the left/right/bottom border cells (it did, for as
+        // long as this panel existed — ChildInset is the fix)
+        Node.ChildInset = 1;
+        // header row inside the frame, spacer then virtualized list below
         var headerSpacer = new ContainerWidget();
         AddChild(headerSpacer);
-        headerSpacer.Node.Height = 2;
+        headerSpacer.Node.Height = 1;
         AddChild(_list);
         _list.Node.Grow = 1f;
         // 1Hz: the /proc scan is the dominant cost — and it now runs OFF the
