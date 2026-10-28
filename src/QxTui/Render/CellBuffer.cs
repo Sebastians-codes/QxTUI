@@ -50,6 +50,20 @@ public sealed class CellBuffer : IDisposable
 
     public void Clear() => Array.Fill(_cells, Cell.Empty, 0, Width * Height);
 
+    /// <summary>Copy a rect of cells from a same-width buffer (layer
+    /// compositing: blit an overlay's painted rect over the scene).
+    /// Row-wise span copies — zero alloc, no per-cell loop.</summary>
+    public void BlitFrom(CellBuffer src, int x, int y, int w, int h)
+    {
+        int x0 = Math.Max(0, x), y0 = Math.Max(0, y);
+        int x1 = Math.Max(x0, Math.Min(Math.Min(Width, src.Width), x + w));
+        int y1 = Math.Max(y0, Math.Min(Math.Min(Height, src.Height), y + h));
+        if (x1 <= x0 || y1 <= y0) return;
+        for (int row = y0; row < y1; row++)
+            src._cells.AsSpan(row * src.Width + x0, x1 - x0)
+               .CopyTo(_cells.AsSpan(row * Width + x0, x1 - x0));
+    }
+
     /// <summary>Fill a rect (clipped to bounds) with a value. Used by widgets.
     /// Clamping is two-sided: after a shrink, stale rects may start beyond
     /// the new buffer edge and must degenerate to a no-op, not throw.</summary>

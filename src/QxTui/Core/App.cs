@@ -57,9 +57,12 @@ public sealed class App : IDisposable
     private readonly List<LayoutNode> _changedNodes = [];
 
     private CellBuffer _back;
+    private CellBuffer _base;
+    private readonly List<CellBuffer> _overlayBufs = []; // parallel to _overlays
+    private bool _layersChanged;                         // push/pop/reorder
+    private readonly List<Layout.Rect> _blitRects = [];  // compose scratch
     private Renderer _renderer;
     private CellBuffer? _lastSubmitted;
-    private readonly Stack<(Widget Owner, CellBuffer Buf)> _dimSnaps = new();
     private CellBuffer? _snapA;
     private CellBuffer? _snapB;
     private long _snapIdA = long.MinValue;
@@ -182,6 +185,7 @@ public sealed class App : IDisposable
         _scheduler = new AnimationScheduler(time);
         _pacer = new FramePacer(targetFps);
         _back = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
+        _base = new CellBuffer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
         _snapW = _back.Width;
         _snapH = _back.Height;
         _renderer = new Renderer(Math.Max(1, terminal.Width), Math.Max(1, terminal.Height));
@@ -292,7 +296,7 @@ public sealed class App : IDisposable
             for (int i = 0; i < rects.Count; i++)
             {
                 var r = rects[i];
-                _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
+                _base.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
             }
 
         // erasing also destroys pixels of widgets that STAY registered
@@ -338,21 +342,17 @@ public sealed class App : IDisposable
     private readonly List<Widget> _overlays = [];
 
     /// <summary>Show a modal on top of everything. It receives keys first
-    /// (HandleKey) and all mouse events; render order puts it last = top.</summary>
+    /// (HandleKey) and all mouse events; render order puts it last = top.
+    /// Compositing: the overlay paints into its OWN layer buffer, so the
+    /// base scene is never touched and popping is just dropping a layer.</summary>
     public void PushOverlay(Widget overlay)
     {
         _overlays.Add(overlay);
         if (!_roots.Contains(overlay))
             _roots.Add(overlay);   // appended = top of the z-order
         AttachSubtree(overlay);    // subtree too: hosted bodies must mount
-        if (overlay.BlocksBaseRendering)
-        {
-            // freeze-frame the base: popping restores this instead of
-            // re-rendering the world (static panels stay "rendered once")
-            var buf = new CellBuffer(_back.Width, _back.Height);
-            _back.Cells.CopyTo(buf.Cells);
-            _dimSnaps.Push((overlay, buf));
-        }
+        _overlayBufs.Add(new CellBuffer(_back.Width, _back.Height));
+        _layersChanged = true;
         ResetHover();
         overlay.Invalidate();
     }
@@ -368,44 +368,17 @@ public sealed class App : IDisposable
         if (_overlays.Count == 0 || ov is null || !_overlays.Contains(ov))
             return;
 
-        _overlays.Remove(ov);
+        int i = _overlays.IndexOf(ov);
+        _overlays.RemoveAt(i);
+        _overlayBufs[i].Dispose();
+        _overlayBufs.RemoveAt(i);
         _roots.Remove(ov);                // or RebuildFlat walks it back in
+        _layersChanged = true;
 
-        bool restored = false;
-        if (ov.BlocksBaseRendering)
-        {
-            if (_dimSnaps.Count > 0 && _dimSnaps.Peek().Owner == ov &&
-                _dimSnaps.Peek().Buf.Width == _back.Width &&
-                _dimSnaps.Peek().Buf.Height == _back.Height)
-            {
-                // restore the freeze-frame: base widgets stay CLEAN (a
-                // static panel must not re-render because a modal opened
-                // and closed); the diff vs the dimmed prev emits exactly
-                // the restore — no resync, no InvalidateAll, no blink
-                using var buf = _dimSnaps.Pop().Buf;
-                buf.Cells.CopyTo(_back.Cells);
-                DetachSubtree(ov, dispose: true, erase: false);
-                restored = true;
-            }
-            else
-            {
-                // out-of-order pop of a blocking modal (its [x] under a
-                // newer one): snapshots above it are stale — sledgehammer
-                while (_dimSnaps.Count > 0)
-                    _dimSnaps.Pop().Buf.Dispose();
-            }
-        }
-
-        if (!restored)
-        {
-            DetachSubtree(ov, dispose: true); // erase painted rects only
-            if (ov.BlocksBaseRendering)
-            {
-                _back.Clear();
-                _renderer.Resync(); // terminal shows dim: repaint EVERY cell
-                InvalidateAll();
-            }
-        }
+        // the layer's pixels lived in the layer buffer: dropping the layer
+        // IS the undo — no erase, no base repaint, no resync blink, and
+        // out-of-order pops cost exactly the same as top pops
+        DetachSubtree(ov, dispose: true, erase: false);
         ResetHover();
     }
 
@@ -465,8 +438,8 @@ public sealed class App : IDisposable
     private bool IsOverlay(Widget w) => _overlays.Contains(w);
 
     /// <summary>Move the overlay owning `w` (or `w` itself) to top of the
-    /// z-stack. Overlays repaint every frame, so a reorder needs no extra
-    /// invalidation — the next frame composes the new order.</summary>
+    /// z-stack. The layer buffer travels with it and the next compose
+    /// picks up the new order.</summary>
     private void RaiseOverlayOf(Widget w)
     {
         Widget? ov = w;
@@ -474,11 +447,16 @@ public sealed class App : IDisposable
             ov = ov.Parent;
         if (ov is null || _overlays.Count < 2 || _overlays[^1] == ov)
             return;
-        _overlays.Remove(ov);
+        int i = _overlays.IndexOf(ov);
+        _overlays.RemoveAt(i);
         _overlays.Add(ov);
+        var buf = _overlayBufs[i];
+        _overlayBufs.RemoveAt(i);
+        _overlayBufs.Add(buf);
         _roots.Remove(ov);
         _roots.Add(ov);
         RebuildFlat();
+        _layersChanged = true;
     }
 
     private int _cellPixW;
@@ -656,51 +634,6 @@ public sealed class App : IDisposable
             p.Invalidate();
             _pressed = null;
         }
-    }
-
-    /// <summary>Erase a rect from the back buffer and re-dirty every
-    /// registered widget under it — used when a floating overlay MOVES:
-    /// its old box must vanish and the base beneath must repaint.</summary>
-    public void EraseInvalidate(Rect r, Widget? caller = null)
-    {
-        _back.FillRect(r.X, r.Y, r.W, r.H, Render.Cell.Empty);
-        int callerZ = caller is null ? int.MaxValue : _overlays.IndexOf(caller);
-        for (int i = 0; i < _widgets.Count; i++)
-        {
-            var w = _widgets[i];
-            // overlays ABOVE the caller keep their pixels (they paint
-            // after it anyway); overlays below and base widgets must
-            // repaint NOW or the erase shows as a one-frame blink
-            int z = _overlays.IndexOf(w);
-            if (z >= 0 && z >= callerZ) continue;
-            // the caller's own subtree repaints LATER THIS FRAME at its
-            // new rect — force-rendering it here would paint its pixels
-            // back into the region we just erased (a hosted body still
-            // holds the OLD rect at erase time), leaving dirty pixels
-            // that nothing ever clears again
-            if (caller is not null && InSubtree(w, caller)) continue;
-            var wr = w.Rect;
-            if (wr.X < r.Right && r.X < wr.Right && wr.Y < r.Bottom && r.Y < wr.Bottom)
-                RepaintSubtreeNow(w); // same frame: no blank, no ghost
-        }
-    }
-
-    private static bool InSubtree(Widget w, Widget root)
-    {
-        for (var p = w; p is not null; p = p.Parent)
-            if (ReferenceEquals(p, root)) return true;
-        return false;
-    }
-
-    /// <summary>Render a subtree into the back buffer RIGHT NOW (bypassing
-    /// caps): used after erasing a region mid-frame, where waiting for the
-    /// next frame would show a blank flash.</summary>
-    private void RepaintSubtreeNow(Widget w)
-    {
-        w.ForceRenderNext();
-        w.RenderTracked(_back);
-        for (int i = 0; i < w.Children.Count; i++)
-            RepaintSubtreeNow(w.Children[i]);
     }
 
     /// <summary>Forward a hardware-scroll hint from a widget: the renderer
@@ -891,10 +824,11 @@ public sealed class App : IDisposable
             // panels, stale HUD fragments during window drags). One full
             // repaint per resize event is cheap; ghost chains are not.
             _back.Resize(w, h, preserve: false);
+            _base.Resize(w, h, preserve: false);
+            for (int i = 0; i < _overlayBufs.Count; i++)
+                _overlayBufs[i].Resize(w, h, preserve: false);
             _lastSubmitted?.Dispose();
             _lastSubmitted = null; // size changes; recreated on next submit
-            while (_dimSnaps.Count > 0)
-                _dimSnaps.Pop().Buf.Dispose(); // stale size after resize
             _snapA?.Dispose(); _snapA = null;
             _snapB?.Dispose(); _snapB = null;
             _snapIdA = _snapIdB = long.MinValue;
@@ -935,12 +869,12 @@ public sealed class App : IDisposable
                 var prevRect = widget.Node.PreviousRect;
                 if (!prevRect.Equals(default(Rect)) && !prevRect.Equals(widget.Rect))
                 {
-                    // vacated cells MUST be erased: they can sit inside a
-                    // clean neighbour whose last paint predates the write
-                    // that ghosted them (containers paint nothing at all).
-                    // Erasing alone caused the blink, so everyone touched
-                    // by the erase is forced to repaint THIS frame.
-                    _back.FillRect(prevRect.X, prevRect.Y, prevRect.W, prevRect.H, Cell.Empty);
+                    // vacated cells MUST be erased from the BASE layer:
+                    // they can sit inside a clean neighbour whose last
+                    // paint predates the write that ghosted them. Erasing
+                    // + dirtying the touched widgets keeps erase and
+                    // repaint in the same frame (no blink)
+                    _base.FillRect(prevRect.X, prevRect.Y, prevRect.W, prevRect.H, Cell.Empty);
                     if (Trace)
                         _traceErases.Add($"{widget.GetType().Name}:{prevRect}");
                     for (int k = 0; k < _widgets.Count; k++)
@@ -968,30 +902,32 @@ public sealed class App : IDisposable
             relayoutThisFrame = true;
         }
 
-        // 5) retained render: only dirty widgets touch the back buffer
+        // 5) retained render: dirty widgets paint into THEIR LAYER's buffer
+        //    (base scene, or the owning overlay's own buffer). Layers never
+        //    share pixels, so nothing any widget does can ghost another —
+        //    z-order is resolved once, at compose time, below.
         bool modalOpen = false;
         for (int oi = 0; oi < _overlays.Count; oi++)
             if (_overlays[oi].BlocksBaseRendering) modalOpen = true;
 
-        // z-order: overlays are the top layers — repaint them LAST EVERY
-        // frame, not only when dirty. Otherwise base widgets that render
-        // on top of their stale pixels glitch through. The diff keeps the
-        // wire cost at real changes.
-        for (int oi = 0; oi < _overlays.Count; oi++)
-            _overlays[oi].Invalidate();
-
         bool anyRendered = false;
+        CellBuffer layer = _base;
         for (int i = 0; i < _widgets.Count; i++)
         {
             var widget = _widgets[i];
-            // a DIMMED modal blocks the base: frozen base keeps the dim
-            // layer clean (otherwise ticking widgets repaint over the dim
-            // patchwork-style). Floating popups let the background live.
-            if (modalOpen && !IsOverlay(widget))
+            // pre-order: a root switches the layer, children inherit it
+            if (widget.Parent is null)
+            {
+                int z = _overlays.IndexOf(widget);
+                layer = z >= 0 ? _overlayBufs[z] : _base;
+            }
+            // a DIMMED modal freezes the base layer: its ticks would cost
+            // renders nobody can see. Floating popups let the base live.
+            if (modalOpen && ReferenceEquals(layer, _base))
                 continue;
             if (widget.Dirty)
             {
-                if (widget.RenderTracked(_back))
+                if (widget.RenderTracked(layer))
                 {
                     anyRendered = true;
                     if (Trace)
@@ -1007,11 +943,33 @@ public sealed class App : IDisposable
             }
         }
 
+        // 5b) compose: base first, then each overlay blitted over the rect
+        //     it actually paints (its box, or the screen when dimming).
+        //     A moved/resized/popped overlay needs no erase and no base
+        //     repaint — the next compose simply blits the new state.
+        bool composed = anyRendered || _layersChanged || relayoutThisFrame;
+        if (composed)
+        {
+            _base.Cells.CopyTo(_back.Cells);
+            for (int oi = 0; oi < _overlays.Count; oi++)
+            {
+                _blitRects.Clear();
+                _overlays[oi].CollectPaintedRects(_blitRects);
+                var src = _overlayBufs[oi];
+                for (int r = 0; r < _blitRects.Count; r++)
+                {
+                    var br = _blitRects[r];
+                    _back.BlitFrom(src, br.X, br.Y, br.W, br.H);
+                }
+            }
+            _layersChanged = false;
+        }
+
         // 6) diff → damage → serialize → ONE submit. Idle wakeups (nothing
-        //    rendered, no relayout) skip the diff and put ZERO bytes on the
-        //    wire — a monitor between ticks costs nothing (AGENT.md §2).
+        //    rendered, no relayout, no layer change) skip the diff AND the
+        //    compose and put ZERO bytes on the wire (AGENT.md §2).
         RenderResult result = default;
-        if (anyRendered || relayoutThisFrame)
+        if (composed)
         {
             // dropped delta frames desync the terminal (it never applied
             // those diffs): the next frame after any drop must be FULL.
@@ -1166,7 +1124,7 @@ public sealed class App : IDisposable
     {
         if (_widgets.Count == 0)
         {
-            _back.Clear();
+            _base.Clear();
             return;
         }
 
@@ -1188,7 +1146,7 @@ public sealed class App : IDisposable
                 }
                 if (!covered)
                 {
-                    _back[x, y] = Cell.Empty;
+                    _base[x, y] = Cell.Empty;
                     _traceUncovered++;
                 }
             }
@@ -1240,11 +1198,13 @@ public sealed class App : IDisposable
             _overlays[oi].Dispose();
         _presenter?.Dispose();
         _back.Dispose();
+        _base.Dispose();
+        for (int i = 0; i < _overlayBufs.Count; i++)
+            _overlayBufs[i].Dispose();
+        _overlayBufs.Clear();
         _lastSubmitted?.Dispose();
         _snapA?.Dispose();
         _snapB?.Dispose();
-        while (_dimSnaps.Count > 0)
-            _dimSnaps.Pop().Buf.Dispose();
         _renderer.Dispose();
         _terminal.Dispose();
     }

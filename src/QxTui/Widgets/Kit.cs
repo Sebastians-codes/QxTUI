@@ -226,7 +226,6 @@ public sealed class ModalWidget : Widget
 
     private bool _dragging;
     private int _grabDX, _grabDY;
-    private Rect _lastBox;
 
     /// <summary>Optional live widget tree hosted inside the box (between
     /// the text lines and the action chips) — animated content in an
@@ -252,13 +251,17 @@ public sealed class ModalWidget : Widget
     public int BodyRows { get; set; }
 
     /// <summary>Shift the box off-center (floating popups that coexist
-    /// side by side instead of perfectly overlapping).</summary>
-    public int OffsetX { get; set; }
-    public int OffsetY { get; set; }
+    /// side by side instead of perfectly overlapping). Self-invalidating:
+    /// moving a window is a data write, the next compose blits it.</summary>
+    public int OffsetX { get => _ox; set { if (_ox == value) return; _ox = value; Invalidate(); } }
+    public int OffsetY { get => _oy; set { if (_oy == value) return; _oy = value; Invalidate(); } }
+    private int _ox, _oy;
 
-    /// <summary>Right-drag resize pins these; null = size to content.</summary>
-    public int? ForceW { get; private set; }
-    public int? ForceH { get; private set; }
+    /// <summary>Right-drag resize pins these; null = size to content.
+    /// Self-invalidating like the offsets.</summary>
+    public int? ForceW { get => _fw; private set { if (_fw == value) return; _fw = value; Invalidate(); } }
+    public int? ForceH { get => _fh; private set { if (_fh == value) return; _fh = value; Invalidate(); } }
+    private int? _fw, _fh;
 
     internal override int ResizeEdgeAt(int x, int y)
     {
@@ -468,9 +471,9 @@ public sealed class ModalWidget : Widget
             int ox = nx - cx, oy = ny - cy;
             if (ox != OffsetX || oy != OffsetY)
             {
-                // old box vanishes; base repaints. caller=this: our own
-                // subtree repaints at the new offset later this frame
-                App?.EraseInvalidate(box0, this);
+                // compositing: moving is just data — the next compose
+                // blits the box at its new origin and the old pixels were
+                // never in the base layer, so nothing to erase or repaint
                 OffsetX = ox;
                 OffsetY = oy;
                 Invalidate();
@@ -521,15 +524,9 @@ public sealed class ModalWidget : Widget
             buffer.FillRect(0, 0, screen.W, screen.H, new Cell { Char = ' ', Fg = -1, Bg = 236 });
 
         var box = BoxRect(screen);
-        // a moved/resized box leaves its old pixels behind (the overlay's
-        // own rect never changes, so no relayout erase covers it): erase
-        // and repaint what's underneath in the same frame
-        if (_lastBox != default && !_lastBox.Equals(box))
-            App?.EraseInvalidate(_lastBox, this);
-        _lastBox = box;
-        // opaque box, every frame: preserved body regions let LOWER
-        // windows' pixels leak through wherever boxes overlap — full
-        // repaint is the only z-correct choice for stacked floaters
+        // opaque box on every repaint: the layer buffer is retained, so a
+        // partial repaint would leave OUR OWN stale pixels (a shrunk box
+        // must overwrite the rows it no longer owns)
         buffer.FillRect(box.X, box.Y, box.W, box.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
         Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Double,

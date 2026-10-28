@@ -925,6 +925,9 @@ public class ModalDragTests
         app.PushOverlay(modal);
         app.RunFrame();
         long bgBefore = bg.RenderCount;
+        // box: w=24,h=5 at (3,2) — a cell inside it, owned by the base
+        int oldX = 4, oldY = 3;
+        Assert.Equal(' ', app.Back[oldX, oldY].Char); // covered by the box
 
         void Mouse(string seq)
         {
@@ -932,7 +935,7 @@ public class ModalDragTests
                 term.QueueInput(b);
         }
 
-        // box: w=24,h=5 at (3,2); grab title at (5,2), drag to (15,5)
+        // grab title at (5,2), drag to (15,5)
         Mouse("\x1b[<0;6;3M");
         app.RunFrame();
         Mouse("\x1b[<32;16;6M");
@@ -942,8 +945,11 @@ public class ModalDragTests
 
         Assert.True(modal.OffsetX != 0 || modal.OffsetY != 0,
             "title-bar drag must move the modal");
-        Assert.True(bg.RenderCount > bgBefore,
-            "base under the old box must repaint (no ghost box)");
+        // compositing invariant, stronger than the old erase+repaint dance:
+        // the base layer was never touched by the overlay, so it neither
+        // repaints nor ghosts — its pixels are simply visible again
+        Assert.Equal(bgBefore, bg.RenderCount);
+        Assert.Equal('B', app.Back[oldX, oldY].Char);
     }
 }
 
@@ -1870,5 +1876,74 @@ public class OutsideClickClosesTests
         Thread.Sleep(KeyParser.EscSettleMs + 20);
         app.RunFrame();               // ...settled -> delivered
         Assert.Null(app.Overlay);      // ...lower was already dismissed
+    }
+}
+
+public class CompositingTests
+{
+    private sealed class StaticOnce : Widget
+    {
+        public int Renders;
+        public override void Render(CellBuffer buffer)
+        {
+            Renders++;
+            buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
+                new Cell { Char = 'S', Fg = 7 });
+        }
+    }
+
+    [Fact]
+    public void IdleFloatingPopup_ZeroWire_AndZeroRenders()
+    {
+        // AGENT.md claim 1, restored INSIDE overlays: an open window whose
+        // state never changes costs 0 renders and 0 bytes per frame (the
+        // flat buffer had to repaint every overlay opaque every frame)
+        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        var pop = new ModalWidget("p", () => ["static lines"], dim: false);
+        app.PushOverlay(pop);
+        app.RunFrame();
+        app.RunFrame();
+        long renders = pop.RenderCount;
+
+        RenderResult last = default;
+        for (int i = 0; i < 5; i++)
+            last = app.RunFrame();
+
+        Assert.Equal(renders, pop.RenderCount);
+        Assert.Equal(0, last.BytesWritten);
+    }
+
+    [Fact]
+    public void OutOfOrderPop_OfBlockingModal_NoFullRepaintFlood()
+    {
+        // the flat buffer's out-of-order pop was the self-declared
+        // "sledgehammer": drop snapshots, Resync, InvalidateAll — a full
+        // screen flood. Layers make it the same cheap op as a top pop.
+        var stat = new StaticOnce();
+        var root = new QxTui.Layout.LayoutNode
+            { Direction = FlexDirection.Column };
+        stat.Node.Grow = 1;
+        root.Add(stat.Node);
+        var term = new FakeTerminal(30, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Assert.Equal(1, stat.Renders);
+
+        var a = new ModalWidget("a", () => ["x"], dim: true);
+        var b = new ModalWidget("b", () => ["y"], dim: true);
+        app.PushOverlay(a);
+        app.RunFrame();
+        app.PushOverlay(b);
+        app.RunFrame();
+
+        app.PopOverlay(a); // out of order, under b
+        app.RunFrame();
+
+        Assert.Equal(1, stat.Renders); // base never repainted
+        Assert.Same(b, app.Overlay);   // the window above survives
     }
 }
