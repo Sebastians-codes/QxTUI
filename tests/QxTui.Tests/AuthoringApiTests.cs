@@ -67,7 +67,7 @@ public class MessageChannelTests
     public void Button_EmitsMessage_OnClick_ComponentHasNoAppReference()
     {
         var level = new Signal<int>(0);
-        var btn = new ButtonWidget(() => " bump ", style: ButtonStyle.Rounded)
+        var btn = new Button(() => " bump ", style: ButtonStyle.Rounded)
             { EmitOnClick = new Bump(3) };
         var root = UI.Column(0, btn.Height(1));
         var (app, term) = MakeApp(root, 20, 4);
@@ -84,7 +84,7 @@ public class MessageChannelTests
     public void ModalChip_EmitsMessage_OnClick_AndOnKey()
     {
         var hits = 0;
-        var modal = new ModalWidget("t", () => ["x"], dim: false,
+        var modal = new Modal("t", () => ["x"], dim: false,
             chips: [new ChipAction("go", Msg: new Bump(1))]);
         var root = new LayoutNode { Direction = FlexDirection.Column };
         var (app, term) = MakeApp(root, 40, 12);
@@ -109,7 +109,7 @@ public class MessageChannelTests
         // migration is additive: app-specific policy chips coexist with
         // pure-intent chips in the same modal
         int closed = 0;
-        var modal = new ModalWidget("t", () => ["x"], dim: false,
+        var modal = new Modal("t", () => ["x"], dim: false,
             chips:
             [
                 new ChipAction("intent", Msg: new Ping()),
@@ -141,7 +141,7 @@ public class LifecycleHookTests
         var probe = new LifecycleProbe();
         Assert.Equal(0, probe.Mounts);
 
-        var parent = new ContainerWidget();
+        var parent = new Container();
         parent.Node.Grow = 1;
         var root = UI.Column(0, parent);
         var term = new FakeTerminal(20, 10);
@@ -156,7 +156,7 @@ public class LifecycleHookTests
     public void OnDetach_FiresOnRemove_DisposeOnlyWhenAsked()
     {
         var probe = new LifecycleProbe();
-        var parent = new ContainerWidget();
+        var parent = new Container();
         parent.Node.Grow = 1;
         var root = UI.Column(0, parent);
         var term = new FakeTerminal(20, 10);

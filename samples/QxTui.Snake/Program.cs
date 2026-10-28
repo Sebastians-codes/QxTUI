@@ -26,9 +26,9 @@ var score = new Signal<int>(0);
 var alive = new Signal<bool>(true);
 var fps = new Signal<int>(120);
 
-var hud = new HudWidget(score, alive, fps);
-var game = new SnakeWidget(score, alive);
-var help = new HelpWidget();
+var hud = new Hud(score, alive, fps);
+var game = new Board(score, alive);
+var help = new Help();
 
 var root = new LayoutNode { Direction = FlexDirection.Column, Gap = 0 };
 root.Add(hud.Node);

@@ -8,13 +8,13 @@ namespace QxTui.Widgets;
 
 /// <summary>Single-line clipped label. Text is a provider so it can be
 /// live without extra invalidation plumbing.</summary>
-public sealed class LabelWidget : Widget
+public sealed class Label : Widget
 {
     private readonly Func<string> _text;
     private readonly ThemeRole _fg;
     private readonly ThemeRole? _bg;
 
-    private LabelWidget(Func<string> text, ThemeRole fg, ThemeRole? bg, bool live)
+    private Label(Func<string> text, ThemeRole fg, ThemeRole? bg, bool live)
     {
         _text = text;
         _fg = fg;
@@ -26,14 +26,14 @@ public sealed class LabelWidget : Widget
             Tick(TimeSpan.FromMilliseconds(250), _ => Invalidate());
     }
 
-    public LabelWidget(Func<string> text, ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
+    public Label(Func<string> text, ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
         : this(text, fg, bg, live: true)
     {
     }
 
     /// <summary>Signal-bound: re-renders whenever the source changes —
     /// event-driven, no heartbeat needed.</summary>
-    public LabelWidget(Signal<float> source, Func<float, string> format,
+    public Label(Signal<float> source, Func<float, string> format,
         ThemeRole fg = ThemeRole.Text, ThemeRole? bg = null)
         : this(() => format(source.Value), fg, bg, live: false)
     {
@@ -54,12 +54,12 @@ public sealed class LabelWidget : Widget
 }
 
 /// <summary>Horizontal fraction bar bound to a provider.</summary>
-public sealed class BarWidget : Widget
+public sealed class Bar : Widget
 {
     private readonly Func<double> _fraction;
     private readonly ThemeRole _fg;
 
-    public BarWidget(Func<double> fraction, ThemeRole fg = ThemeRole.Accent)
+    public Bar(Func<double> fraction, ThemeRole fg = ThemeRole.Accent)
     {
         _fraction = fraction;
         _fg = fg;
@@ -67,7 +67,7 @@ public sealed class BarWidget : Widget
 
     /// <summary>Signal-bound: re-renders automatically whenever the source
     /// signal changes — the invalidation wiring you'd otherwise forget.</summary>
-    public BarWidget(Signal<float> source, ThemeRole fg = ThemeRole.Accent)
+    public Bar(Signal<float> source, ThemeRole fg = ThemeRole.Accent)
         : this(() => source.Value, fg)
     {
         OnSignal(source);
@@ -76,12 +76,12 @@ public sealed class BarWidget : Widget
     public override void Render(CellBuffer buffer)
     {
         var r = Rect;
-        Bar.Draw(buffer, Clip, r.X, r.Y, r.W, _fraction(), fg: Theme.Get(_fg));
+        QxTui.Render.BarPainter.Draw(buffer, Clip, r.X, r.Y, r.W, _fraction(), fg: Theme.Get(_fg));
     }
 }
 
 /// <summary>Sparkline bound to a RingHistory the app owns and pushes to.</summary>
-public sealed class SparklineWidget : Widget
+public sealed class Sparkline : Widget
 {
     private readonly RingHistory _history;
     private readonly ThemeRole _fg;
@@ -89,7 +89,7 @@ public sealed class SparklineWidget : Widget
     private readonly float _autoFloor;
     private readonly Func<float>? _phase;
 
-    public SparklineWidget(RingHistory history, ThemeRole fg = ThemeRole.Accent,
+    public Sparkline(RingHistory history, ThemeRole fg = ThemeRole.Accent,
         float scaleMax = 0f, float autoFloor = 1f, Func<float>? phase = null)
     {
         _history = history;
@@ -104,7 +104,7 @@ public sealed class SparklineWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty); // no stale trail on reflow
-        Sparkline.Draw(buffer, Clip, r.X, r.Y, r.W, _history,
+        QxTui.Render.SparklinePainter.Draw(buffer, Clip, r.X, r.Y, r.W, _history,
             fg: Theme.Get(_fg), scaleMax: _scaleMax, autoFloor: _autoFloor,
             phase: _phase?.Invoke() ?? 0f);
     }
@@ -123,7 +123,7 @@ public enum ButtonStyle
 /// <summary>Clickable labeled button in three styles, all hover-reactive:
 /// the pointer brightens border/fill/label — the "this is clickable"
 /// affordance. Click target is the whole rect.</summary>
-public sealed class ButtonWidget : Widget
+public sealed class Button : Widget
 {
     private readonly Func<string> _label;
     private readonly Action? _onClick;
@@ -140,7 +140,7 @@ public sealed class ButtonWidget : Widget
     /// <c>onClick</c> (message first, then the callback).</summary>
     public object? EmitOnClick { get; set; }
 
-    public ButtonWidget(Func<string> label, Action? onClick,
+    public Button(Func<string> label, Action? onClick,
         ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
     {
         _label = label;
@@ -151,7 +151,7 @@ public sealed class ButtonWidget : Widget
     }
 
     /// <summary>Pure-intent button: no callback at all, just EmitOnClick.</summary>
-    public ButtonWidget(Func<string> label,
+    public Button(Func<string> label,
         ThemeRole fg = ThemeRole.Accent, ButtonStyle style = ButtonStyle.Rounded)
         : this(label, null, fg, style) { }
 
@@ -220,7 +220,7 @@ public sealed record ChipAction(string Label, object? Msg = null, Action? Act = 
 /// (modal semantics). Esc and the [x] chip close; outside-press dismissal
 /// is opt-in via <see cref="Widget.OutsideClickCloses"/> (default off).
 /// </summary>
-public sealed class ModalWidget : Widget
+public sealed class Modal : Widget
 {
     private readonly string _title;
     private readonly Func<string[]> _lines;
@@ -233,7 +233,7 @@ public sealed class ModalWidget : Widget
     /// to keys 1..n while the modal is open. Each chip is either pure
     /// intent (<c>Msg</c>: the modal emits, the app decides) or app policy
     /// (<c>Act</c>: a closure at the composition root).</param>
-    public ModalWidget(string title, Func<string[]> lines, bool dim = true,
+    public Modal(string title, Func<string[]> lines, bool dim = true,
         ChipAction[]? chips = null)
     {
         _title = title;
@@ -603,13 +603,13 @@ public sealed class ModalWidget : Widget
 /// Click to jump, drag to slide (mouse capture keeps the drag alive even
 /// when the pointer leaves the row). Knob brightens on hover/press.
 /// </summary>
-public sealed class SliderWidget : Widget
+public sealed class Slider : Widget
 {
     private readonly Signal<float> _value;
     private readonly ThemeRole _fg;
     private bool _dragging;
 
-    public SliderWidget(Signal<float> value, ThemeRole fg = ThemeRole.Accent)
+    public Slider(Signal<float> value, ThemeRole fg = ThemeRole.Accent)
     {
         _value = value;
         _fg = fg;
@@ -683,7 +683,7 @@ public sealed class SliderWidget : Widget
 
 /// <summary>Multi-line word-wrapped paragraph, unicode-width aware.
 /// Invalidate (or Tick/OnSignal) when the text provider changes.</summary>
-public sealed class TextWidget(Func<string> text, ThemeRole fg = ThemeRole.Text) : Widget
+public sealed class Paragraph(Func<string> text, ThemeRole fg = ThemeRole.Text) : Widget
 {
     public override void Render(CellBuffer buffer)
     {
@@ -695,7 +695,7 @@ public sealed class TextWidget(Func<string> text, ThemeRole fg = ThemeRole.Text)
 
 /// <summary>Composition-only widget: paints nothing, exists to hold
 /// children in the widget tree (panels, groups, rows of controls).</summary>
-public sealed class ContainerWidget : Widget
+public sealed class Container : Widget
 {
     public override void Render(CellBuffer buffer) { }
 }

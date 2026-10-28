@@ -27,17 +27,17 @@ var terminal = new PosixTerminal(); // owned (and disposed) by App
 
 // ---- widgets ----------------------------------------------------------------
 
-var spinner = new SpinnerWidget();
-var staticPanel = new StaticPanelWidget("STATIC PANEL",
+var spinner = new Spinner();
+var staticPanel = new StaticPanel("STATIC PANEL",
     "This panel never re-renders",
     "while everything around it",
     "animates. Its render count in",
     "STATS stays at 1. That is the",
     "damage-isolation proof.");
-var stats = new StatsWidget();
-var progress = new ProgressBarWidget();
-var particles = new ParticlesWidget(count: 500);
-var help = new LabelWidget("q: quit   r: refresh stats   ↔: resize the terminal window!");
+var stats = new Stats();
+var progress = new ProgressBar();
+var particles = new Particles(count: 500);
+var help = new Label("q: quit   r: refresh stats   ↔: resize the terminal window!");
 
 // ---- layout tree: flexbox from day one --------------------------------------
 
@@ -108,13 +108,13 @@ file static class Box
         => QxTui.Render.Box.Draw(buf, r.X, r.Y, r.W, r.H, BoxStyles.Single, fg, title, 39);
 }
 
-file sealed class SpinnerWidget : Widget
+file sealed class Spinner : Widget
 {
     private static readonly char[] Frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
     public Signal<float> Angle { get; } = new(0f);
 
-    public SpinnerWidget() => OnSignal(Angle);
+    public Spinner() => OnSignal(Angle);
 
     public override void Render(CellBuffer buffer)
     {
@@ -134,7 +134,7 @@ file sealed class SpinnerWidget : Widget
 
 }
 
-file sealed class StaticPanelWidget(string? title, params string[] lines) : Widget
+file sealed class StaticPanel(string? title, params string[] lines) : Widget
 {
     public override void Render(CellBuffer buffer)
     {
@@ -147,7 +147,7 @@ file sealed class StaticPanelWidget(string? title, params string[] lines) : Widg
     }
 }
 
-file sealed class LabelWidget(string text) : Widget
+file sealed class Label(string text) : Widget
 {
     public override void Render(CellBuffer buffer)
     {
@@ -157,11 +157,11 @@ file sealed class LabelWidget(string text) : Widget
     }
 }
 
-file sealed class ProgressBarWidget : Widget
+file sealed class ProgressBar : Widget
 {
     public Signal<float> Progress { get; } = new(0f);
 
-    public ProgressBarWidget() => OnSignal(Progress);
+    public ProgressBar() => OnSignal(Progress);
 
     public override void Render(CellBuffer buffer)
     {
@@ -182,7 +182,7 @@ file sealed class ProgressBarWidget : Widget
 
 }
 
-file sealed class ParticlesWidget : Widget
+file sealed class Particles : Widget
 {
     public Signal<float> Clock { get; } = new(0f);
 
@@ -193,7 +193,7 @@ file sealed class ParticlesWidget : Widget
     private long _lastTs = Stopwatch.GetTimestamp();
     private bool _initialized;
 
-    public ParticlesWidget(int count)
+    public Particles(int count)
     {
         _count = count;
         _px = new float[count]; _py = new float[count];
@@ -247,11 +247,11 @@ file sealed class ParticlesWidget : Widget
 
 }
 
-file sealed class StatsWidget : Widget
+file sealed class Stats : Widget
 {
     private App? _app;
 
-    public StatsWidget() => Tick(TimeSpan.FromMilliseconds(250)); // ~4Hz
+    public Stats() => Tick(TimeSpan.FromMilliseconds(250)); // ~4Hz
 
     public void Attach(App app) => _app = app;
 

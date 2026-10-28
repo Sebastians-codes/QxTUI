@@ -6,22 +6,22 @@ using QxTui.Render;
 
 namespace QxTui.Tests;
 
-file sealed class TickWidget : Widget
+file sealed class TickProbe : Widget
 {
-    public TickWidget(TimeSpan interval) => Tick(interval);
+    public TickProbe(TimeSpan interval) => Tick(interval);
     public override void Render(CellBuffer buffer) { }
 }
 
-file sealed class SignalWidget2 : Widget
+file sealed class SignalProbe : Widget
 {
-    public SignalWidget2(Signal<int> source) => OnSignal(source);
+    public SignalProbe(Signal<int> source) => OnSignal(source);
     public override void Render(CellBuffer buffer) { }
 }
 
-file sealed class CallbackWidget : Widget
+file sealed class CallbackProbe : Widget
 {
     public int Callbacks;
-    public CallbackWidget(Signal<int> source) =>
+    public CallbackProbe(Signal<int> source) =>
         OnSignal(source, v => Callbacks += v);
     public override void Render(CellBuffer buffer) { }
 }
@@ -40,7 +40,7 @@ public class WidgetLifecycleTests
     [Fact]
     public void Tick_MaterializesAtMount_NotBefore()
     {
-        var widget = new TickWidget(TimeSpan.FromMilliseconds(100));
+        var widget = new TickProbe(TimeSpan.FromMilliseconds(100));
         Assert.False(widget.Mounted);
 
         var root = new LayoutNode { Direction = FlexDirection.Column };
@@ -69,7 +69,7 @@ public class WidgetLifecycleTests
     public void OnSignal_InvalidatesOnChange()
     {
         var signal = new Signal<int>(0);
-        var widget = new SignalWidget2(signal);
+        var widget = new SignalProbe(signal);
         var root = new LayoutNode { Direction = FlexDirection.Column };
         root.Add(widget.Node);
         widget.Node.Grow = 1f;
@@ -92,7 +92,7 @@ public class WidgetLifecycleTests
     public void OnSignal_CustomCallback_ReceivesValues()
     {
         var signal = new Signal<int>(0);
-        var widget = new CallbackWidget(signal);
+        var widget = new CallbackProbe(signal);
         var root = new LayoutNode { Direction = FlexDirection.Column };
         root.Add(widget.Node);
 
@@ -108,7 +108,7 @@ public class WidgetLifecycleTests
     public void Dispose_UnsubscribesEverything()
     {
         var signal = new Signal<int>(0);
-        var widget = new SignalWidget2(signal);
+        var widget = new SignalProbe(signal);
         var root = new LayoutNode { Direction = FlexDirection.Column };
         root.Add(widget.Node);
         widget.Node.Grow = 1f;
@@ -126,7 +126,7 @@ public class WidgetLifecycleTests
     [Fact]
     public void Theme_ComesFromApp_WithDefaultBeforeMount()
     {
-        var widget = new TickWidget(TimeSpan.FromSeconds(1));
+        var widget = new TickProbe(TimeSpan.FromSeconds(1));
         Assert.Same(Theme.Default, widget.Theme);
 
         var root = new LayoutNode();

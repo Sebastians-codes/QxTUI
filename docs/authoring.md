@@ -45,8 +45,8 @@ Emitters never reference the app:
 // inside any widget:
 Send(new FpsMsg(30));                                  // protected, returns "handled?"
 // kit components, declaratively:
-new ButtonWidget(() => " theme ") { EmitOnClick = new ThemeMsg() };
-new ModalWidget("popup", lines, dim: false, chips:
+new Button(() => " theme ") { EmitOnClick = new ThemeMsg() };
+new Modal("popup", lines, dim: false, chips:
     [ new("30fps", Msg: new FpsMsg(30)),               // pure intent
       new("stack", Act: () => ...) ]);                 // closure = app policy
 ```
@@ -77,7 +77,7 @@ app.OnMessage<LoadMsg>(m => app.Effect(async ct =>
   it is the ONLY supported way to touch the app from another thread.
 - Guard re-entrancy yourself when a scan may outlive its timer
   (`Interlocked.Exchange(ref _busy, 1)`), see `samples/QxTui.SysMon`
-  `ProcWidget` for the full pattern: tick → effect → message → repaint.
+  `Procs` for the full pattern: tick → effect → message → repaint.
 
 ## 3. Lifecycle
 
@@ -127,5 +127,5 @@ until the result message lands. See `tests/QxTui.Tests/AuthoringApiTests.cs`.
 
 - `samples/QxTui.Playground/Program.cs` — messages end-to-end (chips,
   buttons, keys all emit; one update function mutates state).
-- `samples/QxTui.SysMon/Widgets.cs` — `ProcWidget`: 1Hz effect sampling
+- `samples/QxTui.SysMon/Widgets.cs` — `Procs`: 1Hz effect sampling
   `/proc` off-thread, result as message, virtualized list repaint.

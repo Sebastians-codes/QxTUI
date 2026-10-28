@@ -1,7 +1,7 @@
 namespace QxTui.Render;
 
 /// <summary>Horizontal fraction bar (progress, utilization, ...).</summary>
-public static class Bar
+public static class BarPainter
 {
     public static void Draw(CellBuffer buf, RenderClip clip, int x, int y, int width,
         double fraction, int fg, char fill = '█', char empty = '░', int emptyFg = 236)

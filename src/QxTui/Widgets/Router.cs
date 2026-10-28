@@ -77,13 +77,13 @@ public sealed class Router : Widget
 
 /// <summary>Clickable tab strip bound to a Router. Active tab is a filled
 /// chip; hover brightens; keys are up to the app (see TabBar.Keys).</summary>
-public sealed class TabBarWidget : Widget
+public sealed class TabBar : Widget
 {
     private readonly Router _router;
     private readonly string[] _tabs;
     private int _hover = -1;
 
-    public TabBarWidget(Router router, string[] tabs)
+    public TabBar(Router router, string[] tabs)
     {
         _router = router;
         _tabs = tabs;
@@ -91,7 +91,7 @@ public sealed class TabBarWidget : Widget
         OnSignal(router.Changed); // repaint on ANY switch, keyboard or click
     }
 
-    public TabBarWidget() : this(new Router(), []) { }
+    public TabBar() : this(new Router(), []) { }
 
     public IReadOnlyList<string> Tabs => _tabs;
 

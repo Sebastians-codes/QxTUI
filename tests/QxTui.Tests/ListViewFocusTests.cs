@@ -254,7 +254,7 @@ public class OpaqueStripTests
     public void Slider_OwnsItsBackground_NoTransparentHoles()
     {
         var sig = new Signal<float>(0.5f);
-        var slider = new SliderWidget(sig);
+        var slider = new Slider(sig);
         var root = UI.Column(0, slider.Height(1));
         var term = new FakeTerminal(20, 3);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -273,8 +273,8 @@ public class BallStripCollisionTests
         // the ball's pixel canvas must exclude the bottom strip row so the
         // ball reads as colliding with the UI instead of passing under it
         var speed = new Signal<float>(0.5f);
-        var ball = new QxTui.Playground.BallWidget(speed);
-        var row = new ContainerWidget();
+        var ball = new QxTui.Playground.Ball(speed);
+        var row = new Container();
         row.Node.Height = 1;
         ball.AddChild(row);
 
@@ -294,7 +294,7 @@ public class BallStripCollisionTests
         // childless balls (the capped 8/30/120Hz playground panels) bounced
         // off an invisible floor one row short of the window border
         var speed = new Signal<float>(0.5f);
-        var ball = new QxTui.Playground.BallWidget(speed);
+        var ball = new QxTui.Playground.Ball(speed);
 
         var root = UI.Column(0, ball.Grow(1));
         var term = new FakeTerminal(30, 12);
@@ -413,13 +413,13 @@ public class FocusDetachTests
     {
         // keys routed into a detached focused widget get swallowed or
         // mis-handled — the "press 4, land on another tab" weird
-        var field = new TextFieldWidget("hi");
-        var pageA = new ContainerWidget();
+        var field = new TextField("hi");
+        var pageA = new Container();
         pageA.Node.Direction = FlexDirection.Column;
         pageA.Node.Height = 3;
         pageA.AddChild(field);
 
-        var pageB = new ContainerWidget();
+        var pageB = new Container();
         pageB.Node.Height = 3;
 
         var router = new Router();

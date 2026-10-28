@@ -56,31 +56,31 @@ var walkHist = new RingHistory(120);
 
 var speed = new Signal<float>(0.5f); // mid-travel = exactly 1.0x
 
-var hud = new HudWidget(() => themeNames[themeIdx], app.TargetFpsSignal);
-var ball = new BallWidget(speed);
-var staticPanel = new StaticPanelWidget();
-var stats = new StatsPanelWidget(staticPanel, ball);
+var hud = new Hud(() => themeNames[themeIdx], app.TargetFpsSignal);
+var ball = new Ball(speed);
+var staticPanel = new StaticPanel();
+var stats = new StatsPanel(staticPanel, ball);
 stats.MaxRenderHz = 10; // per-component cap demo: HUD text doesn't need 120Hz
 
-var wrapDemo = new TextWidget(() =>
+var wrapDemo = new Paragraph(() =>
     "wrapping: 日本語のテキスト flows by 2-col runes, emoji 👍 = 2 cols, " +
     "ZWJ family 👨‍👩‍ = one glyph, combining é = zero — resize to reflow.");
 
-var speedLabel = new LabelWidget(speed, v =>
+var speedLabel = new Label(speed, v =>
 {
-    float m = BallWidget.MultFor(v);
+    float m = Ball.MultFor(v);
     return $"speed {(m < 10 ? m.ToString("F1") : m.ToString("F0"))}x";
 }, bg: ThemeRole.PanelBg); // opaque strip: ball must not show through
-var speedSlider = new SliderWidget(speed, ThemeRole.Warning);
+var speedSlider = new Slider(speed, ThemeRole.Warning);
 
-var sineSpark = new SparklineWidget(sineHist, ThemeRole.Accent, scaleMax: 100f);
-var walkSpark = new SparklineWidget(walkHist, ThemeRole.Success, autoFloor: 10f);
+var sineSpark = new Sparkline(sineHist, ThemeRole.Accent, scaleMax: 100f);
+var walkSpark = new Sparkline(walkHist, ThemeRole.Success, autoFloor: 10f);
 
 // feeder invalidates its dependents (kit widgets are draw-only)
-var feederWired = new FeederWidget(sineHist, walkHist);
+var feederWired = new Feeder(sineHist, walkHist);
 
 bool filledOn = false;
-var filledDemo = new ButtonWidget(
+var filledDemo = new Button(
     () => filledOn ? " filled: on " : " filled: off ",
     () => filledOn = !filledOn,
     style: ButtonStyle.Filled)
@@ -90,7 +90,7 @@ var filledDemo = new ButtonWidget(
     RoleProvider = () => filledOn ? ThemeRole.Success : ThemeRole.Warning,
 };
 
-var help = new LabelWidget(() =>
+var help = new Label(() =>
     " t: theme  [ ]: fps  1-4/click tabs  o/click: popup  Tab: focus  q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
 string[] PopupLines() =>
@@ -112,9 +112,9 @@ string[] PopupLines() =>
 // The fps chips are PURE INTENT (ChipAction.Msg): the modal knows
 // nothing about this program; the update function at the top of this
 // file is the only place that interprets the messages.
-ModalWidget MakePopup()
+Modal MakePopup()
 {
-    var m = new ModalWidget("popup", PopupLines, dim: false,
+    var m = new Modal("popup", PopupLines, dim: false,
     chips:
     [
         new("30fps", Msg: new FpsMsg(30)),
@@ -145,7 +145,7 @@ ModalWidget MakePopup()
 // popover-on-popover: confirm modal opens a third level with fps settings
 // stacked levels don't dim: the base is already dimmed by level 1 —
 // dimming a dimmed scene is just murk
-ModalWidget MakeConfirmModal() => new("confirm",
+Modal MakeConfirmModal() => new("confirm",
     () =>
     [
         "a second modal on top",
@@ -163,10 +163,10 @@ ModalWidget MakeConfirmModal() => new("confirm",
 // a LIVE ball sim inside the overlay stack: overlays repaint every
 // frame, so animated bodies run at full rate; the slider drives both
 // balls (shared signal)
-ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
+Modal MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
 {
-    BallWidget? roomBall = null;
-    var m = new ModalWidget(hz > 0 ? $"ball {hz}hz" : "ball room",
+    Ball? roomBall = null;
+    var m = new Modal(hz > 0 ? $"ball {hz}hz" : "ball room",
         () =>
         [
             hz > 0
@@ -182,21 +182,21 @@ ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
         dim: false,
         chips: [new("close", Act: () => app.PopOverlay())])
     { BodyRows = 10, OffsetX = ox, OffsetY = oy };
-    var room = new ContainerWidget();
+    var room = new Container();
     room.Node.Direction = FlexDirection.Column;
-    var b2 = new BallWidget(speed, tickHz: hz > 0 ? hz : null);
+    var b2 = new Ball(speed, tickHz: hz > 0 ? hz : null);
     b2.Node.Grow = 1;
     room.AddChild(b2);
     roomBall = b2;
-    var srow = new ContainerWidget();
+    var srow = new Container();
     srow.Node.Height = 1;
-    srow.AddChild(new SliderWidget(speed));
+    srow.AddChild(new Slider(speed));
     room.AddChild(srow);
     m.Body = room;
     return m;
 }
 
-ModalWidget MakeFpsModal() => new("fps settings",
+Modal MakeFpsModal() => new("fps settings",
     () =>
     [
         "third level: popovers on",
@@ -214,13 +214,13 @@ ModalWidget MakeFpsModal() => new("fps settings",
         new("1000", Msg: new FpsMsg(1000)),
     ]);
 
-ButtonWidget? openBtn = null;
-openBtn = new ButtonWidget(() => " open popup ", style: ButtonStyle.Rounded)
+Button? openBtn = null;
+openBtn = new Button(() => " open popup ", style: ButtonStyle.Rounded)
 {
     EmitOnClick = new OpenPopupMsg(), // pure intent: no app reference
 };
 
-var themeBtn = new ButtonWidget(() => " theme ", style: ButtonStyle.Outline)
+var themeBtn = new Button(() => " theme ", style: ButtonStyle.Outline)
 {
     EmitOnClick = new ThemeMsg(),
 };
@@ -232,11 +232,11 @@ var themeBtn = new ButtonWidget(() => " theme ", style: ButtonStyle.Outline)
 // widget tree: the slider row lives INSIDE the ball panel — mounted,
 // laid out and rendered via the parent, not the root list
 ball.Node.Direction = FlexDirection.Column;
-var ballSpacer = new ContainerWidget();
+var ballSpacer = new Container();
 ball.AddChild(ballSpacer);
 ballSpacer.Node.Grow = 1f;
 
-var sliderRow = new ContainerWidget();
+var sliderRow = new Container();
 sliderRow.Node.Direction = FlexDirection.Row;
 sliderRow.Node.Gap = 1;
 ball.AddChild(sliderRow);
@@ -251,32 +251,32 @@ speedSlider.Node.Grow = 1f;
 // page around them runs at full rate — independent refresh windows on
 // the BASE scene (overlays can't do per-body rates: stacked floaters
 // must repaint opaquely every frame to stay z-correct)
-var ballPage = new ContainerWidget();
+var ballPage = new Container();
 ballPage.Node.Direction = FlexDirection.Column;
 ballPage.Node.Gap = 1;
 ball.Node.Grow = 1f;
 ballPage.AddChild(ball);
-var rateRow = new ContainerWidget();
+var rateRow = new Container();
 rateRow.Node.Direction = FlexDirection.Row;
 rateRow.Node.Gap = 1;
 rateRow.Node.Height = 9;
 ballPage.AddChild(rateRow);
 foreach (var hz in new[] { 8, 30, 120 })
 {
-    var col = new ContainerWidget();
+    var col = new Container();
     col.Node.Direction = FlexDirection.Column;
     col.Node.Grow = 1f;
     rateRow.AddChild(col);
     var cap = hz;
-    BallWidget? capped = null;
-    col.AddChild(new LabelWidget(() =>
+    Ball? capped = null;
+    col.AddChild(new Label(() =>
         // renders pause off-tab BY DESIGN (detached pages cost zero —
         // the damage-isolation contract); steps keep running because
         // ticks survive detach. Showing both makes the pause honest.
         $"capped {cap} Hz · {capped?.RenderCount ?? 0} renders"
         + $" · {capped?.Steps ?? 0} steps"));
     col.Children[col.Children.Count - 1].Node.Height = 1;
-    var cb = new BallWidget(speed, tickHz: cap) { MaxRenderHz = cap };
+    var cb = new Ball(speed, tickHz: cap) { MaxRenderHz = cap };
     cb.Node.Grow = 1f;
     col.AddChild(cb);
     capped = cb;
@@ -284,38 +284,38 @@ foreach (var hz in new[] { 8, 30, 120 })
 
 // ---- SPA-style pages behind a Router ---------------------------------------
 
-var widgetsPage = new ContainerWidget();
+var widgetsPage = new Container();
 widgetsPage.Node.Direction = FlexDirection.Row;
 widgetsPage.Node.Gap = 1;
 
-var barCol = new ContainerWidget();
+var barCol = new Container();
 barCol.Node.Direction = FlexDirection.Column;
 barCol.Node.Gap = 1;
 widgetsPage.AddChild(barCol);
 barCol.Node.Grow = 2f;
-void AddBar(LabelWidget l, BarWidget b)
+void AddBar(Label l, Bar b)
 {
     barCol.AddChild(l); l.Node.Height = 1;
     barCol.AddChild(b); b.Node.Height = 1;
 }
-AddBar(new LabelWidget(linear, v => $"linear · 3s · {v:F2}"), new BarWidget(linear, ThemeRole.Accent));
-AddBar(new LabelWidget(cubic, v => $"out-cubic · 2s · {v:F2}"), new BarWidget(cubic, ThemeRole.Success));
-AddBar(new LabelWidget(back, v => $"out-back · 2.5s · {v:F2} (clamps)"), new BarWidget(back, ThemeRole.Warning));
+AddBar(new Label(linear, v => $"linear · 3s · {v:F2}"), new Bar(linear, ThemeRole.Accent));
+AddBar(new Label(cubic, v => $"out-cubic · 2s · {v:F2}"), new Bar(cubic, ThemeRole.Success));
+AddBar(new Label(back, v => $"out-back · 2.5s · {v:F2} (clamps)"), new Bar(back, ThemeRole.Warning));
 
-var sparkCol = new ContainerWidget();
+var sparkCol = new Container();
 sparkCol.Node.Direction = FlexDirection.Column;
 sparkCol.Node.Gap = 1;
 widgetsPage.AddChild(sparkCol);
 sparkCol.Node.Grow = 2f;
-var sineLabel = new LabelWidget(() => "sine · 20Hz feed · fixed scale");
-var walkLabel = new LabelWidget(() => "random walk · auto scale");
+var sineLabel = new Label(() => "sine · 20Hz feed · fixed scale");
+var walkLabel = new Label(() => "random walk · auto scale");
 sparkCol.AddChild(sineLabel); sineLabel.Node.Height = 1;
 sparkCol.AddChild(sineSpark); sineSpark.Node.Height = 2;
 sparkCol.AddChild(walkLabel); walkLabel.Node.Height = 1;
 sparkCol.AddChild(walkSpark); walkSpark.Node.Height = 2;
 
 // ---- kit controls showcase: the new everyday controls, bound to signals
-var controlsCol = new ContainerWidget();
+var controlsCol = new Container();
 controlsCol.Node.Direction = FlexDirection.Column;
 controlsCol.Node.Gap = 1;
 controlsCol.Node.Grow = 2f;
@@ -328,40 +328,42 @@ var load = new Signal<float>(0.35f);
 app.Scheduler.Animate(load, 1f,
     new Transition(TimeSpan.FromSeconds(4), Easing.Linear, RepeatMode.Reverse));
 
-var controlsPanel = new PanelWidget("controls");
+var controlsPanel = new Panel("controls");
 controlsPanel.Node.Grow = 1f;
 controlsCol.AddChild(controlsPanel);
-var controlStack = new ContainerWidget();
+var controlStack = new Container();
 controlStack.Node.Direction = FlexDirection.Column;
 controlStack.Node.Gap = 1;
 controlsPanel.AddChild(controlStack);
-controlStack.AddChild(new CheckboxWidget(darkMode, "dark mode"));
-controlStack.AddChild(new SegmentedWidget(mode, "day", "night", "auto"));
-controlStack.AddChild(new SelectWidget(choice, "alpha", "beta", "gamma"));
-var busyRow = new ContainerWidget();
+controlStack.AddChild(new Checkbox(darkMode, "dark mode"));
+controlStack.AddChild(new Segmented(mode, "day", "night", "auto"));
+controlStack.AddChild(new Dropdown(choice, "alpha", "beta", "gamma"));
+var busyRow = new Container();
 busyRow.Node.Direction = FlexDirection.Row;
 busyRow.Node.Gap = 1;
 busyRow.Node.Height = 1;
 controlStack.AddChild(busyRow);
-busyRow.AddChild(new SpinnerWidget());
-busyRow.AddChild(new ProgressBarWidget(load).Grow(1));
-controlStack.AddChild(new ButtonWidget(() => " toast ", style: ButtonStyle.Rounded)
+busyRow.AddChild(new Spinner());
+var loadBar = new ProgressBar(load);
+busyRow.AddChild(loadBar);
+loadBar.Node.Grow = 1f;
+controlStack.AddChild(new Button(() => " toast ", style: ButtonStyle.Rounded)
 {
     EmitOnClick = new ToastMsg("saved ✓"),
 });
 
-var textPage = new ContainerWidget();
+var textPage = new Container();
 textPage.Node.Direction = FlexDirection.Column;
 textPage.Node.Gap = 1;
-var input = new TextFieldWidget { Placeholder = "type here… (Tab leaves the field)" };
+var input = new TextField { Placeholder = "type here… (Tab leaves the field)" };
 string submitted = "";
-var echo = new LabelWidget(() =>
+var echo = new Label(() =>
     submitted.Length > 0 ? $"submitted: {submitted}" : $"you typed: {input.Text}");
 input.Changed += t => { submitted = ""; echo.Invalidate(); };
 input.Submitted += t => { submitted = t; echo.Invalidate(); };
 
-var textTitle = new LabelWidget(() => "text wrapping + unicode widths");
-var ellipDemo = new LabelWidget(
+var textTitle = new Label(() => "text wrapping + unicode widths");
+var ellipDemo = new Label(
     () => "ellipsize: the quick brown fox jumps over the lazy dog and keeps going…");
 textPage.AddChild(textTitle); textTitle.Node.Height = 1;
 textPage.AddChild(input); input.Node.Height = 1;
@@ -371,11 +373,11 @@ textPage.AddChild(ellipDemo); ellipDemo.Node.Height = 1;
 
 // ---- page 4: virtualized list (10k rows, only visible ones paint) --------
 
-var listPage = new ContainerWidget();
+var listPage = new Container();
 listPage.Node.Direction = FlexDirection.Column;
 listPage.Node.Gap = 1;
 
-var listHint = new LabelWidget(() =>
+var listHint = new Label(() =>
     "10,000 rows — only the visible slice paints. wheel / drag-scroll " +
     "(thumb is pixel-fine where the terminal reports pixels), click or " +
     "Tab to focus, then arrows / PgUp / PgDn / Home / End");
@@ -405,7 +407,7 @@ router.Register("widgets", () => widgetsPage)
       .Register("list", () => listPage);
 router.Switch("widgets");
 
-var tabBar = new TabBarWidget(router, ["widgets", "text", "ball", "list"]);
+var tabBar = new TabBar(router, ["widgets", "text", "ball", "list"]);
 
 app.SetRoot(UI.Column(1,
     hud.Height(1),

@@ -8,12 +8,12 @@ namespace QxTui.Playground;
 
 /// <summary>Top line: theme name, fps target, live bytes/frame.
 /// Shows OnSignal + Tick coexisting on one widget.</summary>
-internal sealed class HudWidget : Widget
+internal sealed class Hud : Widget
 {
     private readonly Func<string> _themeName;
     private readonly Signal<int> _fps;
 
-    public HudWidget(Func<string> themeName, Signal<int> fps)
+    public Hud(Func<string> themeName, Signal<int> fps)
     {
         _themeName = themeName;
         _fps = fps;
@@ -38,7 +38,7 @@ internal sealed class HudWidget : Widget
 
 /// <summary>Feeds two ring histories at 20Hz and invalidates the sparklines
 /// that depend on them — Tick with a custom callback (no self-invalidate).</summary>
-internal sealed class FeederWidget : Widget
+internal sealed class Feeder : Widget
 {
     private readonly RingHistory _sine;
     private readonly RingHistory _walk;
@@ -47,7 +47,7 @@ internal sealed class FeederWidget : Widget
     private readonly Random _rng = new(1234);
 
     // no invalidation wiring: RingHistory.Pushed notifies bound sparklines
-    public FeederWidget(RingHistory sine, RingHistory walk)
+    public Feeder(RingHistory sine, RingHistory walk)
     {
         _sine = sine;
         _walk = walk;
@@ -67,7 +67,7 @@ internal sealed class FeederWidget : Widget
 
 /// <summary>Bouncing ball on square half-block pixels, with a fading trail.
 /// The fast-moving element that makes the fps target visible.</summary>
-internal sealed class BallWidget : Widget
+internal sealed class Ball : Widget
 {
     private float _px = 0.3f, _py = 0.4f, _vx = 0.55f, _vy = 0.4f;
     // time-based trail: a frame-count trail shrinks as fps rises (24 points
@@ -95,7 +95,7 @@ internal sealed class BallWidget : Widget
     /// <param name="tickHz">Fixed physics/repaint rate for this instance.
     /// Null = follow the app's fps target (TickPerFrame). Different rates
     /// per instance showcase independent refresh windows.</param>
-    public BallWidget(Signal<float> speed, int? tickHz = null)
+    public Ball(Signal<float> speed, int? tickHz = null)
     {
         _speed = speed;
         Node.ChildInset = 1; // frame ring; children (slider row) live inside
@@ -205,7 +205,7 @@ internal sealed class BallWidget : Widget
 
 /// <summary>Never invalidates after first paint — the isolation proof:
 /// its RenderCount in the stats panel stays 1 forever.</summary>
-internal sealed class StaticPanelWidget : Widget
+internal sealed class StaticPanel : Widget
 {
     public override void Render(CellBuffer buffer)
     {
@@ -231,12 +231,12 @@ internal sealed class StaticPanelWidget : Widget
 
 /// <summary>Live framework telemetry: wire bytes, presented fps, drops, and
 /// the render counts that prove isolation.</summary>
-internal sealed class StatsPanelWidget : Widget
+internal sealed class StatsPanel : Widget
 {
-    private readonly StaticPanelWidget _staticPanel;
-    private readonly BallWidget _ball;
+    private readonly StaticPanel _staticPanel;
+    private readonly Ball _ball;
 
-    public StatsPanelWidget(StaticPanelWidget staticPanel, BallWidget ball)
+    public StatsPanel(StaticPanel staticPanel, Ball ball)
     {
         _staticPanel = staticPanel;
         _ball = ball;

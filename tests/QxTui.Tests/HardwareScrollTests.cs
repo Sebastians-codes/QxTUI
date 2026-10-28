@@ -248,13 +248,13 @@ public class TabRoundTripHoleTests
     public void StaticWidget_SurvivesTabRoundTrip_NoErasedHoles()
     {
         var once = new RenderOnceWidget();
-        var page1 = new ContainerWidget();
+        var page1 = new Container();
         page1.Node.Direction = FlexDirection.Column;
         page1.Node.Height = 5;
         once.Node.Grow = 1;
         page1.AddChild(once);
 
-        var page2 = new ContainerWidget();
+        var page2 = new Container();
         page2.Node.Direction = FlexDirection.Column;
         page2.Node.Height = 5;
 

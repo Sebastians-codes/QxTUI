@@ -70,7 +70,7 @@ file sealed class ClickTarget : Widget
         buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, Cell.Empty);
 }
 
-file sealed class SilentWidget : Widget
+file sealed class Silent : Widget
 {
     public int Clicks;
     public override void OnClick(Point local) => Clicks++;
@@ -104,7 +104,7 @@ public class ClickRoutingTests
     [Fact]
     public void NonClickable_IgnoresRelease()
     {
-        var silent = new SilentWidget(); // Clickable=false
+        var silent = new Silent(); // Clickable=false
         var root = UI.Column(0, silent.Grow(1));
 
         var term = new FakeTerminal(20, 10);
@@ -129,7 +129,7 @@ public class OverlayTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.OnKey = ev => { seen.Add(ev.Key); return true; };
 
-        var modal = new ModalWidget("t", () => ["line"]);
+        var modal = new Modal("t", () => ["line"]);
         app.PushOverlay(modal);
         Assert.Same(modal, app.Overlay);
 
@@ -158,7 +158,7 @@ public class OverlayTests
 
         app.RunFrame(); // base paint
 
-        var modal = new ModalWidget("title", () => ["hello modal"]);
+        var modal = new Modal("title", () => ["hello modal"]);
         app.PushOverlay(modal);
         app.RunFrame();
 
@@ -171,7 +171,7 @@ public class OverlayTests
     }
 }
 
-file sealed class FillWidget(char c) : Widget
+file sealed class Fill(char c) : Widget
 {
     public override void Render(CellBuffer buffer) =>
         buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H, new Cell { Char = c, Fg = 7, Bg = -1 });
@@ -189,14 +189,14 @@ public class ModalSemanticsTests
     [Fact]
     public void Modal_FreezesBasePaints_WhileOpen()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var (app, _) = MakeApp(root);
 
         app.RunFrame();
         Assert.Equal(1, baseWidget.RenderCount);
 
-        app.PushOverlay(new ModalWidget("t", () => ["x"]));
+        app.PushOverlay(new Modal("t", () => ["x"]));
 
         baseWidget.Invalidate(); // base wants to repaint (a tick would do this)
         app.RunFrame();
@@ -214,7 +214,7 @@ public class ModalSemanticsTests
     [Fact]
     public void Pop_RestoresEvenUncoveredRegions()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         // trailing empty row = region no widget ever paints (uncovered)
         var root = UI.Column(1, baseWidget.Grow(1), new LayoutNode { Height = 1 });
         var (app, term) = MakeApp(root);
@@ -223,7 +223,7 @@ public class ModalSemanticsTests
         Assert.Equal('T', app.Back[15, 0].Char);
         Assert.Equal(' ', app.Back[0, 11].Char); // bottom gap row: uncovered by any widget
 
-        app.PushOverlay(new ModalWidget("t", () => ["x"]));
+        app.PushOverlay(new Modal("t", () => ["x"]));
         app.RunFrame();
         Assert.Equal(236, app.Back[15, 0].Bg); // dimmed
 
@@ -242,12 +242,12 @@ public class ModalSemanticsTests
     [Fact]
     public void ModalWithoutDim_LeavesBackgroundLive()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var (app, _) = MakeApp(root);
 
         app.RunFrame();
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.PushOverlay(new Modal("t", () => ["x"], dim: false));
         app.RunFrame();
 
         // outside the box the base content is untouched (floating popup)
@@ -289,11 +289,11 @@ public class ModalActionTests
     public void ActionKey_TriggersWithoutClosing()
     {
         int hits = 0;
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(30, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false,
+        app.PushOverlay(new Modal("t", () => ["x"], dim: false,
             chips: [new ChipAction("go", Act: () => hits++)]));
 
         term.QueueInput((byte)'1');
@@ -310,12 +310,12 @@ public class ModalActionTests
     public void ActionClick_TriggersAndStaysOpen()
     {
         int hits = 0;
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var modal = new ModalWidget("t", () => ["x"], dim: false,
+        var modal = new Modal("t", () => ["x"], dim: false,
             chips: [new ChipAction("go", Act: () => hits++)]);
         app.PushOverlay(modal);
         app.RunFrame();
@@ -336,7 +336,7 @@ public class FloatingPopupTests
     [Fact]
     public void FloatingPopup_KeepsBaseRendering()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var term = new FakeTerminal(30, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -344,7 +344,7 @@ public class FloatingPopupTests
         app.RunFrame();
         Assert.Equal(1, baseWidget.RenderCount);
 
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.PushOverlay(new Modal("t", () => ["x"], dim: false));
         baseWidget.Invalidate();
         app.RunFrame();
         baseWidget.Invalidate();
@@ -356,13 +356,13 @@ public class FloatingPopupTests
     [Fact]
     public void DimmedModal_StillFreezesBase()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var term = new FakeTerminal(30, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
         app.RunFrame();
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: true));
+        app.PushOverlay(new Modal("t", () => ["x"], dim: true));
         baseWidget.Invalidate();
         app.RunFrame();
 
@@ -373,12 +373,12 @@ public class FloatingPopupTests
     public void ModalContent_IsReactive()
     {
         int counter = 0;
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(30, 12);
         var clock = new QxTui.Animation.VirtualTimeSource();
         using var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
 
-        var modal = new ModalWidget("t", () => [$"n={counter}"], dim: false);
+        var modal = new Modal("t", () => [$"n={counter}"], dim: false);
         app.PushOverlay(modal);
         app.RunFrame();
         Assert.Equal(1, modal.RenderCount);
@@ -397,13 +397,13 @@ public class OverlayZOrderTests
     [Fact]
     public void Overlay_RepaintsOverBase_EveryFrame_EvenWhenBaseIsDirty()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var term = new FakeTerminal(30, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
         app.RunFrame();
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.PushOverlay(new Modal("t", () => ["x"], dim: false));
 
         // base repaints every frame (floating popup => not frozen)
         for (int i = 0; i < 3; i++)
@@ -421,10 +421,10 @@ public class OverlayZOrderTests
 
 public class ButtonStyleTests
 {
-    private static CellBuffer RenderButton(ButtonStyle style, bool hovered, out ButtonWidget btn)
+    private static CellBuffer RenderButton(ButtonStyle style, bool hovered, out Button btn)
     {
         var buf = new CellBuffer(20, 5);
-        btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+        btn = new Button(() => " ok ", () => { }, ThemeRole.Accent, style);
         var root = UI.Column(0, btn.Grow(1));
         var term = new FakeTerminal(20, 5);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -444,7 +444,7 @@ public class ButtonStyleTests
         foreach (var style in new[] { ButtonStyle.Filled, ButtonStyle.Outline, ButtonStyle.Rounded })
         {
             var term = new FakeTerminal(20, 5);
-            var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+            var btn = new Button(() => " ok ", () => { }, ThemeRole.Accent, style);
             var root = UI.Column(0, btn.Grow(1));
             using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
             app.RunFrame();
@@ -473,7 +473,7 @@ public class ButtonStyleTests
         foreach (var style in new[] { ButtonStyle.Filled, ButtonStyle.Outline, ButtonStyle.Rounded })
         {
             var term = new FakeTerminal(20, 5);
-            var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, style);
+            var btn = new Button(() => " ok ", () => { }, ThemeRole.Accent, style);
             var root = UI.Column(0, btn.Grow(1));
             using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
             app.RunFrame();
@@ -492,13 +492,13 @@ public class ButtonStyleTests
     [Fact]
     public void Resize_WithOpenOverlay_LeavesNoGhost()
     {
-        var baseWidget = new FillWidget('T');
+        var baseWidget = new Fill('T');
         var root = UI.Column(0, baseWidget.Grow(1));
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
         app.RunFrame();
-        app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false));
+        app.PushOverlay(new Modal("t", () => ["x"], dim: false));
         app.RunFrame();
 
         // modal panel bg present at old box center
@@ -565,7 +565,7 @@ public class PressedStateTests
     public void Press_SetsPressedUntilRelease_AndLooksDifferent()
     {
         var term = new FakeTerminal(20, 5);
-        var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
+        var btn = new Button(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
         var root = UI.Column(0, btn.Grow(1));
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
@@ -601,7 +601,7 @@ public class PressFlashTests
     {
         var clock = new VirtualTimeSource();
         var term = new FakeTerminal(20, 5);
-        var btn = new ButtonWidget(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
+        var btn = new Button(() => " ok ", () => { }, ThemeRole.Accent, ButtonStyle.Filled);
         var root = UI.Column(0, btn.Grow(1));
         using var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
 
@@ -627,10 +627,10 @@ public class PressFlashTests
 
 public class SliderTests
 {
-    private static (App app, FakeTerminal term, SliderWidget slider, Signal<float> sig) Make()
+    private static (App app, FakeTerminal term, Slider slider, Signal<float> sig) Make()
     {
         var sig = new Signal<float>(0.5f);
-        var slider = new SliderWidget(sig);
+        var slider = new Slider(sig);
         var root = UI.Column(0, slider.Height(1));
         var term = new FakeTerminal(22, 3);
         var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -712,7 +712,7 @@ public class WheelTests
     public void Slider_HoverPlusScroll_AdjustsValue()
     {
         var sig = new Signal<float>(0.5f);
-        var slider = new SliderWidget(sig);
+        var slider = new Slider(sig);
         var root = UI.Column(0, slider.Height(1));
         var term = new FakeTerminal(22, 3);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -734,7 +734,7 @@ public class WheelTests
     public void Wheel_ClampsAtEnds()
     {
         var sig = new Signal<float>(0.98f);
-        var slider = new SliderWidget(sig);
+        var slider = new Slider(sig);
         var root = UI.Column(0, slider.Height(1));
         var term = new FakeTerminal(22, 3);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -753,13 +753,13 @@ public class OverlayStackTests
     public void Stack_TopSwallowsKeys_PopRevealsNext()
     {
         var seen = new List<char>();
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(30, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.OnKey = ev => { if (ev.Key == Key.Char) seen.Add(ev.Char); return true; };
 
-        var first = new ModalWidget("first", () => ["1"]);
-        var second = new ModalWidget("second", () => ["2"]);
+        var first = new Modal("first", () => ["1"]);
+        var second = new Modal("second", () => ["2"]);
         app.PushOverlay(first);
         app.PushOverlay(second);
         Assert.Same(second, app.Overlay);
@@ -792,14 +792,14 @@ public class OverlayStackTests
     [Fact]
     public void Stack_TopPaintsOverLower()
     {
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(40, 14);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        app.PushOverlay(new ModalWidget("first", () => ["aaaa"]));
+        app.PushOverlay(new Modal("first", () => ["aaaa"]));
         app.RunFrame();
-        app.PushOverlay(new ModalWidget("second", () => ["bbbb"]));
+        app.PushOverlay(new Modal("second", () => ["bbbb"]));
         app.RunFrame();
 
         // both boxes centered; the TOP one's title wins the center cell row
@@ -831,7 +831,7 @@ public class OverlayBodyTests
     public void ModalBody_IsLaidOutInsideBox_AndKeepsAnimating()
     {
         var body = new TickingWidget();
-        var modal = new ModalWidget("room", () => ["live content"], dim: false)
+        var modal = new Modal("room", () => ["live content"], dim: false)
         {
             BodyRows = 4,
             Body = body,
@@ -921,7 +921,7 @@ public class ModalDragTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var modal = new ModalWidget("drag", () => ["dd"], dim: false);
+        var modal = new Modal("drag", () => ["dd"], dim: false);
         app.PushOverlay(modal);
         app.RunFrame();
         long bgBefore = bg.RenderCount;
@@ -960,15 +960,15 @@ public class NestedBodyLayoutTests
     {
         // playground shape: Body = container column [ticking, row]
         var tick = OverlayBodyTests_PublicTicker.Make(30);
-        var row = new ContainerWidget();
+        var row = new Container();
         row.Node.Height = 1;
-        var room = new ContainerWidget();
+        var room = new Container();
         room.Node.Direction = FlexDirection.Column;
         tick.Node.Grow = 1;
         room.AddChild(tick);
         room.AddChild(row);
 
-        var modal = new ModalWidget("room", () => ["a", "b"], dim: false)
+        var modal = new Modal("room", () => ["a", "b"], dim: false)
             { BodyRows = 6, Body = room };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1005,9 +1005,9 @@ public class FloatingHitTestTests
     [Fact]
     public void ClickOnLowerModal_X_ClosesThatModal_NotTheTop()
     {
-        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+        var lower = new Modal("lower", () => ["l"], dim: false)
             { OffsetX = -25 };
-        var top = new ModalWidget("top", () => ["t"], dim: false)
+        var top = new Modal("top", () => ["t"], dim: false)
             { OffsetX = 25 };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1046,9 +1046,9 @@ public class FloatingHitTestTests
         // regression: click-to-raise fired on the [x] press too, so closing
         // a popup sitting BEHIND others blinked it in front of the stack
         // for one frame on its way out
-        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+        var lower = new Modal("lower", () => ["l"], dim: false)
             { OffsetX = -25 };
-        var top = new ModalWidget("top", () => ["t"], dim: false)
+        var top = new Modal("top", () => ["t"], dim: false)
             { OffsetX = 25 };
         var root = new QxTui.Layout.LayoutNode
             { Direction = FlexDirection.Column };
@@ -1083,7 +1083,7 @@ public class FloatingHitTestTests
 
 public class OverlayZAndRestoreTests
 {
-    private sealed class MarkerWidget(char c) : Widget
+    private sealed class Marker(char c) : Widget
     {
         public override void Render(CellBuffer buffer) =>
             buffer.FillRect(Rect.X, Rect.Y, Rect.W, Rect.H,
@@ -1096,21 +1096,21 @@ public class OverlayZAndRestoreTests
         // lower floating modal paints a marker everywhere; a higher one
         // overlaps it. The higher modal's body region must NOT show the
         // lower modal's marker (per-overlay clip = z-correctness).
-        var lower = new ModalWidget("lower", () => ["llll"], dim: false)
+        var lower = new Modal("lower", () => ["llll"], dim: false)
             { OffsetX = -20 };
-        var lowerMark = new MarkerWidget('L');
+        var lowerMark = new Marker('L');
         lowerMark.Node.Grow = 1;
-        var lbox = new ContainerWidget();
+        var lbox = new Container();
         lbox.Node.Direction = FlexDirection.Column;
         lbox.AddChild(lowerMark);
         lower.Body = lbox;
         lower.BodyRows = 4;
 
-        var top = new ModalWidget("top", () => ["tttt"], dim: false)
+        var top = new Modal("top", () => ["tttt"], dim: false)
             { OffsetX = 10 };
-        var topProbe = new MarkerWidget('T');
+        var topProbe = new Marker('T');
         topProbe.Node.Grow = 1;
-        var tbox = new ContainerWidget();
+        var tbox = new Container();
         tbox.Node.Direction = FlexDirection.Column;
         tbox.AddChild(topProbe);
         top.Body = tbox;
@@ -1141,13 +1141,13 @@ public class OverlayZAndRestoreTests
         // holds the OLD rect at erase time. That repainted the body into
         // the just-erased region and its pixels survived forever (the
         // "dirty pixels" seen while dragging/resizing popups).
-        var mark = new MarkerWidget('L');
+        var mark = new Marker('L');
         mark.Node.Grow = 1;
-        var lbox = new ContainerWidget();
+        var lbox = new Container();
         lbox.Node.Direction = FlexDirection.Column;
         lbox.AddChild(mark);
 
-        var pop = new ModalWidget("p", () => ["llll"], dim: false)
+        var pop = new Modal("p", () => ["llll"], dim: false)
             { Body = lbox, BodyRows = 4 };
         var root = new QxTui.Layout.LayoutNode
             { Direction = FlexDirection.Column };
@@ -1185,7 +1185,7 @@ public class OverlayZAndRestoreTests
         Assert.Equal(1, stat.Renders);
         Assert.Equal('S', app.Back[0, 0].Char);
 
-        app.PushOverlay(new ModalWidget("m", () => ["x"], dim: true));
+        app.PushOverlay(new Modal("m", () => ["x"], dim: true));
         app.RunFrame();
         app.RunFrame();
 
@@ -1200,19 +1200,19 @@ public class OverlayZAndRestoreTests
     [Fact]
     public void FloatingPopup_Pop_ErasesOnlyItsBox_NeighboursStayClean()
     {
-        var near = new MarkerWidget('N');   // OUTSIDE the popup's box
+        var near = new Marker('N');   // OUTSIDE the popup's box
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         near.Node.Height = 2;               // top strip; box is centered
         root.Add(near.Node);
-        var filler = new MarkerWidget('F');
+        var filler = new Marker('F');
         filler.Node.Grow = 1;
         root.Add(filler.Node);
         var term = new FakeTerminal(60, 16);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var pop = new ModalWidget("p", () => ["one line only"], dim: false);
+        var pop = new Modal("p", () => ["one line only"], dim: false);
         app.PushOverlay(pop);
         app.RunFrame();
         long before = near.RenderCount;
@@ -1250,7 +1250,7 @@ public class ClickToRaiseTests
     {
         var lowerBody = new Fill2('L');
         lowerBody.Node.Grow = 1;
-        var lower = new ModalWidget("lower", () => ["ll"], dim: false)
+        var lower = new Modal("lower", () => ["ll"], dim: false)
         {
             BodyRows = 3,
             Body = lowerBody,
@@ -1258,7 +1258,7 @@ public class ClickToRaiseTests
         };
         var topBody = new Fill2('T');
         topBody.Node.Grow = 1;
-        var top = new ModalWidget("top", () => ["tt"], dim: false)
+        var top = new Modal("top", () => ["tt"], dim: false)
         {
             BodyRows = 3,
             Body = topBody,
@@ -1300,7 +1300,7 @@ public class LiveLabelTests
     public void FuncLabel_RepaintsPeriodically_TextNeverStale()
     {
         int n = 0;
-        var label = new LabelWidget(() => $"count {n}");
+        var label = new Label(() => $"count {n}");
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         label.Node.Height = 1;
@@ -1327,7 +1327,7 @@ public class RightDragResizeTests
 {
     private static (App app, FakeTerminal term, Widget target) Make()
     {
-        var target = new QxTui.Tests.ParserFuzzProbeWidget { Resizable = true };
+        var target = new QxTui.Tests.ParserFuzzProbe { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
@@ -1404,8 +1404,8 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void SiblingResize_ShiftsTheNeighbour()
     {
-        var a = new ParserFuzzProbeWidget { Resizable = true };
-        var b = new ParserFuzzProbeWidget();
+        var a = new ParserFuzzProbe { Resizable = true };
+        var b = new ParserFuzzProbe();
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
         a.Node.Grow = 1;
         b.Node.Grow = 1;
@@ -1429,10 +1429,10 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void RightDragInsideChild_ResizesTheChildComponent()
     {
-        var col = new ContainerWidget();
+        var col = new Container();
         col.Node.Direction = FlexDirection.Column;
         col.Node.Height = 5;
-        var child = new ParserFuzzProbeWidget { Resizable = true };
+        var child = new ParserFuzzProbe { Resizable = true };
         child.Node.Grow = 1;
         col.AddChild(child);
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1454,7 +1454,7 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void Relayout_NeverBlanksACappedNeighbour()
     {
-        var mover = new ParserFuzzProbeWidget();
+        var mover = new ParserFuzzProbe();
         var capped = CappedFill.At(8);
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
         mover.Node.Grow = 1;
@@ -1482,7 +1482,7 @@ public class ResizeEdgeCaseTests
     [Fact]
     public void Modal_RightDrag_ResizesItsBox()
     {
-        var modal = new ModalWidget("box", () => ["one line"], dim: false)
+        var modal = new Modal("box", () => ["one line"], dim: false)
             { Resizable = true };
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
         var term = new FakeTerminal(40, 12);
@@ -1531,7 +1531,7 @@ public class ResizeSignTests
     {
         // grab-side sign: left-of-center grab means the LEFT edge follows
         // the cursor — dragging left grows
-        var target = new ParserFuzzProbeWidget { Resizable = true };
+        var target = new ParserFuzzProbe { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
@@ -1560,7 +1560,7 @@ public class RelayoutGhostTests
         // the ghost-stack bug: a moved widget vacates cells inside a
         // CLEAN capped neighbour; without erase+force-render those cells
         // keep the mover's pixels forever
-        var mover = new ParserFuzzProbeWidget();   // paints '#'
+        var mover = new ParserFuzzProbe();   // paints '#'
         var capped = new ResizeSignCapped('C');
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
         mover.Node.Width = 14;
@@ -1588,7 +1588,7 @@ public class TrailSurvivesResizeTests
     [Fact]
     public void BallTrail_SurvivesSurfaceRebuild()
     {
-        var ball = new QxTui.Playground.BallWidget(new QxTui.Reactive.Signal<float>(0.5f));
+        var ball = new QxTui.Playground.Ball(new QxTui.Reactive.Signal<float>(0.5f));
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
         ball.Node.Grow = 1;
         root.Add(ball.Node);
@@ -1635,7 +1635,7 @@ public class ModalResizeTests
     public void ResizedModal_BodyGrowsWithTheBox()
     {
         var body = new ResizeSignCapped('B');
-        var modal = new ModalWidget("box", () => ["one"], dim: false)
+        var modal = new Modal("box", () => ["one"], dim: false)
             { BodyRows = 3, Body = body, Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1662,7 +1662,7 @@ public class ModalResizeTests
     public void ResizedModal_LeavesNoGhostOfItsOldBox()
     {
         var bg = new ResizeSignCapped('G');
-        var modal = new ModalWidget("box", () => ["one"], dim: false)
+        var modal = new Modal("box", () => ["one"], dim: false)
             { Resizable = true };
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
@@ -1695,13 +1695,13 @@ public class ResizePropagationTests
     [Fact]
     public void ResizingChild_GrowsFixedAncestors_AndStealsFromSiblings()
     {
-        var child = new ParserFuzzProbeWidget { Resizable = true };
+        var child = new ParserFuzzProbe { Resizable = true };
         child.Node.Height = 4;
-        var col = new ContainerWidget();
+        var col = new Container();
         col.Node.Direction = FlexDirection.Column;
         col.Node.Width = 10;
         col.AddChild(child);
-        var other = new ParserFuzzProbeWidget();
+        var other = new ParserFuzzProbe();
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Row };
         root.Add(col.Node);
         other.Node.Grow = 1;
@@ -1730,7 +1730,7 @@ public class ResizeOptInTests
     [Fact]
     public void RightDrag_DoesNothing_UnlessOptedIn()
     {
-        var target = new ParserFuzzProbeWidget(); // Resizable defaults false
+        var target = new ParserFuzzProbe(); // Resizable defaults false
         var root = new QxTui.Layout.LayoutNode
             { Direction = QxTui.Layout.FlexDirection.Column };
         target.Node.Height = 5;
@@ -1764,12 +1764,12 @@ public class OutsideClickClosesTests
         // regression: OnClick closed whenever the RELEASE landed outside
         // the box — modals capture the mouse, so every drag that left the
         // box (body drag, title drag) dismissed the window on release
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var pop = new ModalWidget("p", () => ["x"], dim: false);
+        var pop = new Modal("p", () => ["x"], dim: false);
         app.PushOverlay(pop);
         app.RunFrame();
 
@@ -1786,12 +1786,12 @@ public class OutsideClickClosesTests
     [Fact]
     public void OutsidePress_DefaultOff_BlockingModalStaysOpen()
     {
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var modal = new ModalWidget("m", () => ["x"], dim: true);
+        var modal = new Modal("m", () => ["x"], dim: true);
         app.PushOverlay(modal);
         app.RunFrame();
 
@@ -1810,7 +1810,7 @@ public class OutsideClickClosesTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var modal = new ModalWidget("m", () => ["x"], dim: true)
+        var modal = new Modal("m", () => ["x"], dim: true)
             { OutsideClickCloses = true };
         app.PushOverlay(modal);
         app.RunFrame();
@@ -1827,9 +1827,9 @@ public class OutsideClickClosesTests
     [Fact]
     public void PressInsideHigherOverlay_DoesNotDismissOptInLower()
     {
-        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+        var lower = new Modal("lower", () => ["l"], dim: false)
             { OffsetX = -25, OutsideClickCloses = true };
-        var top = new ModalWidget("top", () => ["t"], dim: false)
+        var top = new Modal("top", () => ["t"], dim: false)
             { OffsetX = 25 };
         var root = new QxTui.Layout.LayoutNode
             { Direction = FlexDirection.Column };
@@ -1854,9 +1854,9 @@ public class OutsideClickClosesTests
     [Fact]
     public void PressOutsideEveryBox_DismissesOptInLower_UnderTop()
     {
-        var lower = new ModalWidget("lower", () => ["l"], dim: false)
+        var lower = new Modal("lower", () => ["l"], dim: false)
             { OffsetX = -25, OutsideClickCloses = true };
-        var top = new ModalWidget("top", () => ["t"], dim: false)
+        var top = new Modal("top", () => ["t"], dim: false)
             { OffsetX = 25 };
         var root = new QxTui.Layout.LayoutNode
             { Direction = FlexDirection.Column };
@@ -1898,12 +1898,12 @@ public class CompositingTests
         // AGENT.md claim 1, restored INSIDE overlays: an open window whose
         // state never changes costs 0 renders and 0 bytes per frame (the
         // flat buffer had to repaint every overlay opaque every frame)
-        var root = UI.Column(0, new FillWidget('T').Grow(1));
+        var root = UI.Column(0, new Fill('T').Grow(1));
         var term = new FakeTerminal(40, 12);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
         app.RunFrame();
 
-        var pop = new ModalWidget("p", () => ["static lines"], dim: false);
+        var pop = new Modal("p", () => ["static lines"], dim: false);
         app.PushOverlay(pop);
         app.RunFrame();
         app.RunFrame();
@@ -1933,8 +1933,8 @@ public class CompositingTests
         app.RunFrame();
         Assert.Equal(1, stat.Renders);
 
-        var a = new ModalWidget("a", () => ["x"], dim: true);
-        var b = new ModalWidget("b", () => ["y"], dim: true);
+        var a = new Modal("a", () => ["x"], dim: true);
+        var b = new Modal("b", () => ["y"], dim: true);
         app.PushOverlay(a);
         app.RunFrame();
         app.PushOverlay(b);

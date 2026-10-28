@@ -11,7 +11,7 @@ namespace QxTui.Widgets;
 /// consumed (it moves focus); Enter fires <see cref="Submitted"/>.
 /// Long content scrolls a window around the cursor.
 /// </summary>
-public sealed class TextFieldWidget : Widget
+public sealed class TextField : Widget
 {
     private readonly List<char> _chars = [];
     private int _cursor;
@@ -24,7 +24,7 @@ public sealed class TextFieldWidget : Widget
     public event Action<string>? Changed;
     public event Action<string>? Submitted;
 
-    public TextFieldWidget(string initial = "")
+    public TextField(string initial = "")
     {
         _chars.AddRange(initial);
         _cursor = _chars.Count;

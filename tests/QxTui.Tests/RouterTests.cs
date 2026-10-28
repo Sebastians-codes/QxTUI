@@ -96,7 +96,7 @@ public class RouterTests
         router.Register("one", () => a).Register("two", () => b);
         router.Switch("one");
 
-        var tabs = new TabBarWidget(router, ["one", "two"]);
+        var tabs = new TabBar(router, ["one", "two"]);
         var term = new FakeTerminal(30, 8);
         using var app = new App(term, UI.Column(0, tabs.Height(1), router.Grow(1)),
             targetFps: 60, asyncPresenting: false);
@@ -121,7 +121,7 @@ public class ChildRepaintTests
         // (the ball panel erased its slider row; it blinked only on
         // full-invalidation events like button presses)
         var parent = new PageWidget("pppp"); // renders full rect every call
-        var child = new LabelWidget(() => "CHILDROW");
+        var child = new Label(() => "CHILDROW");
         parent.AddChild(child);
         child.Node.Height = 1;
         parent.EveryFrame();
@@ -145,8 +145,8 @@ public class PageSwitchCleanupTests
     public void SwitchingPages_ErasesOldPagePixels()
     {
         var a = new PageWidget("aaaa"); // fills its whole rect with 'a'
-        var b = new ContainerWidget();  // paints nothing
-        var bChild = new LabelWidget(() => "top");
+        var b = new Container();  // paints nothing
+        var bChild = new Label(() => "top");
         b.AddChild(bChild);
         bChild.Node.Height = 1;
 
@@ -181,7 +181,7 @@ public class TabBarFollowsRouterTests
         router.Register("one", () => a).Register("two", () => b);
         router.Switch("one");
 
-        var tabs = new TabBarWidget(router, ["one", "two"]);
+        var tabs = new TabBar(router, ["one", "two"]);
         var term = new FakeTerminal(30, 8);
         using var app = new App(term, UI.Column(0, tabs.Height(1), router.Grow(1)),
             targetFps: 60, asyncPresenting: false);

@@ -6,7 +6,7 @@ using QxTui.Widgets;
 
 namespace QxTui.SysMon;
 
-internal static class Panel
+internal static class PanelFrame
 {
     public static void Frame(CellBuffer buf, Rect r, string title, int accent, Theme theme)
         => Box.Draw(buf, r.X, r.Y, r.W, r.H, BoxStyles.Single, theme.Border, title, accent);
@@ -19,11 +19,11 @@ internal static class Panel
     };
 }
 
-internal sealed class HeaderWidget : Widget
+internal sealed class Header : Widget
 {
     private readonly string _host = Environment.MachineName;
 
-    public HeaderWidget() => Tick(TimeSpan.FromSeconds(1));
+    public Header() => Tick(TimeSpan.FromSeconds(1));
 
     public override void Render(CellBuffer buffer)
     {
@@ -35,7 +35,7 @@ internal sealed class HeaderWidget : Widget
     }
 }
 
-internal sealed class CpuWidget : Widget
+internal sealed class Cpu : Widget
 {
     private readonly RingHistory _hist = new(180);
     private readonly SmoothedSampler _agg;
@@ -46,7 +46,7 @@ internal sealed class CpuWidget : Widget
     private readonly double[] _currCore = new double[256];
     private int _coreCount;
 
-    public CpuWidget()
+    public Cpu()
     {
         // sample /proc at 5Hz inside the sampler; render interpolates at 30Hz
         _agg = new SmoothedSampler(() =>
@@ -84,13 +84,13 @@ internal sealed class CpuWidget : Widget
         double agg = _agg.Value;
         float f = _agg.Phase;
 
-        Panel.Frame(buffer, r, $"CPU ({_coreCount})", Theme.Success, Theme);
+        PanelFrame.Frame(buffer, r, $"CPU ({_coreCount})", Theme.Success, Theme);
 
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"all {agg.ToString("F0", CultureInfo.InvariantCulture),3}%",
-            fg: Panel.LoadColor(agg), bold: true);
+            fg: PanelFrame.LoadColor(agg), bold: true);
         buffer.WriteTextClipped(Clip, r.X + 11, r.Y + 1, "last 36s", fg: Theme.Faint);
-        Sparkline.Draw(buffer, Clip, r.X + 19, r.Y + 1, Math.Max(0, r.W - 21), _hist,
+        SparklinePainter.Draw(buffer, Clip, r.X + 19, r.Y + 1, Math.Max(0, r.W - 21), _hist,
             fg: Theme.Success, scaleMax: 100f, phase: f);
 
         int rows = r.H - 3;
@@ -110,21 +110,21 @@ internal sealed class CpuWidget : Widget
 
             buffer.WriteTextClipped(Clip, x, y,
                 i.ToString("D2", CultureInfo.InvariantCulture), fg: Theme.Dim);
-            Bar.Draw(buffer, Clip, x + 3, y, Math.Max(4, colW - 9), pct / 100.0,
-                fg: Panel.LoadColor(pct));
+            BarPainter.Draw(buffer, Clip, x + 3, y, Math.Max(4, colW - 9), pct / 100.0,
+                fg: PanelFrame.LoadColor(pct));
             buffer.WriteTextClipped(Clip, x + colW - 5, y,
                 $"{pct.ToString("F0", CultureInfo.InvariantCulture),3}%", fg: Theme.Dim);
         }
     }
 }
 
-internal sealed class MemWidget : Widget
+internal sealed class Mem : Widget
 {
     private readonly RingHistory _hist = new(120);
     private readonly SmoothedSampler _used;
     private LinuxProc.MemInfo _last = new(0, 0, 0, 0, 0, 0);
 
-    public MemWidget()
+    public Mem()
     {
         _used = new SmoothedSampler(() =>
         {
@@ -140,7 +140,7 @@ internal sealed class MemWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Panel.Frame(buffer, r, "MEMORY", Theme.Accent, Theme);
+        PanelFrame.Frame(buffer, r, "MEMORY", Theme.Accent, Theme);
 
         long now = Environment.TickCount64;
         if (_used.Update(now))
@@ -154,9 +154,9 @@ internal sealed class MemWidget : Widget
             $"{Format.HumanBytes((m.TotalKb - m.AvailableKb) * 1024.0)} / {Format.HumanBytes(m.TotalKb * 1024.0)}"
             + $"  ({usedFrac * 100:0}%)",
             fg: Theme.Text);
-        Bar.Draw(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, fg: Theme.Accent);
+        BarPainter.Draw(buffer, Clip, r.X + 2, r.Y + 2, r.W - 4, usedFrac, fg: Theme.Accent);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3, "used% over last 30s:", fg: Theme.Faint);
-        Sparkline.Draw(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist,
+        SparklinePainter.Draw(buffer, Clip, r.X + 2, r.Y + 4, r.W - 4, _hist,
             fg: Theme.Accent, scaleMax: 100f, phase: f);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 5,
             $"avail {Format.HumanBytes(m.AvailableKb * 1024.0)}"
@@ -170,12 +170,12 @@ internal sealed class MemWidget : Widget
             $"swp {Format.HumanBytes(swapUsed * 1024.0)} / {Format.HumanBytes(m.SwapTotalKb * 1024.0)}",
             fg: swapUsed > 0 ? Theme.Warning : Theme.Dim);
         if (r.H > 9)
-            Bar.Draw(buffer, Clip, r.X + 2, r.Y + 8, r.W - 4,
+            BarPainter.Draw(buffer, Clip, r.X + 2, r.Y + 8, r.W - 4,
                 m.SwapTotalKb > 0 ? swapUsed / m.SwapTotalKb : 0, fg: Theme.Warning);
     }
 }
 
-internal sealed class NetWidget : Widget
+internal sealed class Net : Widget
 {
     private readonly RingHistory _rx = new(120);
     private readonly RingHistory _tx = new(120);
@@ -189,7 +189,7 @@ internal sealed class NetWidget : Widget
     private double _scale = Scales[0];
     private int _lowSamples;
 
-    public NetWidget()
+    public Net()
     {
         _rxS = new SmoothedSampler(() =>
         {
@@ -209,7 +209,7 @@ internal sealed class NetWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Panel.Frame(buffer, r, "NETWORK", Theme.Warning, Theme);
+        PanelFrame.Frame(buffer, r, "NETWORK", Theme.Warning, Theme);
 
         long now = Environment.TickCount64;
         if (_rxS.Update(now))
@@ -248,12 +248,12 @@ internal sealed class NetWidget : Widget
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 1,
             $"▼ {Format.HumanBytes(rxRate)}/s", fg: Theme.Success);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 1, "last 12s", fg: Theme.Faint);
-        Sparkline.Draw(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx,
+        SparklinePainter.Draw(buffer, Clip, r.X + 23, r.Y + 1, Math.Max(0, r.W - 25), _rx,
             fg: Theme.Success, scaleMax: (float)_scale);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 2,
             $"▲ {Format.HumanBytes(txRate)}/s", fg: Theme.Accent);
         buffer.WriteTextClipped(Clip, r.X + 15, r.Y + 2, "last 12s", fg: Theme.Faint);
-        Sparkline.Draw(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx,
+        SparklinePainter.Draw(buffer, Clip, r.X + 23, r.Y + 2, Math.Max(0, r.W - 25), _tx,
             fg: Theme.Accent, scaleMax: (float)_scale);
         buffer.WriteTextClipped(Clip, r.X + 2, r.Y + 3,
             $"graph full-scale: {Format.HumanBytes(_scale)}/s", fg: Theme.Faint);
@@ -262,7 +262,7 @@ internal sealed class NetWidget : Widget
 
 internal record ProcRowsMsg(System.Collections.Generic.List<LinuxProc.ProcRow> Rows);
 
-internal sealed class ProcWidget : Widget
+internal sealed class Procs : Widget
 {
     private readonly Dictionary<int, long> _prevTicks = new(256);
     private readonly Dictionary<int, double> _smoothCpu = new(256);
@@ -273,7 +273,7 @@ internal sealed class ProcWidget : Widget
     private readonly ListView _list;
     public bool Paused;
 
-    public ProcWidget()
+    public Procs()
     {
         // virtualized: 2000+ processes, only visible rows ever painted
         _list = new ListView(() => _rows.Count)
@@ -281,7 +281,7 @@ internal sealed class ProcWidget : Widget
             RenderRow = (buffer, clip, rect, index, selected) =>
             {
                 var p = _rows[index];
-                int cpuColor = Panel.LoadColor(Math.Min(100, p.CpuPercent * Environment.ProcessorCount));
+                int cpuColor = PanelFrame.LoadColor(Math.Min(100, p.CpuPercent * Environment.ProcessorCount));
                 if (selected)
                     buffer.FillRect(rect.X, rect.Y, rect.W, rect.H,
                         new Cell { Char = ' ', Fg = -1, Bg = Theme.Get(ThemeRole.PanelBg) });
@@ -297,7 +297,7 @@ internal sealed class ProcWidget : Widget
         // long as this panel existed — ChildInset is the fix)
         Node.ChildInset = 1;
         // header row inside the frame, spacer then virtualized list below
-        var headerSpacer = new ContainerWidget();
+        var headerSpacer = new Container();
         AddChild(headerSpacer);
         headerSpacer.Node.Height = 1;
         AddChild(_list);
@@ -376,7 +376,7 @@ internal sealed class ProcWidget : Widget
     {
         var r = Rect;
         buffer.FillRect(r.X, r.Y, r.W, r.H, Cell.Empty);
-        Panel.Frame(buffer, r, Paused ? "PROCESSES (paused)" : "PROCESSES", Theme.Title, Theme);
+        PanelFrame.Frame(buffer, r, Paused ? "PROCESSES (paused)" : "PROCESSES", Theme.Title, Theme);
 
         // pure drawing: the sample arrived as a message; Render never blocks
 
@@ -386,7 +386,7 @@ internal sealed class ProcWidget : Widget
     }
 }
 
-internal sealed class FooterWidget : Widget
+internal sealed class Footer : Widget
 {
     public override void Render(CellBuffer buffer)
     {

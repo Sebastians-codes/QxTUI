@@ -41,7 +41,7 @@ public class KitControlsTests
     public void Checkbox_ClickToggles_AndSpaceWhenFocused()
     {
         var on = new Signal<bool>(false);
-        var cb = new CheckboxWidget(on, "dark mode");
+        var cb = new Checkbox(on, "dark mode");
         var (app, term, _) = MakeApp(UI.Column(0, cb));
         app.RunFrame();
         Assert.True(BackContains(app, "[ ] dark mode"));
@@ -61,7 +61,7 @@ public class KitControlsTests
     public void Segmented_ClickSelects_AndArrowsWhenFocused()
     {
         var sel = new Signal<int>(0);
-        var seg = new SegmentedWidget(sel, "day", "night");
+        var seg = new Segmented(sel, "day", "night");
         var (app, term, _) = MakeApp(UI.Column(0, seg));
         app.RunFrame();
 
@@ -79,9 +79,9 @@ public class KitControlsTests
     [Fact]
     public void Panel_ChildrenLiveInsideTheRing_AndTitleDraws()
     {
-        var inner = new ContainerWidget();
+        var inner = new Container();
         inner.Node.Grow = 1;
-        var panel = new PanelWidget("settings");
+        var panel = new Panel("settings");
         panel.AddChild(inner);
         var (app, _, _) = MakeApp(UI.Column(0, panel.Grow(1)));
         app.RunFrame();
@@ -93,7 +93,7 @@ public class KitControlsTests
     [Fact]
     public void Separator_DrawsARule()
     {
-        var sep = new SeparatorWidget();
+        var sep = new Separator();
         var (app, _, _) = MakeApp(UI.Column(0, sep));
         app.RunFrame();
         Assert.Equal('─', app.Back[5, 0].Char);
@@ -103,7 +103,7 @@ public class KitControlsTests
     public void ProgressBar_BlocksAndPercent()
     {
         var v = new Signal<float>(0.5f);
-        var bar = new ProgressBarWidget(v);
+        var bar = new ProgressBar(v);
         var (app, _, _) = MakeApp(UI.Column(0, bar));
         app.RunFrame();
 
@@ -115,7 +115,7 @@ public class KitControlsTests
     [Fact]
     public void Spinner_AdvancesWithTheClock()
     {
-        var sp = new SpinnerWidget();
+        var sp = new Spinner();
         var (app, _, clock) = MakeApp(UI.Column(0, sp));
         app.RunFrame();
         char first = app.Back[0, 0].Char;
@@ -130,14 +130,14 @@ public class KitControlsTests
     public void Select_ClickOpens_ChoiceSetsAndCloses()
     {
         var sel = new Signal<int>(0);
-        var dropdown = new SelectWidget(sel, "alpha", "beta", "gamma");
+        var dropdown = new Dropdown(sel, "alpha", "beta", "gamma");
         var (app, term, _) = MakeApp(UI.Column(0, dropdown));
         app.RunFrame();
         Assert.True(BackContains(app, "alpha"));
 
         Mouse(term, "\x1b[<0;2;1M\x1b[<0;2;1m"); // open
         app.RunFrame();
-        Assert.IsType<SelectPopup>(app.Overlay);
+        Assert.IsType<DropdownPopup>(app.Overlay);
 
         Mouse(term, "\x1b[<0;3;4M\x1b[<0;3;4m"); // click option 1 ("beta", row y=3)
         app.RunFrame();
@@ -150,14 +150,14 @@ public class KitControlsTests
     public void Select_KeyboardOpenNavigateSelect_AndEscapeCloses()
     {
         var sel = new Signal<int>(0);
-        var dropdown = new SelectWidget(sel, "alpha", "beta", "gamma");
+        var dropdown = new Dropdown(sel, "alpha", "beta", "gamma");
         var (app, term, _) = MakeApp(UI.Column(0, dropdown));
         app.RunFrame();
         app.Focus(dropdown);
 
         term.QueueInput((byte)13); // Enter opens
         app.RunFrame();
-        Assert.IsType<SelectPopup>(app.Overlay);
+        Assert.IsType<DropdownPopup>(app.Overlay);
 
         foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[B"))
             term.QueueInput(b); // Down → cursor 1
@@ -169,7 +169,7 @@ public class KitControlsTests
 
         term.QueueInput((byte)13); // open again...
         app.RunFrame();
-        Assert.IsType<SelectPopup>(app.Overlay);
+        Assert.IsType<DropdownPopup>(app.Overlay);
         term.QueueInput((byte)27); // ...Escape closes (settle like any lone ESC)
         app.RunFrame();
         Thread.Sleep(KeyParser.EscSettleMs + 20);
@@ -182,12 +182,12 @@ public class KitControlsTests
     public void Select_OutsidePressCloses_WithoutRetriggering()
     {
         var sel = new Signal<int>(0);
-        var dropdown = new SelectWidget(sel, "alpha", "beta");
+        var dropdown = new Dropdown(sel, "alpha", "beta");
         var (app, term, _) = MakeApp(UI.Column(0, dropdown));
         app.RunFrame();
         Mouse(term, "\x1b[<0;2;1M\x1b[<0;2;1m"); // open
         app.RunFrame();
-        Assert.IsType<SelectPopup>(app.Overlay);
+        Assert.IsType<DropdownPopup>(app.Overlay);
 
         Mouse(term, "\x1b[<0;31;10M\x1b[<0;31;10m"); // press far outside the list
         app.RunFrame();
@@ -198,12 +198,12 @@ public class KitControlsTests
     [Fact]
     public void Toast_Shows_SelfPops_OnTtl_AndReplaces()
     {
-        var (app, _, clock) = MakeApp(UI.Column(0, new ContainerWidget().Grow(1)));
+        var (app, _, clock) = MakeApp(UI.Column(0, new Container().Grow(1)));
         app.RunFrame();
 
         app.Toast("saved");
         app.RunFrame();
-        Assert.IsType<ToastWidget>(app.Overlay);
+        Assert.IsType<Toast>(app.Overlay);
         Assert.True(BackContains(app, "saved"));
 
         app.Toast("again"); // single slot: replaces

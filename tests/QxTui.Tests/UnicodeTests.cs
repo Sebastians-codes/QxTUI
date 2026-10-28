@@ -114,7 +114,7 @@ public class WideCellRenderTests
     [Fact]
     public void TextWidget_WrapsInsideRect()
     {
-        var text = new TextWidget(() => "aaa bbb ccc");
+        var text = new Paragraph(() => "aaa bbb ccc");
         var root = QxTui.Layout.UI.Column(0, text.Width(8).Height(3));
         var term = new FakeTerminal(8, 3);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);

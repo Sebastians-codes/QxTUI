@@ -301,7 +301,7 @@ public abstract class Widget
     /// <summary>OPT-IN: right-click-drag resizes the element (grab-side
     /// edge follows the cursor; flow siblings absorb the delta). Default
     /// false — a component is resizable only when its author says so.
-    /// ModalWidget opts in at class level (windows are resizable).</summary>
+    /// Modal opts in at class level (windows are resizable).</summary>
     public bool Resizable { get; set; }
 
     private bool _resizing;

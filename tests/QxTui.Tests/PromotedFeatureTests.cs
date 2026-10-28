@@ -65,7 +65,7 @@ public class RingHistorySignalTests
     public void SparklineWidget_AutoInvalidatesOnPush()
     {
         var h = new RingHistory(8);
-        var spark = new SparklineWidget(h);
+        var spark = new Sparkline(h);
         var root = UI.Column(0, spark.Height(2));
         var term = new FakeTerminal(20, 6);
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);

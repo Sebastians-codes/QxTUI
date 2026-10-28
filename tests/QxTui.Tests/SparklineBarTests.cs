@@ -46,7 +46,7 @@ public class SparklineTests
         var h = new RingHistory(4);
         h.Push(100);
 
-        Sparkline.Draw(buf, Full, 0, 0, 4, h, fg: 7, scaleMax: 100f);
+        SparklinePainter.Draw(buf, Full, 0, 0, 4, h, fg: 7, scaleMax: 100f);
 
         Assert.Equal('█', buf[3, 0].Char); // right-aligned single sample
     }
@@ -58,7 +58,7 @@ public class SparklineTests
         var h = new RingHistory(4);
         h.Push(50);
 
-        Sparkline.Draw(buf, Full, 0, 0, 4, h, fg: 7, scaleMax: 100f);
+        SparklinePainter.Draw(buf, Full, 0, 0, 4, h, fg: 7, scaleMax: 100f);
 
         Assert.Equal('▄', buf[3, 0].Char); // 50/100 → level 3-4
     }
@@ -71,8 +71,8 @@ public class SparklineTests
         var h = new RingHistory(4);
         h.Push(0); h.Push(100);
 
-        Sparkline.Draw(bufA, Full, 0, 0, 2, h, fg: 7, scaleMax: 100f, phase: 0f);
-        Sparkline.Draw(bufB, Full, 0, 0, 2, h, fg: 7, scaleMax: 100f, phase: 0.5f);
+        SparklinePainter.Draw(bufA, Full, 0, 0, 2, h, fg: 7, scaleMax: 100f, phase: 0f);
+        SparklinePainter.Draw(bufB, Full, 0, 0, 2, h, fg: 7, scaleMax: 100f, phase: 0.5f);
 
         // left column lerps between the two samples as phase advances;
         // the right column clamps to the newest sample in both cases
@@ -91,7 +91,7 @@ public class BarTests
     public void Fraction_FillsProportionally()
     {
         using var buf = new CellBuffer(10, 3);
-        Bar.Draw(buf, Full, 0, 0, 10, 0.5, fg: 7);
+        BarPainter.Draw(buf, Full, 0, 0, 10, 0.5, fg: 7);
 
         Assert.Equal('█', buf[4, 0].Char);
         Assert.Equal('░', buf[5, 0].Char);
@@ -101,10 +101,10 @@ public class BarTests
     public void Fraction_Clamped()
     {
         using var buf = new CellBuffer(10, 3);
-        Bar.Draw(buf, Full, 0, 0, 10, 5.0, fg: 7);
+        BarPainter.Draw(buf, Full, 0, 0, 10, 5.0, fg: 7);
         Assert.Equal('█', buf[9, 0].Char);
 
-        Bar.Draw(buf, Full, 0, 1, 10, -1.0, fg: 7);
+        BarPainter.Draw(buf, Full, 0, 1, 10, -1.0, fg: 7);
         Assert.Equal('░', buf[0, 1].Char);
     }
 }

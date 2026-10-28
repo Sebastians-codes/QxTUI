@@ -161,7 +161,7 @@ public class DropResyncTests
         var root = new QxTui.Layout.LayoutNode { Direction = QxTui.Layout.FlexDirection.Column };
         root.Add(widget.Node);
         widget.Node.Grow = 0.5f;
-        var spacer = new QxTui.Widgets.ContainerWidget();
+        var spacer = new QxTui.Widgets.Container();
         root.Add(spacer.Node);
         spacer.Node.Grow = 0.5f;
 

@@ -10,16 +10,16 @@ namespace QxTui.Widgets;
 /// <summary>Titled frame panel: children lay out INSIDE the border ring
 /// (ChildInset = 1), so hosted content can never paint the frame away —
 /// the widget every sample used to hand-roll.</summary>
-public sealed class PanelWidget : Widget
+public sealed class Panel : Widget
 {
     private readonly Func<string>? _title;
 
     public ThemeRole BorderRole = ThemeRole.Border;
     public ThemeRole TitleRole = ThemeRole.Title;
 
-    public PanelWidget(string? title = null) : this(title is null ? null : () => title) { }
+    public Panel(string? title = null) : this(title is null ? null : () => title) { }
 
-    public PanelWidget(Func<string>? title)
+    public Panel(Func<string>? title)
     {
         _title = title;
         Node.ChildInset = 1;
@@ -39,11 +39,11 @@ public sealed class PanelWidget : Widget
 /// <summary>Horizontal rule. Height 1 by convention; taller rects get one
 /// line per row (use as a column divider by giving it Width 1 and the
 /// vertical style renders instead).</summary>
-public sealed class SeparatorWidget : Widget
+public sealed class Separator : Widget
 {
     public ThemeRole Role = ThemeRole.Faint;
 
-    public SeparatorWidget() => Node.Height = 1;
+    public Separator() => Node.Height = 1;
 
     public override void Render(CellBuffer buffer)
     {
@@ -59,12 +59,12 @@ public sealed class SeparatorWidget : Widget
 /// <summary>Bound boolean toggle: [x]/[ ] plus label. State lives in a
 /// Signal (the state layer), so several widgets can share one checkbox's
 /// truth and settings screens stay testable headless.</summary>
-public sealed class CheckboxWidget : Widget
+public sealed class Checkbox : Widget
 {
     private readonly Signal<bool> _value;
     private readonly Func<string> _label;
 
-    public CheckboxWidget(Signal<bool> value, Func<string> label)
+    public Checkbox(Signal<bool> value, Func<string> label)
     {
         _value = value;
         _label = label;
@@ -74,7 +74,7 @@ public sealed class CheckboxWidget : Widget
         Node.Height = 1;
     }
 
-    public CheckboxWidget(Signal<bool> value, string label) : this(value, () => label) { }
+    public Checkbox(Signal<bool> value, string label) : this(value, () => label) { }
 
     public override void OnClick(Point local) => _value.Set(!_value.Value);
 
@@ -104,12 +104,12 @@ public sealed class CheckboxWidget : Widget
 /// <summary>Radio group as a segmented control: exactly one of N options,
 /// bound to a Signal&lt;int&gt;. Click a segment or use arrows while
 /// focused.</summary>
-public sealed class SegmentedWidget : Widget
+public sealed class Segmented : Widget
 {
     private readonly Signal<int> _selected;
     private readonly string[] _options;
 
-    public SegmentedWidget(Signal<int> selected, params string[] options)
+    public Segmented(Signal<int> selected, params string[] options)
     {
         _selected = selected;
         _options = options;
@@ -178,7 +178,7 @@ public sealed class SegmentedWidget : Widget
 
 /// <summary>Self-driving activity indicator (braille frames). For work
 /// whose progress is unknown — pair with App.Effect.</summary>
-public sealed class SpinnerWidget : Widget
+public sealed class Spinner : Widget
 {
     private static readonly string[] Frames =
         ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
@@ -186,7 +186,7 @@ public sealed class SpinnerWidget : Widget
     private int _frame;
     public ThemeRole Role = ThemeRole.Accent;
 
-    public SpinnerWidget(int hz = 12)
+    public Spinner(int hz = 12)
     {
         Node.Height = 1;
         Node.Width = 1;
@@ -204,12 +204,12 @@ public sealed class SpinnerWidget : Widget
 
 /// <summary>Determinate progress bar bound to a Signal&lt;float&gt; in
 /// [0,1]: filled blocks plus a right-aligned percent when it fits.</summary>
-public sealed class ProgressBarWidget : Widget
+public sealed class ProgressBar : Widget
 {
     private readonly Signal<float> _value;
     public ThemeRole Role = ThemeRole.Success;
 
-    public ProgressBarWidget(Signal<float> value)
+    public ProgressBar(Signal<float> value)
     {
         _value = value;
         OnSignal(value);
@@ -237,12 +237,12 @@ public sealed class ProgressBarWidget : Widget
 /// opens a floating option list (an overlay layer) anchored under itself.
 /// The popup closes on outside press, Escape, or a choice — all via
 /// features the overlay stack already has.</summary>
-public sealed class SelectWidget : Widget
+public sealed class Dropdown : Widget
 {
     private readonly Signal<int> _selected;
     private readonly Func<string[]> _options;
 
-    public SelectWidget(Signal<int> selected, Func<string[]> options)
+    public Dropdown(Signal<int> selected, Func<string[]> options)
     {
         _selected = selected;
         _options = options;
@@ -253,7 +253,7 @@ public sealed class SelectWidget : Widget
         Node.Height = 1;
     }
 
-    public SelectWidget(Signal<int> selected, params string[] options)
+    public Dropdown(Signal<int> selected, params string[] options)
         : this(selected, () => options) { }
 
     public string Current =>
@@ -275,12 +275,12 @@ public sealed class SelectWidget : Widget
     private void Toggle()
     {
         if (App is null) return;
-        if (App.Overlay is SelectPopup p && ReferenceEquals(p.Owner, this))
+        if (App.Overlay is DropdownPopup p && ReferenceEquals(p.Owner, this))
         {
             App.PopOverlay(p);
             return;
         }
-        App.PushOverlay(new SelectPopup(this, _selected, _options()));
+        App.PushOverlay(new DropdownPopup(this, _selected, _options()));
     }
 
     public override void Render(CellBuffer buffer)
@@ -296,17 +296,17 @@ public sealed class SelectWidget : Widget
     }
 }
 
-/// <summary>The SelectWidget's open option list: a floating layer anchored
+/// <summary>The Dropdown's open option list: a floating layer anchored
 /// under its owner. Swallows keys while open (modal-ish), closes on
 /// outside press / Escape / choice.</summary>
-public sealed class SelectPopup : Widget
+public sealed class DropdownPopup : Widget
 {
-    public SelectWidget Owner { get; }
+    public Dropdown Owner { get; }
     private readonly Signal<int> _value;
     private readonly string[] _options;
     private int _cursor;
 
-    public SelectPopup(SelectWidget owner, Signal<int> value, string[] options)
+    public DropdownPopup(Dropdown owner, Signal<int> value, string[] options)
     {
         Owner = owner;
         _value = value;
@@ -331,7 +331,7 @@ public sealed class SelectPopup : Widget
     public override bool HitTest(int x, int y) => ListRect(Rect).Contains(x, y);
 
     /// <summary>"Inside" for outside-press dismissal = the list box, not
-    /// the fullscreen overlay rect — same rule as ModalWidget.</summary>
+    /// the fullscreen overlay rect — same rule as Modal.</summary>
     internal override bool OwnsPoint(int x, int y) => ListRect(Rect).Contains(x, y);
 
     public override bool HandleKey(KeyEvent ev)
@@ -406,12 +406,12 @@ public sealed class SelectPopup : Widget
 /// after a TTL. Clicks pass straight through (HitTest false). Open one via
 /// <see cref="Core.App.Toast"/> (single slot: a new toast replaces the
 /// old).</summary>
-public sealed class ToastWidget : Widget
+public sealed class Toast : Widget
 {
     private readonly string _text;
     private readonly ThemeRole _role;
 
-    public ToastWidget(string text, ThemeRole role, TimeSpan ttl)
+    public Toast(string text, ThemeRole role, TimeSpan ttl)
     {
         _text = text;
         _role = role;
@@ -455,8 +455,8 @@ public static class ToastExtensions
         ThemeRole role = ThemeRole.Success, int ms = 2500)
     {
         for (int i = app.OverlayCount - 1; i >= 0; i--)
-            if (app.OverlayAt(i) is ToastWidget t)
+            if (app.OverlayAt(i) is Toast t)
                 app.PopOverlay(t);
-        app.PushOverlay(new ToastWidget(text, role, TimeSpan.FromMilliseconds(ms)));
+        app.PushOverlay(new Toast(text, role, TimeSpan.FromMilliseconds(ms)));
     }
 }

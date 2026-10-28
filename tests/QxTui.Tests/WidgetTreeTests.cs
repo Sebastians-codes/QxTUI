@@ -188,8 +188,8 @@ public class WidgetTreeTests
     [Fact]
     public void ContainerWidget_HoldsChildren_AndPaintsNothing()
     {
-        var label = new LabelWidget(() => "hi");
-        var container = new ContainerWidget();
+        var label = new Label(() => "hi");
+        var container = new Container();
         container.AddChild(label);
         label.Node.Height = 1;
 

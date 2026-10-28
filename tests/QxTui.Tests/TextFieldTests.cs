@@ -8,9 +8,9 @@ namespace QxTui.Tests;
 
 public class TextFieldTests
 {
-    private static (App app, FakeTerminal term, TextFieldWidget field) Make(string initial = "")
+    private static (App app, FakeTerminal term, TextField field) Make(string initial = "")
     {
-        var field = new TextFieldWidget(initial);
+        var field = new TextField(initial);
         var root = UI.Column(0, field.Height(1));
         var term = new FakeTerminal(20, 4);
         var app = new App(term, root, targetFps: 60, asyncPresenting: false);
@@ -53,7 +53,7 @@ public class TextFieldTests
     [Fact]
     public void Tab_IsNotConsumed_FocusMovesOn()
     {
-        var field = new TextFieldWidget();
+        var field = new TextField();
         var other = new ListView(() => 0);
         var root = UI.Column(0, field.Height(1), other.Grow(1));
         var term = new FakeTerminal(20, 6);

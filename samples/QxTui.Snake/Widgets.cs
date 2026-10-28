@@ -11,7 +11,7 @@ namespace QxTui.Snake;
 /// from a 40Hz render tick; only steps/state changes invalidate, so between
 /// steps the frame loop sleeps (on-demand rendering).
 /// </summary>
-internal sealed class SnakeWidget : Widget
+internal sealed class Board : Widget
 {
     private readonly SnakeModel _model;
     private readonly Signal<int> _score;
@@ -26,7 +26,7 @@ internal sealed class SnakeWidget : Widget
     private double _stepIntervalMs = 130;
     public bool Paused;
 
-    public SnakeWidget(Signal<int> score, Signal<bool> alive)
+    public Board(Signal<int> score, Signal<bool> alive)
     {
         _model = new SnakeModel(40, 20);
         _score = score;
@@ -147,13 +147,13 @@ internal sealed class SnakeWidget : Widget
 
 /// <summary>Score line. Subscribes to signals: re-renders ONLY when score or
 /// alive-state actually changes — the isolation demo, again.</summary>
-internal sealed class HudWidget : Widget
+internal sealed class Hud : Widget
 {
     private readonly Signal<int> _score;
     private readonly Signal<bool> _alive;
     private readonly Signal<int> _fps;
 
-    public HudWidget(Signal<int> score, Signal<bool> alive, Signal<int> fps)
+    public Hud(Signal<int> score, Signal<bool> alive, Signal<int> fps)
     {
         _score = score;
         _alive = alive;
@@ -175,7 +175,7 @@ internal sealed class HudWidget : Widget
 
 }
 
-internal sealed class HelpWidget : Widget
+internal sealed class Help : Widget
 {
     public override void Render(CellBuffer buffer)
     {

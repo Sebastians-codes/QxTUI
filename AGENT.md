@@ -108,7 +108,7 @@ writer thread      → the ONLY place a blocking tty write may happen
 - **Off-thread work enters ONLY as posted intents.** `App.Effect` runs I/O
   on the pool and posts its result (or an `EffectFault`) through the
   thread-safe inbox (`App.Post`); the frame thread stays single-threaded
-  and never blocks (see §2 pipeline and samples/QxTui.SysMon ProcWidget).
+  and never blocks (see §2 pipeline and samples/QxTui.SysMon Procs).
 - **Lifecycle is hooks, not plumbing:** `OnMount(App)` / `OnDetach()` /
   `OnRectChanged(old, new)` are the supported extension points; the
   mount-action materialization stays internal.

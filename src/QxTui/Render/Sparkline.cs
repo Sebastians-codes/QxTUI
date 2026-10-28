@@ -5,7 +5,7 @@ namespace QxTui.Render;
 /// Fixed scale (scaleMax) for percent-like series; auto-scale with a floor
 /// for unbounded series; phase for sub-cell scrolling.
 /// </summary>
-public static class Sparkline
+public static class SparklinePainter
 {
     private const string Levels = "▁▂▃▄▅▆▇█";
 
