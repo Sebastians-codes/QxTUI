@@ -153,11 +153,11 @@ ModalWidget MakeConfirmModal() => new("confirm",
         "one level at a time.",
     ],
     dim: false,
-    actions:
+    chips:
     [
-        ("fps settings", () => app.PushOverlay(MakeFpsModal())),
-        ("ball room", () => app.PushOverlay(MakeBallRoomModal())),
-        ("close", () => app.PopOverlay()),
+        new("fps settings", Act: () => app.PushOverlay(MakeFpsModal())),
+        new("ball room", Act: () => app.PushOverlay(MakeBallRoomModal())),
+        new("close", Act: () => app.PopOverlay()),
     ]);
 
 // a LIVE ball sim inside the overlay stack: overlays repaint every
@@ -180,7 +180,7 @@ ModalWidget MakeBallRoomModal(int hz = 0, int ox = 0, int oy = 0)
                 : "slider drives BOTH balls.",
         ],
         dim: false,
-        actions: [("close", () => app.PopOverlay())])
+        chips: [new("close", Act: () => app.PopOverlay())])
     { BodyRows = 10, OffsetX = ox, OffsetY = oy };
     var room = new ContainerWidget();
     room.Node.Direction = FlexDirection.Column;

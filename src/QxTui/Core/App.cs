@@ -173,15 +173,12 @@ public sealed class App : IDisposable
         return _effectiveFps;
     }
 
-    /// <summary>Raw byte callback (legacy/simple apps). Return false to quit.</summary>
-    public Func<byte, bool>? OnInput { get; set; }
-
     /// <summary>Parsed key callback (games/apps needing arrows etc.).
-    /// Return false to quit.</summary>
+    /// Return false to quit. The ONLY input hook: intents enter as keys,
+    /// mouse events, or posted messages — never as raw bytes.</summary>
     public Func<KeyEvent, bool>? OnKey { get; set; }
 
     private readonly KeyParser _keyParser = new();
-    private readonly List<byte> _rawBatch = new(16);
 
     public AnimationScheduler Scheduler => _scheduler;
 
@@ -841,12 +838,8 @@ public sealed class App : IDisposable
         _pacer.MarkFpsSample();
 
         // 1) input: raw bytes → parsed key events (arrows, enter, chars)
-        _rawBatch.Clear();
         while (_terminal.TryReadInput(out byte b))
-        {
             _keyParser.Feed(b);
-            _rawBatch.Add(b);
-        }
 
         // 1b) thread-safe ingress: intents posted from effects / background
         //     threads join the same vocabulary as keys and clicks, in the
@@ -916,12 +909,6 @@ public sealed class App : IDisposable
 
         while (_running && _keyParser.TryReadMouse(out var mouseEvent))
             RouteMouse(ToCellCoords(mouseEvent));
-
-        for (int i = 0; i < _rawBatch.Count && _running; i++)
-        {
-            if (OnInput is { } handler && !handler(_rawBatch[i]))
-                _running = false;
-        }
 
         bool relayoutThisFrame = false;
 

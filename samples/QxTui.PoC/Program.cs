@@ -70,10 +70,10 @@ var app = new App(terminal, root, targetFps: 165)
     .AddWidget(stats);
 stats.Attach(app);
 
-app.OnInput = b =>
+app.OnKey = ev =>
 {
-    if (b is (byte)'q' or 3) { app.Quit(); return false; } // q or Ctrl-C
-    if (b is (byte)'r') stats.Invalidate();
+    if (ev.Key == Key.Char && ev.Char is 'q' or '\u0003') { app.Quit(); return false; } // q or Ctrl-C
+    if (ev.Key == Key.Char && ev.Char == 'r') stats.Invalidate();
     return true;
 };
 

@@ -3,6 +3,7 @@ using QxTui.Core;
 using QxTui.Layout;
 using QxTui.Reactive;
 using QxTui.Render;
+using QxTui.Terminal;
 
 namespace QxTui.Tests;
 
@@ -223,7 +224,7 @@ public class AppTests
         var app = new App(term, root, targetFps: 60);
         app.AddWidget(widget);
         app.Scheduler.Every(TimeSpan.FromMilliseconds(100), _ => widget.Invalidate());
-        app.OnInput = b => { app.Quit(); return false; };
+        app.OnKey = ev => { app.Quit(); return false; };
 
         var runTask = Task.Run(() => app.Run());
         Thread.Sleep(450);
@@ -247,7 +248,7 @@ public class AppTests
 
         var (app, term, _) = MakeApp(root, [widget]);
         bool sawQ = false;
-        app.OnInput = b => { sawQ = b == (byte)'q'; return !sawQ; };
+        app.OnKey = ev => { sawQ = ev.Key == Key.Char && ev.Char == 'q'; return !sawQ; };
 
         term.QueueInput((byte)'q');
         app.Run(); // must return, not hang

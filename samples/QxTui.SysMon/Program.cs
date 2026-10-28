@@ -60,14 +60,14 @@ app.AddWidget(header)
    .AddWidget(procs)
    .AddWidget(footer);
 
-app.OnInput = b =>
+app.OnKey = ev =>
 {
-    switch (b)
+    switch (ev.Key)
     {
-        case (byte)'q' or 3:
+        case Key.Char when ev.Char is 'q' or '\u0003': // q or Ctrl-C
             app.Quit();
             return false;
-        case (byte)'p':
+        case Key.Char when ev.Char is 'p':
             procs.Paused = !procs.Paused;
             procs.Invalidate();
             return true;

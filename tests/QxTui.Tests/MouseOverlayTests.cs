@@ -294,7 +294,7 @@ public class ModalActionTests
         using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
 
         app.PushOverlay(new ModalWidget("t", () => ["x"], dim: false,
-            actions: [("go", () => hits++)]));
+            chips: [new ChipAction("go", Act: () => hits++)]));
 
         term.QueueInput((byte)'1');
         app.RunFrame();
@@ -316,7 +316,7 @@ public class ModalActionTests
         app.RunFrame();
 
         var modal = new ModalWidget("t", () => ["x"], dim: false,
-            actions: [("go", () => hits++)]);
+            chips: [new ChipAction("go", Act: () => hits++)]);
         app.PushOverlay(modal);
         app.RunFrame();
 

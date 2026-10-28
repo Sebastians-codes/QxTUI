@@ -311,8 +311,9 @@ public sealed class KeyParser
             case 0x08:
                 _keys.Enqueue(KeyEvent.Of(Key.Backspace));
                 break;
-            case 3: // Ctrl-C
-                _keys.Enqueue(KeyEvent.OfChar('c'));
+            case 3: // Ctrl-C: keep it distinguishable from a plain 'c' so
+                    // OnKey handlers can treat it as interrupt (ETX char)
+                _keys.Enqueue(KeyEvent.OfChar('\u0003'));
                 break;
             default:
                 _keys.Enqueue(KeyEvent.OfChar((char)b));

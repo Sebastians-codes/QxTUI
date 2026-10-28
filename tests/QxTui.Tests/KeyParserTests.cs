@@ -78,9 +78,11 @@ public class KeyParserTests
     }
 
     [Fact]
-    public void CtrlC_IsCharC()
+    public void CtrlC_IsInterruptChar_NotPlainC()
     {
+        // Ctrl-C must stay distinguishable from a typed 'c' now that raw
+        // byte input is gone: OnKey handlers match '\u0003' for interrupt
         var events = Feed("\x3");
-        Assert.Equal(KeyEvent.OfChar('c'), events.Single());
+        Assert.Equal(KeyEvent.OfChar('\u0003'), events.Single());
     }
 }

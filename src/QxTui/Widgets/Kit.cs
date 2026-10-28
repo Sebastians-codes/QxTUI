@@ -229,23 +229,17 @@ public sealed class ModalWidget : Widget
 
     /// <param name="dim">Dim everything behind the box (classic modal).
     /// false = floating popup over live content.</param>
-    /// <param name="actions">Button row inside the box: clickable AND
-    /// bound to keys 1..n while the modal is open.</param>
+    /// <param name="chips">Button row inside the box: clickable AND bound
+    /// to keys 1..n while the modal is open. Each chip is either pure
+    /// intent (<c>Msg</c>: the modal emits, the app decides) or app policy
+    /// (<c>Act</c>: a closure at the composition root).</param>
     public ModalWidget(string title, Func<string[]> lines, bool dim = true,
-        (string Label, Action Act)[]? actions = null)
-        : this(title, lines, dim, actions is null ? []
-               : Array.ConvertAll(actions, a => new ChipAction(a.Label, Act: a.Act)))
-    { }
-
-    /// <summary>Chips as pure intent: no closures inside the modal — it
-    /// emits messages and any app can host it.</summary>
-    public ModalWidget(string title, Func<string[]> lines, bool dim,
-        ChipAction[] chips)
+        ChipAction[]? chips = null)
     {
         _title = title;
         _lines = lines;
         _dim = dim;
-        _actions = chips;
+        _actions = chips ?? [];
         Clickable = true;
         CapturesMouse = true; // title-bar drags survive leaving the box
         BlocksBaseRendering = dim; // floating popups keep the background live
