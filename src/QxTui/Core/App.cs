@@ -349,6 +349,9 @@ public sealed class App : IDisposable
     public Widget? Overlay => _overlays.Count > 0 ? _overlays[^1] : null;
     private readonly List<Widget> _overlays = [];
 
+    internal int OverlayCount => _overlays.Count;
+    internal Widget OverlayAt(int i) => _overlays[i];
+
     /// <summary>Show a modal on top of everything. It receives keys first
     /// (HandleKey) and all mouse events; render order puts it last = top.
     /// Compositing: the overlay paints into its OWN layer buffer, so the

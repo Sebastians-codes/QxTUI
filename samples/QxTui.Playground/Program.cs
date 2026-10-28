@@ -314,6 +314,42 @@ sparkCol.AddChild(sineSpark); sineSpark.Node.Height = 2;
 sparkCol.AddChild(walkLabel); walkLabel.Node.Height = 1;
 sparkCol.AddChild(walkSpark); walkSpark.Node.Height = 2;
 
+// ---- kit controls showcase: the new everyday controls, bound to signals
+var controlsCol = new ContainerWidget();
+controlsCol.Node.Direction = FlexDirection.Column;
+controlsCol.Node.Gap = 1;
+controlsCol.Node.Grow = 2f;
+widgetsPage.AddChild(controlsCol);
+
+var darkMode = new Signal<bool>(true);
+var mode = new Signal<int>(1);
+var choice = new Signal<int>(0);
+var load = new Signal<float>(0.35f);
+app.Scheduler.Animate(load, 1f,
+    new Transition(TimeSpan.FromSeconds(4), Easing.Linear, RepeatMode.Reverse));
+
+var controlsPanel = new PanelWidget("controls");
+controlsPanel.Node.Grow = 1f;
+controlsCol.AddChild(controlsPanel);
+var controlStack = new ContainerWidget();
+controlStack.Node.Direction = FlexDirection.Column;
+controlStack.Node.Gap = 1;
+controlsPanel.AddChild(controlStack);
+controlStack.AddChild(new CheckboxWidget(darkMode, "dark mode"));
+controlStack.AddChild(new SegmentedWidget(mode, "day", "night", "auto"));
+controlStack.AddChild(new SelectWidget(choice, "alpha", "beta", "gamma"));
+var busyRow = new ContainerWidget();
+busyRow.Node.Direction = FlexDirection.Row;
+busyRow.Node.Gap = 1;
+busyRow.Node.Height = 1;
+controlStack.AddChild(busyRow);
+busyRow.AddChild(new SpinnerWidget());
+busyRow.AddChild(new ProgressBarWidget(load).Grow(1));
+controlStack.AddChild(new ButtonWidget(() => " toast ", style: ButtonStyle.Rounded)
+{
+    EmitOnClick = new ToastMsg("saved ✓"),
+});
+
 var textPage = new ContainerWidget();
 textPage.Node.Direction = FlexDirection.Column;
 textPage.Node.Gap = 1;
@@ -399,6 +435,7 @@ void CycleTheme()
 app.OnMessage<FpsMsg>(m => app.SetTargetFps(m.Value));
 app.OnMessage<ThemeMsg>(_ => CycleTheme());
 app.OnMessage<OpenPopupMsg>(_ => app.PushOverlay(MakePopup()));
+app.OnMessage<ToastMsg>(m => app.Toast(m.Text));
 
 int[] fpsPresets = [30, 60, 120, 240, 480, 1000];
 
@@ -463,3 +500,4 @@ return 0;
 internal record FpsMsg(int Value);
 internal record ThemeMsg;
 internal record OpenPopupMsg;
+internal record ToastMsg(string Text);
