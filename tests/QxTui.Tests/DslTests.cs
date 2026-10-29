@@ -38,9 +38,13 @@ public class DslTests
         Assert.Equal(aNode.Rect, a.Rect);
         Assert.Equal(bNode.Rect, b.Rect);
         Assert.Equal(cNode.Rect, c.Rect);
-        // row's intrinsic height = its gap (2); grow child takes the rest
-        Assert.Equal(new Rect(0, 4, 40, 2), dsl.Children[1].Rect);
-        Assert.Equal(new Rect(0, 7, 40, 13), dsl.Children[2].Rect);
+        // row's intrinsic HEIGHT is 0: neither child carries a height and
+        // the row's gap is horizontal. (It used to report the gap as its
+        // height — the crossed-axis confusion SumIntrinsicMain had, where
+        // a row-in-a-column summed its own main axis instead of the
+        // parent's.) The grow child therefore starts one gap later.
+        Assert.Equal(new Rect(0, 4, 40, 0), dsl.Children[1].Rect);
+        Assert.Equal(new Rect(0, 5, 40, 15), dsl.Children[2].Rect);
     }
 
     [Fact]

@@ -17,13 +17,33 @@ namespace QxTui.Widgets;
 /// </summary>
 public sealed class TreeView : Widget
 {
-    public TreeNode Root { get; }
+    private TreeNode _root;
+
+    /// <summary>The tree model. Swapping it resets cursor and scroll —
+    /// real data arrives asynchronously (Effect → message), so a tree
+    /// must accept a new model long after mount.</summary>
+    public TreeNode Root
+    {
+        get => _root;
+        set
+        {
+            _root = value;
+            _selected = 0;
+            Offset = 0;
+            _lastRenderedOffset = 0;
+            Invalidate();
+        }
+    }
 
     /// <summary>Fires on Enter over a leaf (events become messages).</summary>
     public event Action<TreeNode>? Activated;
 
     /// <summary>Fires after any expand/collapse.</summary>
     public event Action<TreeNode>? Toggled;
+
+    /// <summary>Fires when the cursor actually MOVES via user navigation
+    /// (keys or row click) — what detail panes follow.</summary>
+    public event Action<TreeNode>? SelectionChanged;
 
     public bool ShowScrollbar { get; set; } = true;
 
@@ -39,7 +59,7 @@ public sealed class TreeView : Widget
 
     public TreeView(TreeNode root)
     {
-        Root = root;
+        _root = root; // direct: the setter wouldn't satisfy _root's CS8618 analysis
         Focusable = true;
         Clickable = true;
         CapturesMouse = true; // thumb drags survive leaving the widget
@@ -89,6 +109,18 @@ public sealed class TreeView : Widget
         Invalidate();
     }
 
+    /// <summary>Clamp → dedupe → notify: the single funnel for user
+    /// navigation so SelectionChanged fires exactly on real moves.</summary>
+    private void MoveSelection(int i)
+    {
+        Flatten();
+        i = Math.Clamp(i, 0, Math.Max(0, _flat.Count - 1));
+        if (i == _selected) return;
+        _selected = i;
+        SelectionChanged?.Invoke(_flat[i]);
+        EnsureVisible();
+    }
+
     private void Toggle(TreeNode n)
     {
         if (!n.IsParent) return;
@@ -106,31 +138,26 @@ public sealed class TreeView : Widget
         switch (ev.Key)
         {
             case Key.Down:
-                _selected = Math.Min(_flat.Count - 1, _selected + 1);
-                EnsureVisible();
+                MoveSelection(_selected + 1);
                 return true;
             case Key.Up:
-                _selected = Math.Max(0, _selected - 1);
-                EnsureVisible();
+                MoveSelection(_selected - 1);
                 return true;
             case Key.Left:
                 if (node.IsParent && node.Expanded) Toggle(node);
                 else
                 {
                     int p = ParentIndexOf(_selected);
-                    if (p >= 0) { _selected = p; EnsureVisible(); }
+                    if (p >= 0) MoveSelection(p);
                 }
                 return true;
             case Key.Right:
                 if (node.IsParent && !node.Expanded) Toggle(node);
                 else if (_selected + 1 < _flat.Count && _depth[_selected + 1] > _depth[_selected])
-                {
-                    _selected++; // first child
-                    EnsureVisible();
-                }
+                    MoveSelection(_selected + 1); // first child
                 return true;
-            case Key.Home: _selected = 0; EnsureVisible(); return true;
-            case Key.End: _selected = _flat.Count - 1; EnsureVisible(); return true;
+            case Key.Home: MoveSelection(0); return true;
+            case Key.End: MoveSelection(_flat.Count - 1); return true;
             case Key.Enter:
                 if (node.IsParent) Toggle(node);
                 else Activated?.Invoke(node);
@@ -209,9 +236,21 @@ public sealed class TreeView : Widget
         Flatten();
         int i = Offset + local.Y;
         if (i < 0 || i >= _flat.Count || local.X >= Rect.W - TrackW) return;
-        _selected = i;
-        if (local.X == _depth[i] * 2) Toggle(_flat[i]); // exactly on the glyph
+        if (local.X == _depth[i] * 2)
+        {
+            if (i != _selected) MoveSelection(i);
+            Toggle(_flat[i]); // exactly on the glyph
+        }
+        else MoveSelection(i);
         Invalidate();
+    }
+
+    /// <summary>Double-click opens leaves (the file-manager gesture);
+    /// parents are already toggled by their glyph on single click.</summary>
+    public override void OnDoubleClick(Point local)
+    {
+        if (SelectedNode is { IsParent: false } leaf)
+            Activated?.Invoke(leaf);
     }
 
     private int ThumbH()

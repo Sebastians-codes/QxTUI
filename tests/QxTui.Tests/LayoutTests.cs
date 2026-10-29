@@ -418,3 +418,52 @@ public class ChildInsetTests
         Assert.Equal(new Rect(0, 0, 20, 10), child.Rect);
     }
 }
+
+public class CrossAxisIntrinsicTests
+{
+    [Fact]
+    public void RowInsideColumn_ReportsHeight_NotItsChildrensWidths()
+    {
+        // regression: a Row nested in a Column reported its WIDTH as its
+        // hypothetical height (SumIntrinsicMain used the node's own axis).
+        // A wide child inflated the hypothetical past the viewport, the
+        // column flipped into the shrink path, and every sibling after the
+        // row — including fixed-height ones — was squeezed to zero.
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var top = new LayoutNode { Height = 1 };
+        var rowNode = new LayoutNode { Direction = FlexDirection.Row, Grow = 3f };
+        rowNode.Add(new LayoutNode { Width = 200 }); // width must NOT leak into height
+        var growAfter = new LayoutNode { Grow = 2f };
+        var bottom = new LayoutNode { Height = 1 };
+        root.Add(top);
+        root.Add(rowNode);
+        root.Add(growAfter);
+        root.Add(bottom);
+
+        LayoutNode.Compute(root, 100, 34);
+
+        Assert.Equal(1, top.Rect.H);
+        Assert.Equal(1, bottom.Rect.H);
+        Assert.Equal(34, top.Rect.H + rowNode.Rect.H + growAfter.Rect.H + bottom.Rect.H);
+        Assert.True(rowNode.Rect.H > growAfter.Rect.H); // 3:2 split of the free space
+        Assert.Equal(34, bottom.Rect.Bottom);           // nothing overflows the viewport
+    }
+
+    [Fact]
+    public void NestedContainerIntrinsic_IncludesChildInset()
+    {
+        // a panel-style container (ChildInset frame) contributes its ring
+        // to the hypothetical size: a fixed sibling after it keeps its room
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var panel = new LayoutNode { Direction = FlexDirection.Column, ChildInset = 1 };
+        panel.Add(new LayoutNode { Height = 3 });
+        var after = new LayoutNode { Height = 2 };
+        root.Add(panel);
+        root.Add(after);
+
+        LayoutNode.Compute(root, 20, 20);
+
+        Assert.Equal(5, panel.Rect.H); // 3 content + 2 ring
+        Assert.Equal(2, after.Rect.H);
+    }
+}

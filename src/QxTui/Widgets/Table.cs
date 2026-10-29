@@ -39,6 +39,12 @@ public sealed class Table : Widget
     /// become messages — apps turn this into an intent.</summary>
     public event Action<int, int>? Activated;
 
+    /// <summary>Fires when the cursor cell actually MOVES via user
+    /// navigation (keys or mouse). Setting SelectedRow/SelectedCol
+    /// directly does not fire — this reports the user, which is what
+    /// detail panes follow.</summary>
+    public event Action<int, int>? SelectionChanged;
+
     private bool _dragThumb;
     private int _grabDelta;         // cursor offset inside the thumb at grab
     private int _grabDeltaPx;       // same, in pixels (sub-cell drags)
@@ -83,12 +89,20 @@ public sealed class Table : Widget
             if (c.Width is int w) fixedSum += Math.Max(0, w);
             else weightSum += Math.Max(0.01f, c.Weight);
         }
-        int flex = Math.Max(0, contentW - seps - fixedSum);
+
+        // narrow rects: squeeze fixed columns proportionally instead of
+        // letting them overflow (every column keeps ≥1 cell) — a real app
+        // meets narrow terminals, and clipped-away columns are unreadable
+        float scale = 1f;
+        if (fixedSum + seps > contentW && fixedSum > 0)
+            scale = Math.Max(0.05f, (float)Math.Max(n, contentW - seps) / fixedSum);
+
+        int flex = Math.Max(0, contentW - seps - (int)(fixedSum * scale));
         int lastWeight = -1, flexUsed = 0;
         for (int i = 0; i < n; i++)
         {
             var c = Columns[i];
-            if (c.Width is int w) _widths[i] = Math.Max(0, w);
+            if (c.Width is int w) _widths[i] = Math.Max(1, (int)(Math.Max(0, w) * scale));
             else
             {
                 _widths[i] = weightSum <= 0 ? 1 : Math.Max(1, (int)(flex * Math.Max(0.01f, c.Weight) / weightSum));
@@ -122,6 +136,19 @@ public sealed class Table : Widget
         Invalidate();
     }
 
+    /// <summary>Clamp → dedupe → notify: the single funnel for user
+    /// navigation so SelectionChanged fires exactly on real moves.</summary>
+    private void MoveSelection(int row, int col)
+    {
+        row = Math.Clamp(row, 0, Math.Max(0, RowCount() - 1));
+        col = Math.Clamp(col, 0, Math.Max(0, Columns.Count - 1));
+        if (row == SelectedRow && col == SelectedCol) return;
+        SelectedRow = row;
+        SelectedCol = col;
+        SelectionChanged?.Invoke(row, col);
+        Invalidate();
+    }
+
     public override bool HandleKey(KeyEvent ev)
     {
         if (!Focused) return false;
@@ -130,25 +157,23 @@ public sealed class Table : Widget
         {
             case Key.Down:
                 // selection outside the window jumps into it first
-                SelectedRow = SelectedRow < Offset ? Offset : Math.Min(total - 1, SelectedRow + 1);
+                MoveSelection(SelectedRow < Offset ? Offset : SelectedRow + 1, SelectedCol);
                 EnsureVisible();
                 return true;
             case Key.Up:
-                SelectedRow = SelectedRow >= Offset + rows ? Offset + rows - 1 : Math.Max(0, SelectedRow - 1);
+                MoveSelection(SelectedRow >= Offset + rows ? Offset + rows - 1 : SelectedRow - 1, SelectedCol);
                 EnsureVisible();
                 return true;
             case Key.Left:
-                SelectedCol = Math.Max(0, SelectedCol - 1);
-                Invalidate();
+                MoveSelection(SelectedRow, SelectedCol - 1);
                 return true;
             case Key.Right:
-                SelectedCol = Math.Min(Math.Max(0, Columns.Count - 1), SelectedCol + 1);
-                Invalidate();
+                MoveSelection(SelectedRow, SelectedCol + 1);
                 return true;
             case Key.PageDown: ScrollTo(Offset + rows); return true;
             case Key.PageUp: ScrollTo(Offset - rows); return true;
-            case Key.Home: ScrollTo(0); SelectedRow = 0; return true;
-            case Key.End: ScrollTo(total); SelectedRow = total - 1; return true;
+            case Key.Home: ScrollTo(0); MoveSelection(0, SelectedCol); return true;
+            case Key.End: ScrollTo(total); MoveSelection(total - 1, SelectedCol); return true;
             case Key.Enter:
                 if (total > 0)
                     Activated?.Invoke(Math.Clamp(SelectedRow, 0, total - 1),
@@ -156,6 +181,16 @@ public sealed class Table : Widget
                 return true;
             default: return false;
         }
+    }
+
+    /// <summary>Double-click = Enter: activate the cursor cell (the press
+    /// of the first click already moved the cursor there).</summary>
+    public override void OnDoubleClick(Point local)
+    {
+        int total = RowCount();
+        if (total > 0)
+            Activated?.Invoke(Math.Clamp(SelectedRow, 0, total - 1),
+                Math.Clamp(SelectedCol, 0, Math.Max(0, Columns.Count - 1)));
     }
 
     public override bool OnMouse(MouseEvent ev)
@@ -202,7 +237,7 @@ public sealed class Table : Widget
                     // header press: pick the column, keep the row
                     LayoutColumns(Math.Max(1, r.W - TrackW));
                     int c = ColumnAt(ev.X - r.X);
-                    if (c >= 0) { SelectedCol = c; Invalidate(); }
+                    if (c >= 0) MoveSelection(SelectedRow, c);
                     return false;
                 }
                 // body press: select the cell under the cursor
@@ -210,10 +245,8 @@ public sealed class Table : Widget
                 int row = Offset + (ev.Y - trackTop);
                 if (row < RowCount())
                 {
-                    SelectedRow = row;
                     int col = ColumnAt(ev.X - r.X);
-                    if (col >= 0) SelectedCol = col;
-                    Invalidate();
+                    MoveSelection(row, col >= 0 ? col : SelectedCol);
                 }
                 return false; // let the App focus us (Clickable path)
 

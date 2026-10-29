@@ -429,11 +429,27 @@ public sealed class App : IDisposable
         // (the X of a lower modal closes THAT modal, not the top one)
         for (int i = _overlays.Count - 1; i >= 0; i--)
             if (_overlays[i].HitTest(x, y))
-                return _overlays[i];
+                return DeepestHit(_overlays[i], x, y);
         for (int i = _widgets.Count - 1; i >= 0; i--)
             if (_widgets[i].HitTest(x, y))
                 return _widgets[i];
         return null;
+    }
+
+    /// <summary>The widget that actually owns a point inside a subtree:
+    /// children paint after their parent (pre-order), so the LAST child
+    /// whose HitTest matches owns the point. Without this descent an
+    /// overlay root swallowed every event aimed at its hosted body —
+    /// a modal's inner list could never scroll or click.</summary>
+    private static Widget DeepestHit(Widget w, int x, int y)
+    {
+        for (int i = w.Children.Count - 1; i >= 0; i--)
+        {
+            var c = w.Children[i];
+            if (c.HitTest(x, y))
+                return DeepestHit(c, x, y);
+        }
+        return w;
     }
 
     private void ResetHover()
@@ -661,14 +677,45 @@ public sealed class App : IDisposable
         if (ev.Kind == MouseKind.Release &&
             ReferenceEquals(clicked, target) && target.Clickable)
         {
-            target.OnClick(new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y));
+            var local = new Point(ev.X - target.Rect.X, ev.Y - target.Rect.Y);
+            target.OnClick(local);
             target.FlashPressed(); // hold the pushed-down look ~120ms
             target.Invalidate();
+
+            // double-click: a second press+release on the same widget
+            // within the window and within a cell = the "open this"
+            // gesture. The first click's single-click semantics already
+            // applied (select/focus) — the double adds the activation.
+            bool isDouble = ReferenceEquals(target, _lastClickTarget) &&
+                _scheduler.Time.Now - _lastClickTs <= DoubleClickWindow &&
+                Math.Abs(ev.X - _lastClickX) + Math.Abs(ev.Y - _lastClickY) <= 1;
+            if (isDouble)
+            {
+                _lastClickTarget = null; // a third click starts a new pair
+                target.OnDoubleClick(local);
+            }
+            else
+            {
+                _lastClickTarget = target;
+                _lastClickTs = _scheduler.Time.Now;
+                _lastClickX = ev.X;
+                _lastClickY = ev.Y;
+            }
         }
     }
 
     private Widget? _pressed;
     private Widget? _resizing;
+
+    // double-click detection: second click on the same widget, inside the
+    // window and inside a cell, is the "open this" gesture
+    private Widget? _lastClickTarget;
+    private TimeSpan _lastClickTs = TimeSpan.MinValue;
+    private int _lastClickX, _lastClickY;
+
+    /// <summary>Max gap between two clicks that still counts as a
+    /// double-click (app clock — virtual-time testable).</summary>
+    public TimeSpan DoubleClickWindow { get; set; } = TimeSpan.FromMilliseconds(450);
 
     // right-button gesture state: the press arms, motion commits a resize,
     // a still release opens the context menu

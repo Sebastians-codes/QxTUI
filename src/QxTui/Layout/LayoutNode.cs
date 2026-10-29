@@ -437,25 +437,50 @@ public sealed class LayoutNode
 
     private static int SumIntrinsicMain(LayoutNode node, bool parentRow, int availableCross)
     {
-        // Shrink-to-fit for nested containers without explicit main size:
-        // lay out hypothetically in a scratch pass is overkill for v1 — sum
-        // children's intrinsic mains + gaps, clamped to available.
+        // Intrinsic size of a nested container WITHOUT an explicit main
+        // size, measured along the PARENT's main axis (that is the axis
+        // the hypothetical size feeds). A row-inside-a-column asks the
+        // container for its HEIGHT — summing the container's own main
+        // axis (widths, in that case) inflated the hypothetical size and
+        // flipped the parent into the shrink path, zeroing every grow
+        // sibling after it. Aligned axes sum (+gaps); crossed axes take
+        // the max. ChildInset frames are part of the intrinsic size, and
+        // nested containers recurse. Leaves without Measure stay 0 —
+        // flex decides them.
+        int inset2 = node.ChildInset * 2;
         if (node._children is not { Count: > 0 } kids)
-            return 0;
+            return inset2;
 
-        bool row = node.Direction == FlexDirection.Row;
-        int total = node.Gap * (kids.Count - 1);
+        bool aligned = (node.Direction == FlexDirection.Row) == parentRow;
+        int sum = aligned ? node.Gap * (kids.Count - 1) : 0;
+        int max = 0;
         foreach (var kid in kids)
         {
-            int? fixedMain = row ? kid.Width : kid.Height;
-            if (fixedMain is int f) { total += f; continue; }
-            if (kid.Basis is float b) { total += (int)b; continue; }
-            if (kid.Measure is { } m)
-            {
-                var s = m(new Size(availableCross, availableCross));
-                total += row ? s.Width : s.Height;
-            }
+            int v = IntrinsicAlong(kid, parentRow, availableCross);
+            if (aligned) sum += v;
+            else max = Math.Max(max, v);
         }
-        return total;
+        return (aligned ? sum : max) + inset2;
+    }
+
+    /// <summary>One child's intrinsic extent along the given axis:
+    /// fixed &gt; basis (only meaningful along the child's OWN main axis)
+    /// &gt; Measure &gt; nested container &gt; 0.</summary>
+    private static int IntrinsicAlong(LayoutNode kid, bool alongRow, int availableCross)
+    {
+        int? fixedMain = alongRow ? kid.Width : kid.Height;
+        if (fixedMain is int f) return f;
+
+        bool kidAligned = (kid.Direction == FlexDirection.Row) == alongRow;
+        if (kidAligned && kid.Basis is float b) return Math.Max(0, (int)b);
+
+        if (kid.Measure is { } m)
+        {
+            var s = m(new Size(availableCross, availableCross));
+            return alongRow ? s.Width : s.Height;
+        }
+        if (kid._children is { Count: > 0 })
+            return SumIntrinsicMain(kid, alongRow, availableCross);
+        return 0;
     }
 }

@@ -265,6 +265,13 @@ public abstract class Widget
     /// <summary>Click at widget-local coordinates (Clickable must be true).</summary>
     public virtual void OnClick(Point local) { }
 
+    /// <summary>Second click on this widget within App.DoubleClickWindow
+    /// and within one cell of the first — the "open this" gesture. The
+    /// first click's effects (select, focus) already happened; this adds
+    /// the activation. Default no-op; lists and trees route it to their
+    /// Activated event.</summary>
+    public virtual void OnDoubleClick(Point local) { }
+
     /// <summary>First chance at key input (overlays use this for modality).
     /// Return true to consume.</summary>
     public virtual bool HandleKey(KeyEvent ev) => false;

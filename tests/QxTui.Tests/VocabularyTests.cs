@@ -40,6 +40,9 @@ public class VocabularyTests
         return false;
     }
 
+    internal static Table MakeTablePublic(int rows = 3) => MakeTable(rows);
+    internal static TreeView MakeTreePublic() => MakeTree();
+
     private static Table MakeTable(int rows = 3)
     {
         var t = new Table(() => rows,
@@ -140,6 +143,49 @@ public class VocabularyTests
         Assert.True(BackContains(app, "readme.md"));
         Assert.True(BackContains(app, "▾")); // expanded parent glyph
         Assert.True(BackContains(app, "·")); // leaf glyph
+    }
+
+    [Fact]
+    public void Table_SelectionChanged_FiresOnNavigationOnly()
+    {
+        var table = MakeTable(10);
+        var (app, term, _) = MakeApp(UI.Column(0, table));
+        app.RunFrame();
+        app.Focus(table);
+
+        var moves = new List<(int Row, int Col)>();
+        table.SelectionChanged += (r, c) => moves.Add((r, c));
+
+        Mouse(term, "\x1b[B"); // Down → row 1
+        Mouse(term, "\x1b[C"); // Right → col 1
+        Mouse(term, "\x1b[C"); // Right again: clamped at last col → no move
+        app.RunFrame();
+
+        Assert.Equal([(1, 0), (1, 1)], moves);
+
+        table.SelectedRow = 5; // direct set: navigation event must NOT fire
+        Assert.Equal(2, moves.Count);
+    }
+
+    [Fact]
+    public void Tree_SelectionChanged_FiresOnMoves_NotToggles()
+    {
+        var tv = MakeTree();
+        var (app, term, _) = MakeApp(UI.Column(0, tv));
+        app.RunFrame();
+        app.Focus(tv);
+
+        var seen = new List<string>();
+        tv.SelectionChanged += n => seen.Add(n.Label);
+
+        Mouse(term, "\x1b[B"); // Down → src
+        app.RunFrame();
+        Mouse(term, "\x1b[D"); // Left → collapse (no move)
+        app.RunFrame();
+        Mouse(term, "\x1b[B"); // Down → readme.md (src collapsed)
+        app.RunFrame();
+
+        Assert.Equal(["src", "readme.md"], seen);
     }
 
     [Fact]
@@ -484,5 +530,133 @@ public class VocabularyTests
         term.QueueInput((byte)' '); // and off again
         app.RunFrame();
         Assert.DoesNotContain(0, on.Value);
+    }
+}
+
+public class DoubleClickTests
+{
+    private sealed class DblProbe : Widget
+    {
+        public int Doubles;
+        public Point LastLocal;
+        public override void OnDoubleClick(Point local)
+        {
+            Doubles++;
+            LastLocal = local;
+        }
+        public override void Render(CellBuffer buffer) { }
+    }
+
+    private static (App app, FakeTerminal term, VirtualTimeSource clock) MakeApp(
+        LayoutNode root, int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var clock = new VirtualTimeSource();
+        var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+        return (app, term, clock);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void SecondClickWithinWindow_FiresOnce_SlowPairDoesNot()
+    {
+        var probe = new DblProbe { Clickable = true };
+        probe.Node.Height = 3;
+        var (app, term, clock) = MakeApp(UI.Column(0, probe));
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;5;2M\x1b[<0;5;2m"); // click 1
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;5;2M\x1b[<0;5;2m"); // click 2 → double
+        app.RunFrame();
+        Assert.Equal(1, probe.Doubles);
+        Assert.Equal(new Point(4, 1), probe.LastLocal);
+
+        clock.Advance(TimeSpan.FromSeconds(2));   // past the window
+        Mouse(term, "\x1b[<0;5;2M\x1b[<0;5;2m"); // slow single
+        app.RunFrame();
+        Assert.Equal(1, probe.Doubles);
+    }
+
+    [Fact]
+    public void ClicksFarApart_AreNotADouble()
+    {
+        var probe = new DblProbe { Clickable = true };
+        probe.Node.Height = 3;
+        probe.Node.Width = 30;
+        var (app, term, _) = MakeApp(UI.Column(0, probe));
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<0;5;2M\x1b[<0;5;2m");
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;25;2M\x1b[<0;25;2m"); // >1 cell away
+        app.RunFrame();
+        Assert.Equal(0, probe.Doubles);
+    }
+
+    [Fact]
+    public void Table_DoubleClick_ActivatesTheCursorCell()
+    {
+        var table = VocabularyTests.MakeTablePublic(5);
+        (int Row, int Col)? act = null;
+        table.Activated += (r, c) => act = (r, c);
+        var (app, term, _) = MakeApp(UI.Column(0, table));
+        app.RunFrame();
+
+        // header y0-1, body from y2: SGR y3 = row 0; x6 lands in col 0
+        Mouse(term, "\x1b[<0;6;3M\x1b[<0;6;3m");
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;6;3M\x1b[<0;6;3m");
+        app.RunFrame();
+        Assert.Equal((0, 0), act);
+    }
+
+    [Fact]
+    public void Tree_DoubleClickOnLeaf_Activates_ParentDoesNot()
+    {
+        var tv = VocabularyTests.MakeTreePublic();
+        TreeNode? act = null;
+        tv.Activated += n => act = n;
+        var (app, term, _) = MakeApp(UI.Column(0, tv));
+        app.RunFrame();
+
+        // flat: proj0 src1 main.cs2 lib.cs3 readme.md4 → SGR y5
+        Mouse(term, "\x1b[<0;6;5M\x1b[<0;6;5m");
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;6;5M\x1b[<0;6;5m");
+        app.RunFrame();
+        Assert.Equal("readme.md", act?.Label);
+
+        // parent row (src, y2): double-click must NOT activate
+        act = null;
+        Mouse(term, "\x1b[<0;6;2M\x1b[<0;6;2m");
+        app.RunFrame();
+        Mouse(term, "\x1b[<0;6;2M\x1b[<0;6;2m");
+        app.RunFrame();
+        Assert.Null(act);
+    }
+
+    [Fact]
+    public void ModalBody_ReceivesWheel_InsteadOfTheModal()
+    {
+        // regression: TopMostAt returned the overlay ROOT for any point in
+        // its box, so a hosted body never saw a mouse event (no scrolling)
+        var body = new ListView(() => 100);
+        var modal = new Modal("t", () => [], dim: false) { Body = body, BodyRows = 6 };
+        var (app, term, _) = MakeApp(UI.Column(0, new ParserFuzzProbe()), w: 40, h: 20);
+        app.PushOverlay(modal);
+        app.RunFrame(); // modal render hands the body its rect
+        app.RunFrame();
+        Assert.True(body.Rect.H > 0);
+
+        var r = body.Rect;
+        Mouse(term, $"\x1b[<65;{r.X + 3 + 1};{r.Y + 2 + 1}M"); // wheel down inside body
+        app.RunFrame();
+        Assert.Equal(3, body.Offset);
     }
 }

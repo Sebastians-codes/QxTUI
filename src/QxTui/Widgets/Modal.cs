@@ -85,8 +85,8 @@ public sealed class Modal : Widget
 
     /// <summary>Right-drag resize pins these; null = size to content.
     /// Self-invalidating like the offsets.</summary>
-    public int? ForceW { get => _fw; private set { if (_fw == value) return; _fw = value; Invalidate(); } }
-    public int? ForceH { get => _fh; private set { if (_fh == value) return; _fh = value; Invalidate(); } }
+    public int? ForceW { get => _fw; set { if (_fw == value) return; _fw = value; Invalidate(); } }
+    public int? ForceH { get => _fh; set { if (_fh == value) return; _fh = value; Invalidate(); } }
     private int? _fw, _fh;
 
     internal override int ResizeEdgeAt(int x, int y)
