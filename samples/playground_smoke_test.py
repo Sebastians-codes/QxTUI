@@ -59,12 +59,18 @@ script = [
     (16.4, ("resize", 40, 120)),
     (17.0, b"4"),       # tab: virtualized list
     (17.6, b"\x1b[6~"),  # PageDown in list (unfocused: ignored safely)
-    (18.2, b"1"),
-    (19.5, b"q"),
+    (18.2, b"5"),       # tab: data page (table / tree / pickers)
+    (18.8, b"\x1b[<65;40;16M"),  # wheel down over the table
+    (19.2, b"\x1b[<35;40;16M"),  # hover the table → tooltip arms (700ms)
+    (20.3, b"\x1b[<2;40;16M"),   # right-press…
+    (20.5, b"\x1b[<2;40;16m"),   # …still release: context menu opens
+    (20.9, b"\x1b"),              # Esc closes the menu
+    (21.5, b"1"),       # back to widgets
+    (22.8, b"q"),
 ]
 si = 0
 try:
-    while time.time() - start < 26:
+    while time.time() - start < 30:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
             try:
@@ -136,6 +142,13 @@ checks = {
     "ball rooms x3":    "ball 8hz" in text and "ball 30hz" in text and "ball 120hz" in text,
     "rate caps row":    "capped 8 Hz" in text and "capped 120 Hz" in text,
     "popup closes":     "modals swallow" not in screen,
+    "data tab":         " data " in text,
+    "table columns":    "modified" in text,
+    "radio rendered":   "(\u2022)" in text and "date" in text,
+    "toggle chips":     " scrollbar " in text,
+    "tree leaves":      "samples" in text and "\u25b8" in text,
+    "context menu":     "jump to top" in text,
+    "tooltip shown":    "500 fake rows" in text,
     "clean exit":       "\x1b[?1049l" in text,
 }
 

@@ -91,7 +91,7 @@ var filledDemo = new Button(
 };
 
 var help = new Label(() =>
-    " t: theme  [ ]: fps  1-4/click tabs  o/click: popup  Tab: focus  q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
+    " t: theme  [ ]: fps  1-5/click tabs  o/click: popup  Tab: focus  q: quit ", fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
 string[] PopupLines() =>
 [
@@ -401,14 +401,136 @@ listHint.Node.Height = 1;
 listPage.AddChild(bigList);
 bigList.Node.Grow = 1f;
 
+// ---- page 5: data vocabulary — table, tree, pickers, menu, tooltip --------
+
+var dataPage = new Container();
+dataPage.Node.Direction = FlexDirection.Column;
+dataPage.Node.Gap = 1;
+
+var dataHint = new Label(() =>
+    "table: click/arrows pick a cell · Enter toasts it · wheel + thumb scroll · " +
+    "RIGHT-CLICK opens the context menu · hover anything for a tooltip");
+
+// deterministic fake dataset; the radio picks the sort order (state layer:
+// a signal, re-read by the cell provider — no table rebuild, no re-mount)
+const int FileCount = 500;
+string[] kinds = ["rs", "toml", "md", "py", "cs"];
+string Name(int i) => $"file_{i:000}.{kinds[i % kinds.Length]}";
+int Size(int i) => i * 7 % 9973;
+string Modified(int i) => $"2026-{i % 12 + 1:00}-{i % 28 + 1:00}";
+int[][] orders =
+[
+    [.. Enumerable.Range(0, FileCount)],
+    [.. Enumerable.Range(0, FileCount).OrderByDescending(Size)],
+    [.. Enumerable.Range(0, FileCount).OrderBy(Modified).ThenBy(Name)],
+];
+
+var sortKey = new Signal<int>(0);
+var chrome = new Signal<HashSet<int>>([0, 1]); // header + scrollbar on
+
+var files = new Table(() => FileCount,
+    new TableColumn("name", Weight: 2),
+    new TableColumn("kind", Width: 5),
+    new TableColumn("size", Width: 6, Align: ColumnAlign.Right),
+    new TableColumn("modified", Weight: 1))
+{
+    Cell = (r, c) =>
+    {
+        int i = orders[sortKey.Value][r];
+        return c switch
+        {
+            0 => Name(i),
+            1 => kinds[i % kinds.Length],
+            2 => Size(i).ToString(CultureInfo.InvariantCulture),
+            _ => Modified(i),
+        };
+    },
+    Tooltip = "500 fake rows · virtualized: only the visible slice paints",
+};
+files.MenuItems =
+[
+    new MenuItem("toast cursor row", Act: () =>
+        app.Send(new ToastMsg($"row {files.SelectedRow}: {Name(orders[sortKey.Value][files.SelectedRow])}"))),
+    new MenuItem("jump to top", Act: () => files.ScrollTo(0)),
+    new MenuItem("jump to bottom", Act: () => files.ScrollTo(FileCount)),
+    new MenuItem("disabled demo", Enabled: false),
+];
+files.Activated += (r, c) => app.Send(new ToastMsg($"cell {r},{c} = {files.Cell(r, c)}"));
+sortKey.Subscribe(_ => files.Invalidate()); // re-reads the order in Cell
+chrome.Subscribe(set =>
+{
+    files.ShowHeader = set.Contains(0);
+    files.ShowScrollbar = set.Contains(1);
+    files.Invalidate();
+});
+
+// the tree mirrors this repo's new one-component-per-file layout
+var coreDir = new TreeNode("Core");
+coreDir.Add("App.cs"); coreDir.Add("Widget.cs"); coreDir.Add("MenuItem.cs"); coreDir.Add("TooltipBox.cs");
+var widgetsDir = new TreeNode("Widgets");
+widgetsDir.Add("Table.cs"); widgetsDir.Add("TreeView.cs"); widgetsDir.Add("Modal.cs"); widgetsDir.Add("ListView.cs");
+var qxtuiDir = new TreeNode("QxTui");
+qxtuiDir.Add(coreDir); qxtuiDir.Add(widgetsDir);
+var srcDir = new TreeNode("src");
+srcDir.Add(qxtuiDir);
+srcDir.Expanded = false; // collapsed on entry: demos ▸ and keeps samples/docs visible
+var samplesDir = new TreeNode("samples");
+samplesDir.Add("Playground"); samplesDir.Add("SysMon"); samplesDir.Add("Snake");
+var projRoot = new TreeNode("qxtui");
+projRoot.Add(srcDir); projRoot.Add(samplesDir); projRoot.Add("docs");
+
+var tree = new TreeView(projRoot)
+{
+    Tooltip = "project tree · ←/→ collapse/expand · Enter activates leaves",
+};
+tree.Activated += n => app.Send(new ToastMsg(n.Label));
+
+var sortRadio = new RadioGroup(sortKey, "name", "size", "date")
+{
+    Tooltip = "sort order: a signal the table's Cell provider re-reads",
+};
+var chromeToggles = new ToggleGroup(chrome, "header", "scrollbar")
+{
+    Tooltip = "table chrome, toggled live from a Signal<HashSet<int>>",
+};
+
+var topRow = new Container();
+topRow.Node.Direction = FlexDirection.Row;
+topRow.Node.Gap = 1;
+topRow.Node.Height = 5;
+dataPage.AddChild(dataHint); dataHint.Node.Height = 1;
+dataPage.AddChild(topRow);
+
+var sortPanel = new Panel("sort");
+sortPanel.AddChild(sortRadio);
+sortPanel.Node.Width = 12;
+topRow.AddChild(sortPanel);
+var chromePanel = new Panel("chrome");
+chromePanel.AddChild(chromeToggles);
+chromePanel.Node.Width = 24;
+topRow.AddChild(chromePanel);
+var treePanel = new Panel("tree");
+tree.Node.Grow = 1f; // fill the panel's inner box
+treePanel.AddChild(tree);
+treePanel.Node.Grow = 1f;
+topRow.AddChild(treePanel);
+
+var filesPanel = new Panel("files");
+files.Node.Grow = 1f; // fill the panel's inner box
+filesPanel.AddChild(files);
+filesPanel.Node.Grow = 1f;
+filesPanel.Tooltip = "the context menu lives on the table inside";
+dataPage.AddChild(filesPanel);
+
 var router = new Router();
 router.Register("widgets", () => widgetsPage)
       .Register("text", () => textPage)
       .Register("ball", () => ballPage)
-      .Register("list", () => listPage);
+      .Register("list", () => listPage)
+      .Register("data", () => dataPage);
 router.Switch("widgets");
 
-var tabBar = new TabBar(router, ["widgets", "text", "ball", "list"]);
+var tabBar = new TabBar(router, ["widgets", "text", "ball", "list", "data"]);
 
 app.SetRoot(UI.Column(1,
     hud.Height(1),
@@ -472,6 +594,9 @@ app.OnKey = ev =>
             return true;
         case Key.Char when ev.Char is '4':
             router.Switch("list");
+            return true;
+        case Key.Char when ev.Char is '5':
+            router.Switch("data");
             return true;
 
         case Key.Char when ev.Char is 'o' or 'O':
