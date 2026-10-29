@@ -519,6 +519,11 @@ public sealed class App : IDisposable
     {
         _mouseWindowEvents++;
 
+        // any press kills a pending/visible tooltip — clicking the thing
+        // you're reading a hint about means you've read it
+        if (ev.Kind == MouseKind.Press)
+            CancelTooltip();
+
         // opt-in outside-press dismissal (OutsideClickCloses, default off):
         // the first press no overlay above claims AND that lands outside an
         // opt-in overlay's box closes it — and is consumed: while a modal
@@ -542,28 +547,9 @@ public sealed class App : IDisposable
 
         Widget? target = TopMostAt(ev.X, ev.Y);
 
-        // press/release bookkeeping FIRST: widgets may consume the event in
-        // OnMouse (sliders do), and capture/Pressed/flash must still work
-        Widget? clicked = null;
-        if (ev.Kind == MouseKind.Press && target is { Clickable: true })
-        {
-            ReleasePressed();
-            _pressed = target;
-            target.Pressed = true;
-            target.Invalidate();
-        }
-
-        // right-drag on an element's edge/corner = resize gesture
-        if (target is not null && ev.Kind == MouseKind.Press && ev.Button == 2 &&
-            target.Resizable && target.ResizeEdgeAt(ev.X, ev.Y) != 0)
-        {
-            // right-drag anywhere on a component = resize (dx->width,
-            // dy->height); overlays qualify too (they are parentless by
-            // design, and modals resize their box via ForceW/ForceH)
-            _resizing = target;
-            target.BeginResize(ev, 3, _cellPixW, _cellPixH);
-            return;
-        }
+        // an ACTIVE resize owns every motion/release until the button
+        // comes up, regardless of reported button — terminals disagree
+        // about drag encodings
         if (_resizing is { } rw)
         {
             if (ev.Kind == MouseKind.Motion)
@@ -575,8 +561,68 @@ public sealed class App : IDisposable
             {
                 rw.EndResize();
                 _resizing = null;
+                _rightPressTarget = null;
                 return;
             }
+        }
+
+        // the right button carries two mutually exclusive gestures, and
+        // the press only ARMS: the first motion commits a resize drag (on
+        // Resizable targets), a release without movement opens the context
+        // menu (nearest ancestor with MenuItems). Deferring BeginResize to
+        // first motion keeps a right-CLICK from ever pinning layout sizes.
+        if (ev.Button == 2)
+        {
+            if (ev.Kind == MouseKind.Press)
+            {
+                _rightPressTarget = target;
+                _rightPressEv = ev;
+                _rightMoved = false;
+                _rightEdges = target is { Resizable: true }
+                    ? target.ResizeEdgeAt(ev.X, ev.Y) : 0;
+                // right-press raises a floating window too (WM behaviour)
+                if (target is not null && target.RaisesOnPress(ev))
+                    RaiseOverlayOf(target);
+                return;
+            }
+            if (ev.Kind == MouseKind.Motion)
+            {
+                if (_rightPressTarget is null) return; // drag with no press
+                if (!_rightMoved &&
+                    (ev.X != _rightPressEv.X || ev.Y != _rightPressEv.Y))
+                {
+                    _rightMoved = true;
+                    if (_rightEdges != 0 && _rightPressTarget is { } rt)
+                    {
+                        _resizing = rt;
+                        rt.BeginResize(_rightPressEv, _rightEdges, _cellPixW, _cellPixH);
+                        rt.ApplyResize(ev, _cellPixW, _cellPixH, () => _needsLayout = true);
+                    }
+                }
+                return; // a right-drag never hovers or clicks
+            }
+            if (ev.Kind == MouseKind.Release)
+            {
+                var owner = _rightPressTarget;
+                bool moved = _rightMoved;
+                _rightPressTarget = null;
+                if (!moved && owner is not null && MenuOwnerOf(owner) is { } mw)
+                    PushOverlay(new ContextMenuPopup(mw.MenuItems!, ev.X, ev.Y));
+                return; // a right-click is never an OnClick
+            }
+            return;
+        }
+
+        // press/release bookkeeping FIRST: widgets may consume the event in
+        // OnMouse (sliders do), and capture/Pressed/flash must still work
+        Widget? clicked = null;
+        if (ev.Kind == MouseKind.Press && target is { Clickable: true })
+        {
+            _rightPressTarget = null;
+            ReleasePressed();
+            _pressed = target;
+            target.Pressed = true;
+            target.Invalidate();
         }
 
         // click-to-raise: clicking anywhere in a floating window (or its
@@ -598,10 +644,16 @@ public sealed class App : IDisposable
 
         if (ev.Kind == MouseKind.Motion && !ReferenceEquals(target, _hovered))
         {
+            // a tooltip's owner re-entered on hover: keep the box (pushing
+            // an overlay reset hover, so without this the tooltip would
+            // blink off/re-arm on every motion over the same widget)
+            bool sameOwner = _tooltip is { } shown && ReferenceEquals(shown.Owner, target);
+            if (!sameOwner) CancelTooltip();
             ResetHover();
             _hovered = target;
             target.Hovered = true;
             target.Invalidate(); // border/color reacts to hover
+            if (!sameOwner) ArmTooltip(target, ev);
         }
 
         if (target.OnMouse(ev)) return;
@@ -617,6 +669,55 @@ public sealed class App : IDisposable
 
     private Widget? _pressed;
     private Widget? _resizing;
+
+    // right-button gesture state: the press arms, motion commits a resize,
+    // a still release opens the context menu
+    private Widget? _rightPressTarget;
+    private MouseEvent _rightPressEv;
+    private bool _rightMoved;
+    private int _rightEdges;
+
+    // hover tooltip: a one-shot timer arms on hover-enter and the box is
+    // tracked so leaving/pressing pops exactly it
+    private Animation.IAnimationHandle? _tooltipTimer;
+    private TooltipBox? _tooltip;
+
+    /// <summary>Default hover delay before a widget's <see cref="Widget.Tooltip"/>
+    /// shows, in ms. Per-widget override: Widget.TooltipDelayMs.</summary>
+    public int TooltipDelayMs { get; set; } = 700;
+
+    /// <summary>The nearest widget at/above `w` that carries a context menu.</summary>
+    private static Widget? MenuOwnerOf(Widget w)
+    {
+        for (Widget? t = w; t is not null; t = t.Parent)
+            if (t.MenuItems is { Length: > 0 }) return t;
+        return null;
+    }
+
+    private void CancelTooltip()
+    {
+        _tooltipTimer?.Dispose();
+        _tooltipTimer = null;
+        var tip = _tooltip;
+        _tooltip = null;
+        if (tip is not null) PopOverlay(tip); // guarded: no-op when already gone
+    }
+
+    private void ArmTooltip(Widget target, MouseEvent ev)
+    {
+        if (target.Tooltip is not { Length: > 0 } text) return;
+        int ms = Math.Max(1, target.TooltipDelayMs ?? TooltipDelayMs);
+        int cx = ev.X;
+        _tooltipTimer = _scheduler.Every(TimeSpan.FromMilliseconds(ms), _ =>
+        {
+            _tooltipTimer?.Dispose(); // one-shot: first fire wins
+            _tooltipTimer = null;
+            if (!ReferenceEquals(_hovered, target) || _tooltip is not null) return;
+            var tip = new TooltipBox(text, target, cx);
+            _tooltip = tip;
+            PushOverlay(tip);
+        });
+    }
 
     /// <summary>The box a resize edge visually belongs to: the OUTERMOST
     /// widget whose edge is at the point (stretched children share their

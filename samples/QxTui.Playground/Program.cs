@@ -392,7 +392,7 @@ var bigList = new ListView(() => 10_000)
                 new Cell { Char = ' ', Fg = -1, Bg = theme.Get(ThemeRole.PanelBg) });
         buffer.WriteTextClipped(clip, rect.X + 1, rect.Y,
             string.Create(CultureInfo.InvariantCulture,
-                $"row {i,5}  value {(i * 7) % 97,3}  {new string('#', 1 + i % 40)}"),
+                $"row {i,5}  value {i * 7 % 97,3}  {new string('#', 1 + i % 40)}"),
             fg: selected ? theme.Get(ThemeRole.Title) : theme.Get(ThemeRole.Text));
     },
 };

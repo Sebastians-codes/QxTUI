@@ -300,9 +300,24 @@ public abstract class Widget
     /// tick at 5Hz while a ball animates at 120Hz in the same scene.</summary>
     /// <summary>OPT-IN: right-click-drag resizes the element (grab-side
     /// edge follows the cursor; flow siblings absorb the delta). Default
-    /// false — a component is resizable only when its author says so.
-    /// Modal opts in at class level (windows are resizable).</summary>
+    /// false — a component is resizable only when its author says so.</summary>
     public bool Resizable { get; set; }
+
+    /// <summary>OPT-IN context menu: a right press+release WITHOUT drag
+    /// opens these items anchored at the cursor. The lookup walks
+    /// ancestors, so children inherit the nearest menu above them. A right
+    /// DRAG stays the resize gesture (when <see cref="Resizable"/>), so
+    /// the two right-button gestures never collide.</summary>
+    public MenuItem[]? MenuItems { get; set; }
+
+    /// <summary>OPT-IN tooltip: hovering this widget for
+    /// <see cref="TooltipDelayMs"/> (default: App.TooltipDelayMs) shows a
+    /// floating label; leaving or pressing pops it.</summary>
+    public string? Tooltip { get; set; }
+
+    /// <summary>Per-widget tooltip delay override in ms (null = the app's
+    /// <see cref="App.TooltipDelayMs"/>).</summary>
+    public int? TooltipDelayMs { get; set; }
 
     private bool _resizing;
     private bool _rsApplied;
