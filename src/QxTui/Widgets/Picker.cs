@@ -24,14 +24,14 @@ public sealed class Picker : Widget
     private readonly string _title;
     private readonly Func<IReadOnlyList<string>> _lines;
     private readonly Action<int, string> _commit;
-    private readonly Action<char, int>? _extraKey;
+    private readonly Action<char, int, string>? _extraKey;
     private readonly Func<string, IReadOnlyList<string>>? _search;
     private readonly Action<string>? _onCreate;
     private string _query = "";
     private int _cursor;
 
     public Picker(string title, Func<IReadOnlyList<string>> lines,
-        Action<int, string> commit, Action<char, int>? extraKey = null,
+        Action<int, string> commit, Action<char, int, string>? extraKey = null,
         Func<string, IReadOnlyList<string>>? search = null,
         Action<string>? onCreate = null)
     {
@@ -93,13 +93,16 @@ public sealed class Picker : Widget
                 else if (_search is not null && _onCreate is not null && _query.Trim().Length > 0)
                     _onCreate(_query.Trim()); // typed what doesn't exist → create it
                 return true;
+            // control chars (ctrl-d = \x04, …) are COMMANDS even while
+            // searching — printable chars type into the query instead
+            case Key.Char when _extraKey is not null &&
+                               (_search is null || ev.Char < ' '):
+                _extraKey(ev.Char, Math.Clamp(_cursor, 0, Math.Max(0, n - 1)), _query);
+                return true;
             case Key.Char when _search is not null && ev.Char >= ' ':
                 _query += ev.Char;   // search mode: typing edits the query
                 _cursor = 0;
                 Invalidate();
-                return true;
-            case Key.Char when _extraKey is not null:
-                _extraKey(ev.Char, Math.Clamp(_cursor, 0, Math.Max(0, n - 1)));
                 return true;
             default:
                 return true; // swallow: the picker owns the keyboard

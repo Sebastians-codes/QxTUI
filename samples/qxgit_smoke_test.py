@@ -63,33 +63,38 @@ script = [
     (15.2, b"\r"),           # switch to main: stashes qxgit:smoke-sbx
     (15.9, b"b"),
     (16.2, b"smoke"),
-    (16.8, b"\r"),           # back: pops the linked stash automatically
-    (17.6, b"m"),            # merge picker
-    (18.0, b"\x1b"),
-    (18.4, b"w"),            # worktree picker
-    (18.8, b"\x1b"),
-    (19.2, b"c"),            # commit prompt…
-    (19.6, b"\x1b"),         # …Esc: NOTHING is committed
-    (19.8, b"r"),            # deterministic refresh before selecting
-    (20.4, b"\x1b[<0;6;4M"),   # click scratch #1 in the tree
-    (20.5, b"\x1b[<0;6;4m"),
-    (20.7, b"\x1b[<16;6;5M"),  # CTRL-click scratch #2 → multi-select
-    (20.8, b"\x1b[<19;6;5m"),
-    (20.9, b"\x1b[<0;6;3M"),   # click the ROOT dir: selection = subtree,
-    (21.0, b"\x1b[<0;6;3m"),   # diff pane shows the staging preview
-    (21.4, b"s"),            # stage the whole previewed set in one call
-    (21.8, b"a"),            # all-files mode: clean files visible
-    (22.0, b"\x1b[H"),       # Home: tree root
-    (22.2, b"\x1b[B"),       # Down: .gitignore (clean) → CODE view
-    (22.8, b"\x1b[<0;16;23M"),  # double-click the date header → sort asc
-    (22.9, b"\x1b[<0;16;23m"),
-    (23.0, b"\x1b[<0;16;23M"),
-    (23.1, b"\x1b[<0;16;23m"),
-    (23.3, b"\x1b[<0;16;23M"),  # …and again → desc
-    (23.4, b"\x1b[<0;16;23m"),
-    (23.5, b"\x1b[<0;16;23M"),
-    (23.6, b"\x1b[<0;16;23m"),
-    (24.2, b"q"),            # quit
+    (16.5, b"\x04"),         # ctrl-d INSIDE the searching picker → delete dialog
+    (16.9, b"\x1b"),         # Esc: cancel the delete
+    (17.3, b"\r"),           # back: pops the linked stash automatically
+    (18.0, b"m"),            # merge picker
+    (18.4, b"\x1b"),
+    (18.8, b"w"),            # worktree picker
+    (19.2, b"\x1b"),
+    (19.6, b"c"),            # commit prompt…
+    (20.0, b"\x1b"),         # …Esc: NOTHING is committed
+    (20.2, b"r"),            # deterministic refresh before selecting
+    (20.8, b"\x1b[<0;6;4M"),   # click scratch #1 in the tree
+    (20.9, b"\x1b[<0;6;4m"),
+    (21.1, b"\x1b[<16;6;5M"),  # CTRL-click scratch #2 → multi-select
+    (21.2, b"\x1b[<19;6;5m"),
+    (21.3, b"\x1b[<0;6;3M"),   # click the ROOT dir: selection = subtree,
+    (21.4, b"\x1b[<0;6;3m"),   # diff pane shows the staging preview
+    (21.8, b"s"),            # stage the whole previewed set in one call
+    (22.2, b"a"),            # all-files mode: clean files visible
+    (22.4, b"\x1b[H"),       # Home: tree root
+    (22.6, b"\x1b[B"),       # Down: .gitignore (clean) → CODE view
+    (23.2, b"\x1b[<0;16;23M"),  # double-click the date header → sort asc
+    (23.3, b"\x1b[<0;16;23m"),
+    (23.4, b"\x1b[<0;16;23M"),
+    (23.5, b"\x1b[<0;16;23m"),
+    (23.7, b"\x1b[<0;16;23M"),  # …and again → desc
+    (23.8, b"\x1b[<0;16;23m"),
+    (23.9, b"\x1b[<0;16;23M"),
+    (24.0, b"\x1b[<0;16;23m"),
+    (24.6, b"\x1b[<0;105;34M"),  # click the menu chip (bottom bar, right)
+    (24.7, b"\x1b[<0;105;34m"),
+    (25.2, b"\x1b"),          # Esc: close the action menu
+    (25.8, b"q"),            # quit
 ]
 
 # a scratch untracked file: the default tree is the STATUS view (changed
@@ -161,11 +166,15 @@ checks = {
     "first diff auto": "diff --git" in text,      # pane loads selection on LogMsg
     "filter applied":  "Widget vocabulary batch" in text,
     "overlay chips":   "close" in text,
-    "help line":       "q: quit" in text,
-    "dbl-click hint":  "dbl-click" in text,
+    "status bar":      "selected ·" in text,
+    "action menu":     "stage selection" in text,   # upward menu opened
+    "menu hints":      "Esc" in text and "stage selection" in text,
+    "delete dialog":   "delete local" in text and "FORCE" in text,
     # collapse + expand + sideways resize each relayout the row, so the
     # commits panel title repaints at a new x every time (4 = initial + 3)
-    "panel collapse+resize": text.count("commits (") >= 4,
+    # collapse/expand/resize each move the diff panel's x, repainting its
+    # title (the commits band is full-width now and no longer relayouts)
+    "panel collapse+resize": text.count("diff ·") >= 4,
     "multi-stage":      "A  qxgit-smoke-tmp2" in text,   # ctrl-click set staged together
     "branch created":   "created smoke-sbx" in text,
     "stash linked":     "restored stash" in text,        # auto-pop on return
@@ -173,7 +182,7 @@ checks = {
     "code view":        "(code)" in text,                # clean file → code, not diff
     "stage preview":    "file(s) in selection" in text,   # dir cursor lists what stages
     "sort asc+desc":    "\u25b2" in text and "\u25bc" in text,  # header indicators
-    "collapse in help":  "chip: tree" in text,
+    "menu chip":       "menu" in text,
     "clean exit":      "\x1b[?1049l" in text,
 }
 

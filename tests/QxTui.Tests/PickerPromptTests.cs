@@ -73,7 +73,7 @@ public class PickerPromptTests
         var (app, term, _) = MakeApp(UI.Column(0, new Label(() => "base")));
         app.PushOverlay(new Picker("pick", () => ["a", "b"],
             (_, _) => app.PopOverlay(),
-            (c, i) => { gotC = c; gotI = i; }));
+            (c, i, q) => { gotC = c; gotI = i; Assert.Equal("", q); }));
         app.RunFrame();
 
         Mouse(term, "\x1b[B");   // cursor → 1
@@ -183,5 +183,38 @@ public class PickerSearchTests
         term.QueueInput((byte)'\r');     // no match → create what was typed
         app.RunFrame();
         Assert.Equal("brand-new", created);
+    }
+}
+
+public class PickerCtrlKeyTests
+{
+    [Fact]
+    public void CtrlChar_ReachesExtraKey_EvenWhileSearching_PrintableDoesNot()
+    {
+        string[] all = ["main", "feature"];
+        char gotC = '\0';
+        string gotQ = "";
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, UI.Column(0, new Label(() => "x")),
+            targetFps: 60, asyncPresenting: false);
+        app.PushOverlay(new Picker("branches",
+            () => all,
+            (_, _) => app.PopOverlay(),
+            (c, i, q) => { gotC = c; gotQ = q; },
+            search: q => q.Length == 0
+                ? all
+                : [.. all.Where(l => l.Contains(q, StringComparison.OrdinalIgnoreCase))]));
+        app.RunFrame();
+
+        foreach (byte b in "ma"u8) term.QueueInput(b); // query = "ma"
+        app.RunFrame();
+        term.QueueInput((byte)'d');                    // printable → query
+        app.RunFrame();
+        Assert.Equal('\0', gotC);                     // …never reaches extraKey
+
+        term.QueueInput((byte)0x04);                   // ctrl-d → command
+        app.RunFrame();
+        Assert.Equal('\x04', gotC);
+        Assert.Equal("mad", gotQ);                     // query saw the 'd', not the ^d
     }
 }

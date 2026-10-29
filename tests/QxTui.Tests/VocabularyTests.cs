@@ -955,3 +955,34 @@ public class TreeStageMarkTests
         Assert.Equal(0, marks);
     }
 }
+
+public class MenuHintTests
+{
+    [Fact]
+    public void MenuItemHint_PaintsRightAligned()
+    {
+        var probe = new ParserFuzzProbe
+        {
+            MenuItems = [new MenuItem("refresh", Msg: "r-msg", Hint: "r")],
+        };
+        probe.Node.Height = 5;
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, UI.Column(0, probe), targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<2;5;3M\x1b[<2;5;3m"))
+            term.QueueInput(b);
+        app.RunFrame();
+        Assert.IsType<ContextMenuPopup>(app.Overlay);
+
+        var cells = app.Back.Cells;
+        int ni = 0;
+        bool found = false;
+        for (int i = 0; i < cells.Length; i++)
+        {
+            ni = cells[i].Char == "r"[ni] ? ni + 1 : 0;
+            if (ni == 1) { found = true; break; }
+        }
+        Assert.True(found); // the hint glyph painted
+    }
+}

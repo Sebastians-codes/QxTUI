@@ -35,7 +35,11 @@ public sealed class ContextMenuPopup : Widget
     {
         int w = 8;
         for (int i = 0; i < _items.Length; i++)
-            w = Math.Max(w, _items[i].Label.Length + 4);
+        {
+            int row = _items[i].Label.Length +
+                       (_items[i].Hint is { } hs ? hs.Length + 3 : 0);
+            w = Math.Max(w, row + 4);
+        }
         w = Math.Min(w, Math.Max(1, screen.W - 2));
         int h = _items.Length + 2;
         int x = Math.Clamp(_atX, 0, Math.Max(0, screen.W - w));
@@ -122,6 +126,15 @@ public sealed class ContextMenuPopup : Widget
             buffer.WriteTextClipped(Clip, b.X + 1, b.Y + 1 + i,
                 " " + QxTui.Render.Text.Ellipsize(_items[i].Label, b.W - 3) + " ",
                 fg: fg, bg: bg, bold: cur);
+            // shortcut hint, right-aligned: always visible, never a
+            // hover-tooltip (menus must not fight the pointer)
+            if (_items[i].Hint is { } hint)
+            {
+                int hx = b.Right - 2 - hint.Length;
+                if (hx > b.X + 1 + _items[i].Label.Length)
+                    buffer.WriteTextClipped(Clip, hx, b.Y + 1 + i, hint,
+                        fg: cur ? 232 : Theme.Get(ThemeRole.Dim), bg: bg);
+            }
         }
     }
 

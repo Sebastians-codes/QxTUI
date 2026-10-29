@@ -125,12 +125,7 @@ var diffList = new ListView(() => diffLines.Length)
 var hud = new Label(() =>
     $" qxgit · {repoRoot} [{branch.Value}]{(busy.Value.Length > 0 ? "  " + busy.Value : "")}",
     fg: ThemeRole.Title, bg: ThemeRole.Faint);
-var help1 = new Label(() =>
-    " p/P/F pull/push/fetch  c commit  b branch  m merge  w worktree  s stage sel  t/chip: tree  a all/changed ",
-    fg: ThemeRole.Text, bg: ThemeRole.Faint);
-var help2 = new Label(() =>
-    " / filter  Enter/dbl-click: full diff  wheel: scroll  Tab: focus  live: fs-watch  q: quit ",
-    fg: ThemeRole.Text, bg: ThemeRole.Faint);
+
 
 // the worktree panel owns its collapse state; the </> chip and 't' both
 // flip IsCollapsed (opt-in per component: Collapsible defaults false)
@@ -185,10 +180,64 @@ hud.Node.Height = 1;
 page.AddChild(mainRow);
 commitsPanel.Node.Grow = 2f;
 page.AddChild(commitsPanel);
-page.AddChild(help1);
-help1.Node.Height = 1;
-page.AddChild(help2);
-help2.Node.Height = 1;
+
+
+// bottom bar: live view-state readout + one chip whose menu opens
+// UPWARD and holds every action (replaces the old two-line key help)
+var statusBar = new Label(() =>
+    $" {tree.SelectedNodes.Count} selected · sort: " +
+    (logTable.SortColumn < 0 ? "none" :
+        $"{new[] { "hash", "date", "author", "subject" }[logTable.SortColumn]}" +
+        (logTable.SortDescending ? " ▼" : " ▲")) +
+    $" · filter: {(filterField.Text.Length > 0 ? filterField.Text : "-")} · live: fs-watch",
+    fg: ThemeRole.Dim, bg: ThemeRole.Faint);
+
+void OpenActionMenu(Widget anchor)
+{
+    const int Items = 13;
+    int h = Items + 2;
+    // anchor above the chip: the box grows upward from the bottom bar
+    int y = Math.Max(0, anchor.Rect.Y - h);
+    app.PushOverlay(new ContextMenuPopup(
+    [
+        new MenuItem("pull",              Act: () => GitOp("pull", "pull"), Hint: "p"),
+        new MenuItem("push",              Act: () => GitOp("push", "push"), Hint: "P"),
+        new MenuItem("fetch",             Act: () => GitOp("fetch", "fetch"), Hint: "F"),
+        new MenuItem("commit…",           Act: OpenCommitPrompt, Hint: "c"),
+        new MenuItem("branches…",         Act: OpenBranches, Hint: "b"),
+        new MenuItem("merge…",            Act: OpenMerge, Hint: "m"),
+        new MenuItem("worktrees…",        Act: OpenWorktrees, Hint: "w"),
+        new MenuItem("stage selection",   Act: StageSelected, Hint: "s",
+            Enabled: tree.SelectedNodes.Any(n => n.Tag is string)),
+        new MenuItem("toggle tree panel", Act: ToggleTree, Hint: "t"),
+        new MenuItem("all/changed files", Act: () => { showAllFiles = !showAllFiles; RebuildTree(); }, Hint: "a"),
+        new MenuItem("refresh",           Act: RefreshAll, Hint: "r"),
+        new MenuItem("clear filter+sort", Act: () =>
+        {
+            filterField.SetText("");
+            filterField.Invalidate();
+            logTable.SetSort(-1, false);
+            ApplyFilter();
+        }, Hint: "Esc"),
+        new MenuItem("quit",              Act: app.Quit, Hint: "q"),
+    ], anchor.Rect.X, y));
+}
+
+Button? menuBtn = null;
+menuBtn = new Button(() => " menu ▴ ", () => OpenActionMenu(menuBtn!),
+    style: ButtonStyle.Outline)
+{
+    Tooltip = "every action — the menu opens upward",
+};
+menuBtn.Node.Width = 10;
+
+var bottomBar = new Container();
+bottomBar.Node.Direction = FlexDirection.Row;
+bottomBar.Node.Height = 1;
+bottomBar.AddChild(statusBar);
+statusBar.Node.Grow = 1f;
+bottomBar.AddChild(menuBtn);
+page.AddChild(bottomBar);
 
 app.SetRoot(page.Node);
 
@@ -369,6 +418,30 @@ void GitOp(string what, params string[] gitArgs)
     });
 }
 
+/// <summary>Sequential multi-command op (delete local THEN push
+/// --delete): stops at the first failure, reports the failing line.</summary>
+void GitOpMany(string what, params string[][] cmds)
+{
+    busy.Set(what + "…");
+    string cwd = repoRoot;
+    app.Effect(async ct =>
+    {
+        var log = new List<string>();
+        foreach (var c in cmds)
+        {
+            var (code, sout, serr) = await Git.RunAsync(cwd, ct, c);
+            if (code != 0)
+            {
+                string tail = (serr.Length > 0 ? serr : sout).Trim();
+                int nl = tail.LastIndexOf('\n');
+                return new GitOpMsg(what, 1, nl >= 0 ? tail[(nl + 1)..] : tail);
+            }
+            log.Add($"{c[0]} {c[1]}");
+        }
+        return new GitOpMsg(what, 0, string.Join(" · ", log));
+    });
+}
+
 void RebuildTree()
 {
     // carry the selection across the rebuild: same tags, new node objects
@@ -474,11 +547,64 @@ void SwitchToBranch(string name, bool create = false)
     });
 }
 
+/// <summary>Delete dialog: the alternatives, each labelled with the exact
+/// command it runs. The remote option appears only when a remote
+/// counterpart (origin/&lt;name&gt;) exists — and says so.</summary>
+void OpenBranchDelete(Git.Branch b)
+{
+    if (b.Current)
+    {
+        app.Toast($"cannot delete the current branch ({b.Name})", ToastKind.Warning);
+        return;
+    }
+    var options = new List<(string Label, Action Act)>();
+    int slash = b.Name.IndexOf('/');
+    if (slash > 0)
+    {
+        // a remote-tracking ref (origin/feat): you can delete the branch
+        // ON the remote (the one you created by pushing), or just drop
+        // your local tracking copy
+        string remoteName = b.Name[..slash];
+        string remoteBranch = b.Name[(slash + 1)..];
+        options.Add(($"delete REMOTE branch   git push {remoteName} --delete {remoteBranch}",
+            () => GitOp($"delete remote {remoteBranch}",
+                "push", remoteName, "--delete", remoteBranch)));
+        options.Add(($"remove tracking ref    git branch -dr {b.Name}",
+            () => GitOp($"prune {b.Name}", "branch", "-dr", b.Name)));
+    }
+    else
+    {
+        var remote = branches.FirstOrDefault(x => x.Name == "origin/" + b.Name);
+        string? remoteName = remote?.Name.Split('/')[0];
+        options.Add(($"delete local         git branch -d {b.Name}",
+            () => GitOp($"delete {b.Name}", "branch", "-d", b.Name)));
+        options.Add(($"FORCE delete local   git branch -D {b.Name}",
+            () => GitOp($"force delete {b.Name}", "branch", "-D", b.Name)));
+        if (remoteName is not null)
+        {
+            options.Add(($"delete local + remote  git push {remoteName} --delete {b.Name}",
+                () => GitOpMany($"delete {b.Name} + remote",
+                    ["branch", "-d", b.Name],
+                    ["push", remoteName, "--delete", b.Name])));
+        }
+    }
+    var labels = options.Select(o => o.Label).ToArray();
+    app.PushOverlay(new Picker(
+        $"delete {b.Name} · enter runs it · esc cancels",
+        () => labels,
+        (i, _) =>
+        {
+            if (i >= options.Count) return;
+            app.PopOverlay();
+            options[i].Act();
+        }));
+}
+
 void OpenBranches()
 {
     LoadBranches();
     app.PushOverlay(new Picker(
-        "branches · type: name/author/email · enter: switch or create",
+        "branches · type: name/author/email · enter: switch/create · ^d: delete",
         () => BranchLines(""),
         (i, q) =>
         {
@@ -488,6 +614,12 @@ void OpenBranches()
             var b = m[i];
             if (b.Current) app.Toast($"already on {b.Name}", ToastKind.Info);
             else SwitchToBranch(b.Name);
+        },
+        (c, i, q) =>
+        {
+            var m = BranchMatches(q);
+            if (c == '\x04' && i < m.Length)   // ctrl-d: delete dialog
+                OpenBranchDelete(m[i]);
         },
         search: BranchLines,
         onCreate: name =>
@@ -533,7 +665,7 @@ void OpenWorktrees()
             if (i < worktrees.Length)
                 app.Toast($"open with: qxgit {worktrees[i].Path}", ToastKind.Info, desktop: true);
         },
-        (c, i) =>
+        (c, i, _) =>
         {
             if (c == 'a')
                 app.PushOverlay(new Prompt("add worktree", "/path [branch]", spec =>
