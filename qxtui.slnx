@@ -5,6 +5,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/QxTui.Playground/QxTui.Playground.csproj" />
     <Project Path="samples/QxTui.PoC/QxTui.PoC.csproj" />
+    <Project Path="samples/QxTui.QxGit/QxTui.QxGit.csproj" />
     <Project Path="samples/QxTui.Snake/QxTui.Snake.csproj" />
     <Project Path="samples/QxTui.SysMon/QxTui.SysMon.csproj" />
   </Folder>

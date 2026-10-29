@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\QxTui\QxTui.csproj" />
     <ProjectReference Include="..\..\samples\QxTui.Snake\QxTui.Snake.csproj" />
     <ProjectReference Include="..\..\samples\QxTui.Playground\QxTui.Playground.csproj" />
+    <ProjectReference Include="..\..\samples\QxTui.QxGit\QxTui.QxGit.csproj" />
   </ItemGroup>
 
 </Project>
