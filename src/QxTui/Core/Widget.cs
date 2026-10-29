@@ -284,6 +284,14 @@ public abstract class Widget
     /// Activated event.</summary>
     public virtual void OnDoubleClick(Point local) { }
 
+    /// <summary>Identity of the ELEMENT under a widget-local point, for
+    /// double-click: two clicks form a double only when widget AND
+    /// element identity match. Fast clicks on two different rows/cells
+    /// are two singles, never a double. Default null = the whole widget
+    /// is one element (buttons, chips); data widgets override with their
+    /// row/node identity.</summary>
+    internal virtual object? ClickElementAt(Point local) => null;
+
     /// <summary>First chance at key input (overlays use this for modality).
     /// Return true to consume.</summary>
     public virtual bool HandleKey(KeyEvent ev) => false;

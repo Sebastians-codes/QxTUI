@@ -183,6 +183,16 @@ public sealed class Table : Widget
         }
     }
 
+    /// <summary>The data cell under the point (header clicks identity as
+    /// their column) — two fast clicks on different rows stay singles.</summary>
+    internal override object? ClickElementAt(Point local)
+    {
+        LayoutColumns(Math.Max(1, Rect.W - TrackW));
+        int col = ColumnAt(local.X);
+        if (local.Y < HeaderRows) return ("header", col);
+        return (Offset + local.Y - HeaderRows, col);
+    }
+
     /// <summary>Double-click = Enter: activate the cursor cell (the press
     /// of the first click already moved the cursor there).</summary>
     public override void OnDoubleClick(Point local)

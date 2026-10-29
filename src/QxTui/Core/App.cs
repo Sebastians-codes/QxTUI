@@ -527,8 +527,10 @@ public sealed class App : IDisposable
     {
         if (_pixelMouse && _cellPixH > 0)
             return new Terminal.MouseEvent(
-                ev.Px / _cellPixW, ev.Py / _cellPixH, ev.Button, ev.Kind, ev.Px, ev.Py);
-        return new Terminal.MouseEvent(ev.X, ev.Y, ev.Button, ev.Kind);
+                ev.Px / _cellPixW, ev.Py / _cellPixH, ev.Button, ev.Kind, ev.Px, ev.Py,
+                ev.Shift, ev.Ctrl, ev.Alt);
+        return new Terminal.MouseEvent(ev.X, ev.Y, ev.Button, ev.Kind,
+            Shift: ev.Shift, Ctrl: ev.Ctrl, Alt: ev.Alt);
     }
 
     private void RouteMouse(MouseEvent ev)
@@ -705,20 +707,24 @@ public sealed class App : IDisposable
             // within the window and within a cell = the "open this"
             // gesture. The first click's single-click semantics already
             // applied (select/focus) — the double adds the activation.
+            // same widget AND same element (row/cell/node — the widget
+            // decides) inside the window: fast clicks on two DIFFERENT
+            // rows are two singles, never an accidental activation
+            object? element = target.ClickElementAt(local);
             bool isDouble = ReferenceEquals(target, _lastClickTarget) &&
-                _scheduler.Time.Now - _lastClickTs <= DoubleClickWindow &&
-                Math.Abs(ev.X - _lastClickX) + Math.Abs(ev.Y - _lastClickY) <= 1;
+                Equals(element, _lastClickElement) &&
+                _scheduler.Time.Now - _lastClickTs <= DoubleClickWindow;
             if (isDouble)
             {
                 _lastClickTarget = null; // a third click starts a new pair
+                _lastClickElement = null;
                 target.OnDoubleClick(local);
             }
             else
             {
                 _lastClickTarget = target;
+                _lastClickElement = element;
                 _lastClickTs = _scheduler.Time.Now;
-                _lastClickX = ev.X;
-                _lastClickY = ev.Y;
             }
         }
     }
@@ -729,8 +735,8 @@ public sealed class App : IDisposable
     // double-click detection: second click on the same widget, inside the
     // window and inside a cell, is the "open this" gesture
     private Widget? _lastClickTarget;
+    private object? _lastClickElement;
     private TimeSpan _lastClickTs = TimeSpan.MinValue;
-    private int _lastClickX, _lastClickY;
 
     /// <summary>Max gap between two clicks that still counts as a
     /// double-click (app clock — virtual-time testable).</summary>
@@ -753,6 +759,15 @@ public sealed class App : IDisposable
     /// <summary>Default hover delay before a widget's <see cref="Widget.Tooltip"/>
     /// shows, in ms. Per-widget override: Widget.TooltipDelayMs.</summary>
     public int TooltipDelayMs { get; set; } = 700;
+
+    /// <summary>App-wide opt-in: every toast also fires a real desktop
+    /// notification (notify-send / osascript). Per-toast override:
+    /// Toast(desktop: true). Default false — terminals are quiet guests.</summary>
+    public bool DesktopNotifications { get; set; }
+
+    /// <summary>Title desktop notifications carry (defaults to the app
+    /// name slot; per-toast override via desktopTitle).</summary>
+    public string DesktopNotifyTitle { get; set; } = "qxtui";
 
     /// <summary>The nearest widget at/above `w` that carries a context menu.</summary>
     private static Widget? MenuOwnerOf(Widget w)

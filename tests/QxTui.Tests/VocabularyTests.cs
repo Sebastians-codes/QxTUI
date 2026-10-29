@@ -641,8 +641,11 @@ public class DoubleClickTests
     }
 
     [Fact]
-    public void ClicksFarApart_AreNotADouble()
+    public void ClicksFarApart_OnOneSingleElementWidget_AreADouble()
     {
+        // a button is ONE element: double-clicking it anywhere on its
+        // face is a double-click (desktop semantics). Element granularity
+        // is what data widgets override — see TreeMultiSelectTests.
         var probe = new DblProbe { Clickable = true };
         probe.Node.Height = 3;
         probe.Node.Width = 30;
@@ -651,9 +654,9 @@ public class DoubleClickTests
 
         Mouse(term, "\x1b[<0;5;2M\x1b[<0;5;2m");
         app.RunFrame();
-        Mouse(term, "\x1b[<0;25;2M\x1b[<0;25;2m"); // >1 cell away
+        Mouse(term, "\x1b[<0;25;2M\x1b[<0;25;2m");
         app.RunFrame();
-        Assert.Equal(0, probe.Doubles);
+        Assert.Equal(1, probe.Doubles);
     }
 
     [Fact]

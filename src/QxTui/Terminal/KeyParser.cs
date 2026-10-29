@@ -285,7 +285,10 @@ public sealed class KeyParser
         else
             kind = MouseKind.Press;
 
-        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind, x - 1, y - 1));
+        // SGR modifier bits: +4 shift, +8 alt, +16 ctrl — multi-select
+        // gestures (shift-click range, ctrl-click toggle) read these
+        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind, x - 1, y - 1,
+            Shift: (btn & 4) != 0, Ctrl: (btn & 16) != 0, Alt: (btn & 8) != 0));
     }
 
     private void Ground(byte b)

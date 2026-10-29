@@ -349,3 +349,43 @@ public class PanelCollapseTests
         public override void Render(CellBuffer buffer) { }
     }
 }
+
+public class DesktopNotifyTests
+{
+    private static (App app, FakeTerminal term, VirtualTimeSource clock) MakeApp(
+        LayoutNode root, int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var clock = new VirtualTimeSource();
+        var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+        return (app, term, clock);
+    }
+
+    [Fact]
+    public void Toast_DesktopFlagIsOptIn_AppDefaultFlipsItOnForAll()
+    {
+        var got = new List<(string Title, string Body)>();
+        DesktopNotify.TestSink = (t, b) => got.Add((t, b));
+        try
+        {
+            var (app, _, _) = MakeApp(UI.Column(0, new Label(() => "x")));
+            app.RunFrame();
+
+            app.Toast("saved", ToastKind.Success, desktop: true);
+            Assert.Single(got);              // flag on → notifier fired at mount
+            Assert.Equal("saved", got[0].Body);
+
+            app.Toast("quiet", ToastKind.Info);
+            Assert.Single(got);              // default stays silent
+
+            app.DesktopNotifications = true; // app-wide opt-in
+            app.Toast("loud", ToastKind.Warning);
+            Assert.Equal(2, got.Count);
+            Assert.Equal("qxtui", got[1].Title); // default notify title
+        }
+        finally
+        {
+            DesktopNotify.TestSink = null;
+        }
+    }
+}

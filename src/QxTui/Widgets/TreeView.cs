@@ -29,6 +29,8 @@ public sealed class TreeView : Widget
         {
             _root = value;
             _selected = 0;
+            _anchor = 0;
+            _selection.Clear();
             Offset = 0;
             _lastRenderedOffset = 0;
             Invalidate();
@@ -51,6 +53,8 @@ public sealed class TreeView : Widget
     public int Offset { get; private set; }
 
     private int _selected; // index into the flattened visible rows
+    private int _anchor;   // shift-range start (last plain/ctrl click)
+    private readonly HashSet<int> _selection = []; // flat indices, multi-select
     private readonly List<TreeNode> _flat = [];
     private readonly List<int> _depth = [];
 
@@ -75,6 +79,31 @@ public sealed class TreeView : Widget
         }
     }
 
+    /// <summary>The multi-selection in visual order, with every selected
+    /// folder expanded to all its descendants (selecting a directory
+    /// means selecting everything under it). Plain click selects one,
+    /// CTRL-click toggles membership, SHIFT-click selects the range from
+    /// the anchor. Staging/deleting acts on this set; the cursor
+    /// (SelectedNode) is what diffs and Enter follow.</summary>
+    public IReadOnlyList<TreeNode> SelectedNodes
+    {
+        get
+        {
+            Flatten();
+            var list = new List<TreeNode>();
+            var seen = new HashSet<TreeNode>();
+            void AddWithDescendants(TreeNode n)
+            {
+                if (!seen.Add(n)) return; // parent+child both selected: once
+                list.Add(n);
+                foreach (var c in n.Children) AddWithDescendants(c);
+            }
+            for (int i = 0; i < _flat.Count; i++)
+                if (_selection.Contains(i)) AddWithDescendants(_flat[i]);
+            return list;
+        }
+    }
+
     private void Flatten()
     {
         _flat.Clear();
@@ -88,6 +117,10 @@ public sealed class TreeView : Widget
         }
         Walk(Root, 0);
         _selected = Math.Clamp(_selected, 0, Math.Max(0, _flat.Count - 1));
+        // expand/collapse shifts flat indices: prune what fell off the end
+        // rather than pretending a mapping VSCode-style
+        _selection.RemoveWhere(i => i >= _flat.Count);
+        _anchor = Math.Clamp(_anchor, 0, Math.Max(0, _flat.Count - 1));
     }
 
     private int TrackW => ShowScrollbar ? 1 : 0;
@@ -213,7 +246,37 @@ public sealed class TreeView : Widget
                     DragTo(ev); // 1:1: view goes where the cursor is
                     return true;
                 }
-                return false; // body press handled in OnClick (row select/toggle)
+                // body press: the selection gesture lives HERE because the
+                // modifiers (shift/ctrl) are on the mouse event, which
+                // OnClick never sees
+                Flatten();
+                int row = Offset + (ev.Y - r.Y);
+                if (row >= 0 && row < _flat.Count && ev.X < r.W - TrackW)
+                {
+                    if (ev.Ctrl)
+                    {
+                        MoveSelection(row);
+                        if (!_selection.Remove(row)) _selection.Add(row);
+                        _anchor = row;
+                    }
+                    else if (ev.Shift)
+                    {
+                        int lo = Math.Min(_anchor, row);
+                        int hi = Math.Max(_anchor, row);
+                        _selection.Clear();
+                        for (int k = lo; k <= hi; k++) _selection.Add(k);
+                        MoveSelection(row);
+                    }
+                    else
+                    {
+                        _selection.Clear();
+                        _selection.Add(row);
+                        _anchor = row;
+                        MoveSelection(row);
+                    }
+                    Invalidate();
+                }
+                return false; // let the App focus us (Clickable path)
 
             case MouseKind.Motion:
                 if (_dragThumb)
@@ -229,20 +292,24 @@ public sealed class TreeView : Widget
         }
     }
 
-    /// <summary>Click on a row: the glyph column toggles, anywhere else
-    /// selects. Local coords from the App's Clickable path.</summary>
+    /// <summary>Click on a row's glyph column toggles expand/collapse —
+    /// row SELECTION happens on press (it needs the modifier keys, which
+    /// OnClick never sees).</summary>
     public override void OnClick(Point local)
     {
         Flatten();
         int i = Offset + local.Y;
         if (i < 0 || i >= _flat.Count || local.X >= Rect.W - TrackW) return;
-        if (local.X == _depth[i] * 2)
-        {
-            if (i != _selected) MoveSelection(i);
-            Toggle(_flat[i]); // exactly on the glyph
-        }
-        else MoveSelection(i);
-        Invalidate();
+        if (local.X == _depth[i] * 2) Toggle(_flat[i]); // exactly on the glyph
+    }
+
+    /// <summary>The node under the point is the element identity: fast
+    /// clicks on two different rows never form a double.</summary>
+    internal override object? ClickElementAt(Point local)
+    {
+        Flatten();
+        int i = Offset + local.Y;
+        return i >= 0 && i < _flat.Count ? _flat[i] : null;
     }
 
     /// <summary>Double-click opens leaves (the file-manager gesture);
@@ -316,7 +383,8 @@ public sealed class TreeView : Widget
             var n = _flat[i];
             int d = _depth[i];
             bool sel = i == _selected;
-            if (sel && Focused)
+            bool inSet = _selection.Contains(i);
+            if (inSet || (sel && Focused))
                 buffer.FillRect(r.X, y, contentW, 1,
                     new Cell { Char = ' ', Fg = -1, Bg = panelBg });
 
@@ -325,10 +393,13 @@ public sealed class TreeView : Widget
             buffer.WriteTextClipped(Clip, gx, y, glyph,
                 fg: Theme.Get(n.IsParent ? ThemeRole.Accent : ThemeRole.Faint),
                 bg: sel && Focused ? panelBg : -1);
+            // per-node semantic color (git status etc) beats the default
+            // text role; selection shows as background + cursor bold
+            int fg = Theme.Get(n.Role ?? (sel && Focused ? ThemeRole.Title : ThemeRole.Text));
             buffer.WriteTextClipped(Clip, gx + 2, y,
                 Text.Ellipsize(n.Label, Math.Max(0, contentW - d * 2 - 2)),
-                fg: Theme.Get(sel ? ThemeRole.Title : ThemeRole.Text),
-                bg: sel && Focused ? panelBg : -1,
+                fg: fg,
+                bg: inSet || (sel && Focused) ? panelBg : -1,
                 bold: sel && Focused);
         }
 

@@ -160,6 +160,11 @@ public sealed class ListView : Widget
         }
     }
 
+    /// <summary>The data row under the point is the element identity for
+    /// double-click: adjacent rows are distinct elements.</summary>
+    internal override object? ClickElementAt(Point local) =>
+        Offset + local.Y / Math.Max(1, RowHeight);
+
     private int ThumbH()
     {
         int total = Count();

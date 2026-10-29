@@ -1,3 +1,5 @@
+using QxTui.Core;
+
 
 namespace QxTui.Widgets;
 
@@ -15,6 +17,12 @@ public sealed class TreeNode
 
     public string Label => _label();
     public object? Tag { get; set; }
+
+    /// <summary>Optional semantic color for the label — data widgets
+    /// colour their states (git: modified/staged/deleted/untracked).
+    /// null = the tree's default text role.</summary>
+    public ThemeRole? Role { get; set; }
+
     public bool Expanded { get; set; } = true;
 
     public IReadOnlyList<TreeNode> Children => _kids ??= [];

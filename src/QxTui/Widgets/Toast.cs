@@ -25,14 +25,29 @@ public sealed class Toast : Widget
     private readonly string _text;
     private readonly ToastKind _kind;
     private readonly BoxStyle? _frame;
+    private readonly bool _desktop;
+    private readonly string? _desktopTitle;
 
     public Toast(string text, ToastKind kind = ToastKind.Info,
-        int ms = 2500, BoxStyle? frame = null)
+        int ms = 2500, BoxStyle? frame = null, bool desktop = false,
+        string? desktopTitle = null)
     {
         _text = text;
         _kind = kind;
         _frame = frame;
+        _desktop = desktop;
+        _desktopTitle = desktopTitle;
         Tick(TimeSpan.FromMilliseconds(ms), _ => App?.PopOverlay(this));
+    }
+
+    /// <summary>OPT-IN desktop mirror: when the flag (or the app-wide
+    /// <see cref="App.DesktopNotifications"/>) is on, showing the toast
+    /// also fires a real OS notification — for results that arrive while
+    /// the user watches another window.</summary>
+    public override void OnMount(App app)
+    {
+        if (_desktop || app.DesktopNotifications)
+            DesktopNotify.Send(_desktopTitle ?? app.DesktopNotifyTitle, _text);
     }
 
     /// <summary>(background, ink) pairs, chosen for contrast: near-black
@@ -101,11 +116,12 @@ public static class ToastExtensions
     /// <paramref name="frame"/> switches the filled look for a framed one
     /// (BoxStyles.Rounded for rounded corners, etc).</summary>
     public static void Toast(this App app, string text,
-        ToastKind kind = ToastKind.Info, int ms = 2500, BoxStyle? frame = null)
+        ToastKind kind = ToastKind.Info, int ms = 2500, BoxStyle? frame = null,
+        bool desktop = false, string? desktopTitle = null)
     {
         for (int i = app.OverlayCount - 1; i >= 0; i--)
             if (app.OverlayAt(i) is Toast t)
                 app.PopOverlay(t);
-        app.PushOverlay(new Toast(text, kind, ms, frame));
+        app.PushOverlay(new Toast(text, kind, ms, frame, desktop, desktopTitle));
     }
 }
