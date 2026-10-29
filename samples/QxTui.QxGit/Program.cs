@@ -50,6 +50,8 @@ Git.Commit[] filtered = [];
 Git.Branch[] branches = [];
 Git.Worktree[] worktrees = [];
 string[] diffLines = [];
+List<Token[]>? codeTokens = null; // parallel highlight spans for code views
+string codeLang = "";
 int diffReq = 0;          // monotonic; stale DiffMsg results are dropped
 string repoRoot = startDir;
 Dictionary<string, Git.FileStatus> fileStatus = new();
@@ -95,6 +97,45 @@ var logTable = new Table(() => filtered.Length,
 
 var filterField = new TextField { Placeholder = "filter commits… (Esc clears)" };
 
+static int TokFg(TokenKind k, Theme th) => k switch
+{
+    TokenKind.Comment => th.Get(ThemeRole.Faint),
+    TokenKind.String => th.Get(ThemeRole.Success),
+    TokenKind.Keyword => th.Get(ThemeRole.Accent),
+    TokenKind.Number => th.Get(ThemeRole.Warning),
+    TokenKind.Type => th.Get(ThemeRole.Title),
+    TokenKind.Directive => th.Get(ThemeRole.Accent),
+    _ => th.Get(ThemeRole.Text),
+};
+
+/// <summary>Paint one line: highlighted segments where tokens exist,
+/// plain text in the gaps (and for token-less views like diffs).</summary>
+static void PaintCodeLine(CellBuffer buffer, RenderClip clip, int x, int y,
+    string line, Token[]? toks, Theme theme)
+{
+    int pos = 0, cx = x;
+    if (toks is not null)
+    {
+        foreach (var t in toks)
+        {
+            if (t.Start > pos)
+            {
+                var gap = line[pos..Math.Min(t.Start, line.Length)];
+                buffer.WriteTextClipped(clip, cx, y, gap, fg: theme.Get(ThemeRole.Text));
+                cx += gap.Length;
+            }
+            int end = Math.Min(t.Start + t.Length, line.Length);
+            if (end <= t.Start) continue;
+            var seg = line[t.Start..end];
+            buffer.WriteTextClipped(clip, cx, y, seg, fg: TokFg(t.Kind, theme));
+            cx += seg.Length;
+            pos = end;
+        }
+    }
+    if (pos < line.Length)
+        buffer.WriteTextClipped(clip, cx, y, line[pos..], fg: theme.Get(ThemeRole.Text));
+}
+
 // one renderer for diff AND code views, shared by pane and overlay
 static int DiffFg(string line, Theme theme)
 {
@@ -118,7 +159,10 @@ var diffList = new ListView(() => diffLines.Length)
         if (selected)
             buffer.FillRect(rect.X, rect.Y, rect.W, rect.H,
                 new Cell { Char = ' ', Fg = -1, Bg = theme.Get(ThemeRole.PanelBg) });
-        buffer.WriteTextClipped(clip, rect.X, rect.Y, diffLines[i], fg: DiffFg(diffLines[i], theme));
+        if (codeTokens is not null && i < codeTokens.Count)
+            PaintCodeLine(buffer, clip, rect.X, rect.Y, diffLines[i], codeTokens[i], theme);
+        else
+            buffer.WriteTextClipped(clip, rect.X, rect.Y, diffLines[i], fg: DiffFg(diffLines[i], theme));
     },
 };
 
@@ -267,6 +311,7 @@ void LoadCode(string path)
 {
     int req = ++diffReq;
     diffTitle.Set($"{path} (code)");
+    codeLang = SyntaxHighlighter.LanguageFor(path);
     string full = Path.Combine(repoRoot, path);
     app.Effect(async ct =>
     {
@@ -465,12 +510,16 @@ void RebuildTree()
 void OpenDiffOverlay()
 {
     var lines = diffLines; // freeze: the pane may reload underneath the modal
+    var toks = codeTokens;
     var body = new ListView(() => lines.Length)
     {
         RenderRow = (buffer, clip, rect, i, _) =>
         {
-            buffer.WriteTextClipped(clip, rect.X, rect.Y, lines[i],
-                fg: DiffFg(lines[i], app.Theme));
+            if (toks is not null && i < toks.Count)
+                PaintCodeLine(buffer, clip, rect.X, rect.Y, lines[i], toks[i], app.Theme);
+            else
+                buffer.WriteTextClipped(clip, rect.X, rect.Y, lines[i],
+                    fg: DiffFg(lines[i], app.Theme));
         },
     };
     diffModal = new Modal(diffTitle.Value, () => [], dim: false, chips:
@@ -814,6 +863,11 @@ app.OnMessage<DiffMsg>(m =>
     diffLines = m.Text.Split('\n');
     if (diffLines.Length > 0 && diffLines[^1].Length == 0)
         diffLines = diffLines[..^1]; // trailing newline artifact
+    // code views get highlight spans (computed once, off the render path);
+    // diffs keep their +/- semantics instead
+    codeTokens = m.Key.EndsWith("(code)", StringComparison.Ordinal)
+        ? SyntaxHighlighter.HighlightAll(diffLines, codeLang)
+        : null;
     diffList.ScrollTo(0);
     diffList.Invalidate();
 });

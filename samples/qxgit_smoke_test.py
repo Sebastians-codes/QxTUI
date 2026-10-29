@@ -162,7 +162,11 @@ checks = {
     "full tree toggle": "qxtui.slnx" in text,        # clean file, only in all-files mode
     "commits panel":   "commits (" in text,
     "table headers":   "hash" in text and "subject" in text,
-    "commit rows":     "One component per file" in text,
+    # repo grows over time: pin the CURRENT HEAD subject (what the table
+    # must show as its first row), not some historical commit
+    "commit rows":     __import__("subprocess").run(
+        ["git", "log", "-1", "--format=%s"], cwd=REPO,
+        capture_output=True, text=True).stdout.strip()[:30] in text,
     "first diff auto": "diff --git" in text,      # pane loads selection on LogMsg
     "filter applied":  "Widget vocabulary batch" in text,
     "overlay chips":   "close" in text,
