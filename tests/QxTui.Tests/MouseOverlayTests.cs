@@ -1947,3 +1947,47 @@ public class CompositingTests
         Assert.Same(b, app.Overlay);   // the window above survives
     }
 }
+
+public class ResizeAbsorptionTests
+{
+    [Fact]
+    public void Resize_WithGrowSibling_FlexAbsorbs_FixedChipUntouched()
+    {
+        // regression: the immediate-fixed-sibling absorption rule used to
+        // grab a 1-wide splitter chip between the resized panel and a grow
+        // sibling — narrowing fattened the chip, widening overflowed the
+        // row. With a grow sibling present, flex alone absorbs the delta.
+        var a = new ParserFuzzProbe { Resizable = true };
+        a.Node.Width = 10;
+        var chip = new ParserFuzzProbe();
+        chip.Node.Width = 1;
+        var b = new ParserFuzzProbe();
+        b.Node.Grow = 1;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(a.Node);
+        root.Add(chip.Node);
+        root.Add(b.Node);
+        var term = new FakeTerminal(30, 8);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Assert.Equal(19, b.Rect.W);
+
+        void Mouse(string seq)
+        {
+            foreach (byte c in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(c);
+        }
+
+        Mouse("\x1b[<2;6;3M");   // right-press inside a (right of its center)
+        app.RunFrame();
+        Mouse("\x1b[<34;10;3M"); // drag +4
+        app.RunFrame();
+        Mouse("\x1b[<2;10;3m");
+        app.RunFrame();
+
+        Assert.Equal(14, a.Rect.W);
+        Assert.Equal(1, chip.Rect.W);   // the chip never absorbs
+        Assert.Equal(15, b.Rect.W);     // flex took the delta
+        Assert.Equal(30, a.Rect.W + chip.Rect.W + b.Rect.W);
+    }
+}

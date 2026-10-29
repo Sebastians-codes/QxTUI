@@ -594,8 +594,21 @@ public sealed class App : IDisposable
                 _rightPressTarget = target;
                 _rightPressEv = ev;
                 _rightMoved = false;
-                _rightEdges = target is { Resizable: true }
-                    ? target.ResizeEdgeAt(ev.X, ev.Y) : 0;
+                _rightEdges = 0;
+                _rightResize = null;
+                // the resize owner is the NEAREST RESIZABLE ANCESTOR whose
+                // rect owns the point: pressing a panel's inner tree must
+                // resize the panel, not be swallowed by the non-resizable
+                // child (stretched children share their container's edge)
+                for (var w = target; w is not null; w = w.Parent)
+                {
+                    if (!w.Resizable) continue;
+                    int e = w.ResizeEdgeAt(ev.X, ev.Y);
+                    if (e == 0) break;
+                    _rightResize = w;
+                    _rightEdges = e;
+                    break;
+                }
                 // right-press raises a floating window too (WM behaviour)
                 if (target is not null && target.RaisesOnPress(ev))
                     RaiseOverlayOf(target);
@@ -608,7 +621,7 @@ public sealed class App : IDisposable
                     (ev.X != _rightPressEv.X || ev.Y != _rightPressEv.Y))
                 {
                     _rightMoved = true;
-                    if (_rightEdges != 0 && _rightPressTarget is { } rt)
+                    if (_rightResize is { } rt)
                     {
                         _resizing = rt;
                         rt.BeginResize(_rightPressEv, _rightEdges, _cellPixW, _cellPixH);
@@ -658,18 +671,24 @@ public sealed class App : IDisposable
 
         if (target is null) return;
 
-        if (ev.Kind == MouseKind.Motion && !ReferenceEquals(target, _hovered))
+        if (ev.Kind == MouseKind.Motion)
         {
-            // a tooltip's owner re-entered on hover: keep the box (pushing
-            // an overlay reset hover, so without this the tooltip would
-            // blink off/re-arm on every motion over the same widget)
-            bool sameOwner = _tooltip is { } shown && ReferenceEquals(shown.Owner, target);
-            if (!sameOwner) CancelTooltip();
-            ResetHover();
-            _hovered = target;
-            target.Hovered = true;
-            target.Invalidate(); // border/color reacts to hover
-            if (!sameOwner) ArmTooltip(target, ev);
+            // the pointer is the tooltip anchor
+            _tooltipX = ev.X;
+            _tooltipY = ev.Y;
+            bool sameTarget = ReferenceEquals(target, _hovered);
+            // STILLNESS rule: any motion kills a shown tooltip and
+            // restarts the delay — a tooltip appears only for a resting
+            // pointer, never while sweeping across the UI
+            CancelTooltip();
+            if (!sameTarget)
+            {
+                ResetHover();
+                _hovered = target;
+                target.Hovered = true;
+                target.Invalidate(); // border/color reacts to hover
+            }
+            ArmTooltip(target, ev);
         }
 
         if (target.OnMouse(ev)) return;
@@ -723,11 +742,13 @@ public sealed class App : IDisposable
     private MouseEvent _rightPressEv;
     private bool _rightMoved;
     private int _rightEdges;
+    private Widget? _rightResize; // nearest resizable ancestor of the press
 
     // hover tooltip: a one-shot timer arms on hover-enter and the box is
     // tracked so leaving/pressing pops exactly it
     private Animation.IAnimationHandle? _tooltipTimer;
     private TooltipBox? _tooltip;
+    private int _tooltipX, _tooltipY; // pointer anchor, refreshed per motion
 
     /// <summary>Default hover delay before a widget's <see cref="Widget.Tooltip"/>
     /// shows, in ms. Per-widget override: Widget.TooltipDelayMs.</summary>
@@ -753,14 +774,19 @@ public sealed class App : IDisposable
     private void ArmTooltip(Widget target, MouseEvent ev)
     {
         if (target.Tooltip is not { Length: > 0 } text) return;
+        // containers don't carry tooltips: hovering "the panel" really
+        // means hovering its frame/padding chrome — the hint belongs to
+        // the ELEMENTS inside, which own their own Tooltip text
+        if (target.Children.Count > 0) return;
         int ms = Math.Max(1, target.TooltipDelayMs ?? TooltipDelayMs);
-        int cx = ev.X;
         _tooltipTimer = _scheduler.Every(TimeSpan.FromMilliseconds(ms), _ =>
         {
             _tooltipTimer?.Dispose(); // one-shot: first fire wins
             _tooltipTimer = null;
             if (!ReferenceEquals(_hovered, target) || _tooltip is not null) return;
-            var tip = new TooltipBox(text, target, cx);
+            // anchor read at PUSH time: the pointer may have moved since
+            // the hover-enter that armed the timer
+            var tip = new TooltipBox(text, target, _tooltipX, _tooltipY);
             _tooltip = tip;
             PushOverlay(tip);
         });
@@ -798,6 +824,11 @@ public sealed class App : IDisposable
     /// <summary>Forward a hardware-scroll hint from a widget: the renderer
     /// emits a scroll-region SU/SD and repaints only exposed rows.</summary>
     public void ScrollHint(Layout.Rect rect, int delta) => _renderer.ScrollHint(rect, delta);
+
+    /// <summary>Ask for a flexbox pass on the next frame — needed after
+    /// app code changes node sizes or Collapsed flags outside the resize
+    /// gesture (which requests its own relayouts).</summary>
+    public void RequestLayout() => _needsLayout = true;
 
     /// <summary>Mark every widget dirty (theme switch, global style change).</summary>
     public void InvalidateAll()

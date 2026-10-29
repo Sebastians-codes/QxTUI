@@ -256,3 +256,96 @@ public class KitControlsTests
         Assert.Equal(236, app.Back[20, 9].Bg);   // dark fill inside the frame
     }
 }
+
+public class PanelCollapseTests
+{
+    private static (App app, FakeTerminal term, VirtualTimeSource clock) MakeApp(
+        LayoutNode root, int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var clock = new VirtualTimeSource();
+        var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+        return (app, term, clock);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void CollapseChip_IsOptIn_OffByDefault()
+    {
+        var plain = new Panel("pane");
+        plain.Node.Width = 12;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(plain.Node);
+        var (app, term, _) = MakeApp(root, w: 30, h: 8);
+        app.RunFrame();
+
+        // clicking where the chip would sit does nothing without opt-in
+        Mouse(term, "\x1b[<0;11;1M\x1b[<0;11;1m");
+        app.RunFrame();
+        Assert.Equal(12, plain.Rect.W);
+        plain.IsCollapsed = true; // ignored: not collapsible
+        app.RunFrame();
+        Assert.Equal(12, plain.Rect.W);
+    }
+
+    [Fact]
+    public void ChipCollapses_ToRail_ExpandRestoresWidth()
+    {
+        var panel = new Panel("pane") { Collapsible = true };
+        panel.Node.Width = 12;
+        var sibling = new ParserFuzzProbeWidget2();
+        sibling.Node.Grow = 1;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(panel.Node);
+        root.Add(sibling.Node);
+        var (app, term, _) = MakeApp(root, w: 30, h: 8);
+        app.RunFrame();
+        Assert.Equal(12, panel.Rect.W);
+
+        // title-bar chip at local (W-2, 0) = (10,0) → SGR (11,1)
+        Mouse(term, "\x1b[<0;11;1M\x1b[<0;11;1m");
+        app.RunFrame();
+        Assert.True(panel.IsCollapsed);
+        app.RunFrame();
+        Assert.Equal(1, panel.Rect.W);      // the rail
+        Assert.Equal(29, sibling.Rect.W);   // sibling took the room
+
+        // rail chip at (0,0) → SGR (1,1)
+        Mouse(term, "\x1b[<0;1;1M\x1b[<0;1;1m");
+        app.RunFrame();
+        Assert.False(panel.IsCollapsed);
+        app.RunFrame();
+        Assert.Equal(12, panel.Rect.W);     // expanded width remembered
+    }
+
+    [Fact]
+    public void CollapsedPanel_RefusesResizeGrabs()
+    {
+        var panel = new Panel("pane") { Collapsible = true, Resizable = true };
+        panel.Node.Width = 12;
+        panel.IsCollapsed = true; // Collapsible set first, so this sticks
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(panel.Node);
+        var (app, term, _) = MakeApp(root, w: 30, h: 8);
+        app.RunFrame();
+        Assert.Equal(1, panel.Rect.W);
+
+        Mouse(term, "\x1b[<2;1;1M");  // right-press on the rail
+        app.RunFrame();
+        Mouse(term, "\x1b[<34;10;1M"); // drag: must NOT resize
+        app.RunFrame();
+        Mouse(term, "\x1b[<2;10;1m");
+        app.RunFrame();
+        Assert.Equal(1, panel.Rect.W);
+    }
+
+    private sealed class ParserFuzzProbeWidget2 : Widget
+    {
+        public override void Render(CellBuffer buffer) { }
+    }
+}

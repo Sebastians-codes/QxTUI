@@ -12,17 +12,32 @@ public sealed class TooltipBox : Widget
 {
     private readonly string _text;
     private readonly Widget _owner;
-    private readonly int _cursorX;
+    private int _cursorX, _cursorY;
 
     /// <summary>The widget this tooltip describes — App keeps the box alive
     /// while hover re-enters its owner (no blink-on-motion).</summary>
     public Widget Owner => _owner;
 
-    public TooltipBox(string text, Widget owner, int cursorX)
+    /// <summary>Where the box paints right now — public so placement is
+    /// assertable (and authors can reason about it).</summary>
+    public Rect Box => TipRect(Rect);
+
+    /// <summary>Follow the pointer: App feeds every motion over the owner
+    /// in, so a shown tooltip never lags behind the cursor.</summary>
+    public void SetAnchor(int x, int y)
+    {
+        if (x == _cursorX && y == _cursorY) return;
+        _cursorX = x;
+        _cursorY = y;
+        Invalidate();
+    }
+
+    public TooltipBox(string text, Widget owner, int cursorX, int cursorY)
     {
         _text = text;
         _owner = owner;
         _cursorX = cursorX;
+        _cursorY = cursorY;
     }
 
     public override bool HitTest(int x, int y) => false; // never eats clicks
@@ -32,10 +47,12 @@ public sealed class TooltipBox : Widget
     {
         int w = Math.Min(Math.Max(1, screen.W - 2), _text.Length + 4);
         int h = 3;
-        var o = _owner.Rect;
-        int x = Math.Clamp(_cursorX - w / 2, 0, Math.Max(0, screen.W - w));
-        // prefer above the owner; fall below when there is no room
-        int y = o.Y - h >= 0 ? o.Y - h : Math.Min(o.Bottom, Math.Max(0, screen.H - h));
+        // hug the POINTER: one row below the cursor cell, flipping above
+        // it when the bottom edge is near. (Anchoring to the owner's box
+        // read as "spawns randomly": on a tall widget the cursor sat
+        // mid-table while the box sat at the table's top edge.)
+        int y = _cursorY + 1 + h <= screen.H ? _cursorY + 1 : Math.Max(0, _cursorY - h);
+        int x = Math.Clamp(_cursorX, 0, Math.Max(0, screen.W - w));
         return new Rect(x, y, w, h);
     }
 

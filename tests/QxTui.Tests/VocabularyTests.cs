@@ -461,7 +461,7 @@ public class VocabularyTests
     }
 
     [Fact]
-    public void Tooltip_MotionOverSameOwnerKeepsTheBox()
+    public void Tooltip_MotionHidesAndRearms_SteadyPointerBringsItBack()
     {
         var a = new ParserFuzzProbe { Tooltip = "sticky" };
         a.Node.Grow = 1;
@@ -474,15 +474,72 @@ public class VocabularyTests
         clock.Advance(TimeSpan.FromMilliseconds(400));
         app.RunFrame();
         app.RunFrame();
-        var box = Assert.IsType<TooltipBox>(app.Overlay);
+        Assert.IsType<TooltipBox>(app.Overlay);
 
-        // PushOverlay reset hover; motion over the SAME owner must not
-        // blink the box (pop + re-arm), it stays exactly as it was
+        // moving kills the shown box immediately…
         Mouse(term, "\x1b[<35;6;3M");
         app.RunFrame();
-        clock.Advance(TimeSpan.FromMilliseconds(400));
+        Assert.Null(app.Overlay);
+
+        // …and only a STILL pointer for the full delay brings it back
+        clock.Advance(TimeSpan.FromMilliseconds(150));
         app.RunFrame();
-        Assert.Same(box, app.Overlay);
+        Assert.Null(app.Overlay);          // still inside the new delay
+        clock.Advance(TimeSpan.FromMilliseconds(300));
+        app.RunFrame();
+        app.RunFrame();
+        Assert.IsType<TooltipBox>(app.Overlay);
+    }
+
+    [Fact]
+    public void Tooltip_ContinuousMotion_NeverShows()
+    {
+        var a = new ParserFuzzProbe { Tooltip = "never while sweeping" };
+        a.Node.Grow = 1;
+        var (app, term, clock) = MakeApp(UI.Column(0, a), w: 20, h: 6);
+        app.TooltipDelayMs = 300;
+        app.RunFrame();
+
+        // sweep: a motion every 200ms of virtual time — always inside the
+        // delay window, so the box must never appear
+        for (int x = 3; x <= 9; x++)
+        {
+            Mouse(term, $"\x1b[<35;{x};3M");
+            app.RunFrame();
+            clock.Advance(TimeSpan.FromMilliseconds(200));
+            app.RunFrame();
+            Assert.Null(app.Overlay);
+        }
+    }
+
+    [Fact]
+    public void Tooltip_ContainersNeverShowTheirOwnHint()
+    {
+        // hovering the panel (its frame chrome) must not fire the panel's
+        // tooltip — the hint belongs to the elements inside
+        var inner = new ParserFuzzProbe { Tooltip = "inner hint" };
+        inner.Node.Grow = 1;
+        var panel = new Panel("box") { Tooltip = "container hint" };
+        panel.AddChild(inner);
+        panel.Node.Grow = 1;
+        var (app, term, clock) = MakeApp(UI.Column(0, panel), w: 20, h: 8);
+        app.TooltipDelayMs = 300;
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<35;1;1M"); // the panel's top-left border cell
+        app.RunFrame();
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        app.RunFrame();
+        app.RunFrame();
+        Assert.Null(app.Overlay);        // container hint suppressed
+
+        Mouse(term, "\x1b[<35;5;4M"); // inside: the inner element
+        app.RunFrame();
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        app.RunFrame();
+        app.RunFrame();
+        var tip = Assert.IsType<TooltipBox>(app.Overlay);
+        Assert.Same(inner, tip.Owner);
     }
 
     // ---- RadioGroup / ToggleGroup ----------------------------------------------
@@ -658,5 +715,138 @@ public class DoubleClickTests
         Mouse(term, $"\x1b[<65;{r.X + 3 + 1};{r.Y + 2 + 1}M"); // wheel down inside body
         app.RunFrame();
         Assert.Equal(3, body.Offset);
+    }
+}
+
+public class TooltipPlacementTests
+{
+    private static (App app, FakeTerminal term, VirtualTimeSource clock) MakeApp(
+        LayoutNode root, int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var clock = new VirtualTimeSource();
+        var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+        return (app, term, clock);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    [Fact]
+    public void Tooltip_HugsThePointer_FlipsAboveNearBottom_FollowsMotion()
+    {
+        var a = new ParserFuzzProbe { Tooltip = "hint text" };
+        a.Node.Grow = 1; // fills the 40x8 screen: owner edges are useless anchors
+        var (app, term, clock) = MakeApp(UI.Column(0, a), w: 40, h: 8);
+        app.TooltipDelayMs = 300;
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<35;6;3M"); // hover cell (5,2)
+        app.RunFrame();
+        clock.Advance(TimeSpan.FromMilliseconds(400));
+        app.RunFrame();
+        app.RunFrame();
+        TooltipBox tip = Assert.IsType<TooltipBox>(app.Overlay);
+
+        // one row BELOW the cursor: y=3; w = len+4 = 13; x = cursor x
+        Assert.Equal(new Rect(5, 3, 13, 3), tip.Box);
+
+        // motion over the same owner hides the box (stillness rule)…
+        Mouse(term, "\x1b[<35;10;4M"); // cell (9,3)
+        app.RunFrame();
+        Assert.Null(app.Overlay);
+
+        // …and after a still delay it returns AT THE NEW POINTER CELL
+        clock.Advance(TimeSpan.FromMilliseconds(400));
+        app.RunFrame();
+        app.RunFrame();
+        tip = Assert.IsType<TooltipBox>(app.Overlay);
+        Assert.Equal(new Rect(9, 4, 13, 3), tip.Box);
+
+        // near the bottom edge it flips above the cursor
+        Mouse(term, "\x1b[<35;6;8M"); // cell (5,7): 7+1+3 > 8
+        app.RunFrame();
+        Assert.Null(app.Overlay);
+        clock.Advance(TimeSpan.FromMilliseconds(400));
+        app.RunFrame();
+        app.RunFrame();
+        tip = Assert.IsType<TooltipBox>(app.Overlay);
+        Assert.Equal(new Rect(5, 4, 13, 3), tip.Box);
+    }
+}
+
+public class ResizeAxisMaskTests
+{
+    [Fact]
+    public void HorizontalOnly_MasksVerticalDrag_AndRestoresPreGrabSpecs()
+    {
+        // row root: height comes from cross-axis STRETCH (null spec), so
+        // unpinning after the drag must hand the stretch back
+        var probe = new ParserFuzzProbe
+        {
+            Resizable = true,
+            ResizeAxes = ResizeAxis.Horizontal,
+        };
+        probe.Node.Width = 20;
+        var root = new LayoutNode { Direction = FlexDirection.Row };
+        root.Add(probe.Node);
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        Assert.Equal(10, probe.Rect.H); // stretched
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+
+        Mouse("\x1b[<2;17;3M");  // right-press inside, right of center
+        app.RunFrame();
+        Mouse("\x1b[<34;13;6M"); // drag left AND down (diagonal)
+        app.RunFrame();
+        Mouse("\x1b[<2;13;6m");
+        app.RunFrame();
+
+        Assert.Equal(16, probe.Rect.W); // horizontal moved: 20 - 4
+        Assert.Equal(10, probe.Rect.H); // vertical masked: untouched
+        Assert.Null(probe.Node.Height); // unpinned: stretch survives resizes
+    }
+
+    [Fact]
+    public void HorizontalOnly_WithExplicitHeight_RestoresThatHeight()
+    {
+        var probe = new ParserFuzzProbe
+        {
+            Resizable = true,
+            ResizeAxes = ResizeAxis.Horizontal,
+        };
+        probe.Node.Height = 5;
+        probe.Node.Width = 20;
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        root.Add(probe.Node);
+        var term = new FakeTerminal(20, 10);
+        using var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        void Mouse(string seq)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+                term.QueueInput(b);
+        }
+
+        Mouse("\x1b[<2;17;3M");
+        app.RunFrame();
+        Mouse("\x1b[<34;13;6M");
+        app.RunFrame();
+        Mouse("\x1b[<2;13;6m");
+        app.RunFrame();
+
+        Assert.Equal(16, probe.Rect.W);
+        Assert.Equal(5, probe.Rect.H);   // masked axis never moved
+        Assert.Equal(5, probe.Node.Height); // ...and its spec came back as-is
     }
 }

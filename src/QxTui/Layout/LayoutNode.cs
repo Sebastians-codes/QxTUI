@@ -51,6 +51,12 @@ public sealed class LayoutNode
     /// <summary>Flex grow weight along the parent's main axis (0 = fixed).</summary>
     public float Grow { get; set; }
 
+    /// <summary>Layout skips this node entirely: zero rect at the parent's
+    /// inner origin, no gap share, no grow/shrink participation — while
+    /// the subtree stays MOUNTED, so state survives collapse round-trips.
+    /// Prefer Widget.Collapsed: it also requests the relayout.</summary>
+    public bool Collapsed { get; set; }
+
     /// <summary>Flex shrink weight along the parent's main axis.</summary>
     public float Shrink { get; set; } = 1f;
 
@@ -124,13 +130,28 @@ public sealed class LayoutNode
     internal LayoutNode? NextSiblingOf(LayoutNode n) => SiblingOf(n, +1);
     internal LayoutNode? PrevSiblingOf(LayoutNode n) => SiblingOf(n, -1);
 
+    /// <summary>True when a non-collapsed sibling other than `n` grows —
+    /// i.e. the flex pass can absorb a main-axis delta by itself.</summary>
+    internal bool HasGrowSiblingOf(LayoutNode n)
+    {
+        if (_children is null) return false;
+        foreach (var c in _children)
+            if (!ReferenceEquals(c, n) && !c.Collapsed && c.Grow > 0f) return true;
+        return false;
+    }
+
     private LayoutNode? SiblingOf(LayoutNode n, int dir)
     {
         if (_children is null) return null;
         int i = _children.IndexOf(n);
         if (i < 0) return null;
         i += dir;
-        return i >= 0 && i < _children.Count ? _children[i] : null;
+        while (i >= 0 && i < _children.Count)
+        {
+            if (!_children[i].Collapsed) return _children[i];
+            i += dir;
+        }
+        return null;
     }
 
     public LayoutNode Add(LayoutNode child)
@@ -210,6 +231,17 @@ public sealed class LayoutNode
         int availableCross = row ? innerH : innerW;
         int n = _children.Count;
 
+        // collapsed children stay MOUNTED (state survives) but take no
+        // space and no gap: zero rect at the inner origin, and their own
+        // subtree lays out inside nothing
+        int live = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!_children[i].Collapsed) { live++; continue; }
+            _children[i].SetRect(new Rect(innerX, innerY, 0, 0));
+            _children[i].LayoutChildren();
+        }
+
         Span<int> mainSizes = n <= 64 ? stackalloc int[64] : new int[n]; // cold-path alloc OK for huge n
         mainSizes = mainSizes[..n];
 
@@ -218,6 +250,7 @@ public sealed class LayoutNode
         for (int i = 0; i < n; i++)
         {
             var child = _children[i];
+            if (child.Collapsed) { mainSizes[i] = 0; continue; }
             var avail = new Size(row ? availableMain : availableCross, row ? availableCross : availableMain);
 
             int? fixedMain = row ? child.Width : child.Height;
@@ -243,7 +276,7 @@ public sealed class LayoutNode
         }
 
         // 2) distribute free space / shrink overflow
-        int totalGap = Gap * (n - 1);
+        int totalGap = Gap * Math.Max(0, live - 1);
         int used = totalGap;
         for (int i = 0; i < n; i++) used += mainSizes[i];
         int free = availableMain - used;
@@ -254,7 +287,7 @@ public sealed class LayoutNode
             for (int i = 0; i < n; i++)
             {
                 var child = _children[i];
-                if (child.Grow <= 0f) continue;
+                if (child.Grow <= 0f || child.Collapsed) continue;
                 int share = (int)(free * (child.Grow / growSum));
                 mainSizes[i] += share;
                 distributed += share;
@@ -263,7 +296,7 @@ public sealed class LayoutNode
             int remainder = free - distributed;
             for (int i = 0; remainder > 0; i = (i + 1) % n)
             {
-                if (_children[i].Grow > 0f)
+                if (_children[i].Grow > 0f && !_children[i].Collapsed)
                 {
                     mainSizes[i]++;
                     remainder--;
@@ -305,7 +338,8 @@ public sealed class LayoutNode
         {
             float growSum2 = 0f;
             for (int i = 0; i < n; i++)
-                if (_children[i].Grow > 0f && !AtMax(_children[i], mainSizes[i], row))
+                if (_children[i].Grow > 0f && !_children[i].Collapsed &&
+                    !AtMax(_children[i], mainSizes[i], row))
                     growSum2 += _children[i].Grow;
             if (growSum2 > 0f)
             {
@@ -313,14 +347,15 @@ public sealed class LayoutNode
                 for (int i = 0; i < n; i++)
                 {
                     var c = _children[i];
-                    if (c.Grow <= 0f || AtMax(c, mainSizes[i], row)) continue;
+                    if (c.Grow <= 0f || c.Collapsed || AtMax(c, mainSizes[i], row)) continue;
                     int share = (int)(free * (c.Grow / growSum2));
                     mainSizes[i] += share;
                     distributed += share;
                 }
                 int rem = free - distributed;
                 for (int i = 0; rem > 0; i = (i + 1) % n)
-                    if (_children[i].Grow > 0f && !AtMax(_children[i], mainSizes[i], row))
+                    if (_children[i].Grow > 0f && !_children[i].Collapsed &&
+                        !AtMax(_children[i], mainSizes[i], row))
                     { mainSizes[i]++; rem--; }
             }
         }
@@ -328,14 +363,14 @@ public sealed class LayoutNode
         {
             float shrinkSum2 = 0f;
             for (int i = 0; i < n; i++)
-                if (!AtMin(_children[i], mainSizes[i], row))
+                if (!_children[i].Collapsed && !AtMin(_children[i], mainSizes[i], row))
                     shrinkSum2 += _children[i].Shrink * mainSizes[i];
             if (shrinkSum2 > 0f)
             {
                 int deficit = -free;
                 for (int i = 0; i < n; i++)
                 {
-                    if (AtMin(_children[i], mainSizes[i], row)) continue;
+                    if (_children[i].Collapsed || AtMin(_children[i], mainSizes[i], row)) continue;
                     int reduction = (int)(deficit * (_children[i].Shrink * mainSizes[i] / shrinkSum2));
                     mainSizes[i] = Math.Max(0, mainSizes[i] - reduction);
                 }
@@ -352,7 +387,7 @@ public sealed class LayoutNode
         for (int i = 0; i < n; i++) usedJ += mainSizes[i];
         int freeJ = Math.Max(0, availableMain - usedJ);
         int lead = 0;
-        int gaps = Math.Max(0, n - 1);
+        int gaps = Math.Max(0, live - 1);
         Span<int> gapExtra = gaps <= 64 ? stackalloc int[64] : new int[gaps];
         gapExtra = gapExtra[..gaps];
         if (freeJ > 0)
@@ -379,9 +414,11 @@ public sealed class LayoutNode
 
         // 3) cross sizes + placement
         int offsetMain = lead;
+        int gapIdx = 0;
         for (int i = 0; i < n; i++)
         {
             var child = _children[i];
+            if (child.Collapsed) continue; // zero rect assigned up front
             int main = Math.Min(mainSizes[i], Math.Max(0, availableMain - offsetMain));
 
             // cross axis: fixed > percent > stretch > intrinsic, then the
@@ -423,7 +460,8 @@ public sealed class LayoutNode
             child.SetRect(new Rect(cx, cy, cw, ch));
             child.LayoutChildren();
 
-            offsetMain += main + Gap + (i < gaps ? gapExtra[i] : 0);
+            offsetMain += main + Gap + (gapIdx < gaps ? gapExtra[gapIdx] : 0);
+            gapIdx++;
         }
     }
 
@@ -452,10 +490,14 @@ public sealed class LayoutNode
             return inset2;
 
         bool aligned = (node.Direction == FlexDirection.Row) == parentRow;
-        int sum = aligned ? node.Gap * (kids.Count - 1) : 0;
+        int liveKids = 0;
+        foreach (var kid in kids)
+            if (!kid.Collapsed) liveKids++;
+        int sum = aligned ? node.Gap * Math.Max(0, liveKids - 1) : 0;
         int max = 0;
         foreach (var kid in kids)
         {
+            if (kid.Collapsed) continue;
             int v = IntrinsicAlong(kid, parentRow, availableCross);
             if (aligned) sum += v;
             else max = Math.Max(max, v);

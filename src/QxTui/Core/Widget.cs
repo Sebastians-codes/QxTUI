@@ -20,6 +20,18 @@ namespace QxTui.Core;
 /// the app's single scheduler, and disposed automatically with the widget.
 /// No more manual subscription bookkeeping in samples.
 /// </summary>
+/// <summary>Axis mask for opt-in right-drag resize: which dimensions the
+/// gesture may change. Side panels want Horizontal only — long content
+/// gets wider by dragging, height stays owned by the layout.</summary>
+[Flags]
+public enum ResizeAxis
+{
+    None = 0,
+    Horizontal = 1,
+    Vertical = 2,
+    Both = Horizontal | Vertical,
+}
+
 public abstract class Widget
 {
     public LayoutNode Node { get; } = new();
@@ -310,6 +322,29 @@ public abstract class Widget
     /// false — a component is resizable only when its author says so.</summary>
     public bool Resizable { get; set; }
 
+    /// <summary>Hide from layout entirely: zero rect at the parent's inner
+    /// origin, no gap share, no grow/shrink participation — while the
+    /// subtree stays MOUNTED, so its state survives collapse round-trips
+    /// (scroll, selection, expanded nodes). Requests the relayout; raw
+    /// LayoutNode.Collapsed edits need App.RequestLayout().</summary>
+    public bool Collapsed
+    {
+        get => Node.Collapsed;
+        set
+        {
+            if (Node.Collapsed == value) return;
+            Node.Collapsed = value;
+            App?.RequestLayout();
+            Invalidate();
+        }
+    }
+
+    /// <summary>Which axes a right-drag resize moves (default Both).
+    /// A side panel sets Horizontal: vertical drag does nothing, and the
+    /// masked axis is UNPINNED on release so its flex spec (cross-axis
+    /// stretch) survives terminal resizes.</summary>
+    public ResizeAxis ResizeAxes { get; set; } = ResizeAxis.Both;
+
     /// <summary>OPT-IN context menu: a right press+release WITHOUT drag
     /// opens these items anchored at the cursor. The lookup walks
     /// ancestors, so children inherit the nearest menu above them. A right
@@ -332,6 +367,7 @@ public abstract class Widget
     private int _rsStartX, _rsStartY, _rsStartW, _rsStartH;
     private int _rsCurW, _rsCurH;
     private int _rsPrevX, _rsPrevY;
+    private int? _rsOrigWidth, _rsOrigHeight; // pre-grab flex spec (axis mask restore)
     private int _rsSignX = 1, _rsSignY = 1;
     private int _rsCenterX, _rsCenterY;
     private double _rsCorrW, _rsCorrH;
@@ -374,10 +410,22 @@ public abstract class Widget
         }
         // pin the CURRENT size before dropping grow: zeroing grow alone
         // collapsed the element to its intrinsic size on press and made
-        // every sibling jump — the 'surroundings move too much' feel
-        Node.Width = Rect.W;
-        Node.Height = Rect.H;
-        Node.Grow = 0f; // manual size wins from here on
+        // every sibling jump — the 'surroundings move too much' feel.
+        // ONLY the axes the gesture may move get pinned: pinning a masked
+        // axis froze its flex spec (a Horizontal-only panel kept a stale
+        // explicit height and stopped stretching with its row).
+        _rsOrigWidth = Node.Width;
+        _rsOrigHeight = Node.Height;
+        if ((ResizeAxes & ResizeAxis.Horizontal) != 0) Node.Width = Rect.W;
+        if ((ResizeAxes & ResizeAxis.Vertical) != 0) Node.Height = Rect.H;
+        // grow is the PARENT's main axis: yield it only when the resized
+        // axis is that axis, else a cross-axis-only resize would kill the
+        // element's main-axis distribution for nothing
+        bool parentRow = Node.Parent is { } pp && pp.Direction == FlexDirection.Row;
+        bool mainAxisResized = parentRow
+            ? (ResizeAxes & ResizeAxis.Horizontal) != 0
+            : (ResizeAxes & ResizeAxis.Vertical) != 0;
+        if (mainAxisResized) Node.Grow = 0f; // manual size wins from here on
         // flow widgets: the edge nearest the grab follows the cursor —
         // grab the top half and drag down = push that edge down (shrink)
         if (!CenterMirroredResize)
@@ -407,10 +455,12 @@ public abstract class Widget
     /// forced box sizes for modals.</summary>
     internal virtual void ApplyResizeSize(int w, int h)
     {
-        int dW = w - Rect.W;
-        int dH = h - Rect.H;
-        Node.Width = w;
-        Node.Height = h;
+        // masked axes are untouched: not assigned, not absorbed — their
+        // flex spec (stretch/grow) keeps owning them through the drag
+        int dW = (ResizeAxes & ResizeAxis.Horizontal) != 0 ? w - Rect.W : 0;
+        int dH = (ResizeAxes & ResizeAxis.Vertical) != 0 ? h - Rect.H : 0;
+        if (dW != 0) Node.Width = w;
+        if (dH != 0) Node.Height = h;
         AbsorbDelta(Node, dW, dH);
     }
 
@@ -426,7 +476,13 @@ public abstract class Widget
         int dMain = row ? dW : dH;
         int dCross = row ? dH : dW;
 
-        if (dMain != 0)
+        // a grow sibling flexes on its own (free space shrinks as this
+        // node grows) — absorbing into a fixed neighbour THEN would fight
+        // the flex pass. The fixed-sibling rule is for true split panes
+        // where nobody else can take the delta. (qxgit's 1-wide splitter
+        // chip used to swallow the whole delta: narrowing fattened the
+        // chip and the commit panel never moved.)
+        if (dMain != 0 && !p.HasGrowSiblingOf(node))
         {
             var sib = p.NextSiblingOf(node) ?? p.PrevSiblingOf(node);
             if (sib is not null)
@@ -480,7 +536,14 @@ public abstract class Widget
         return true;
     }
 
-    internal void EndResize() => _resizing = false;
+    internal void EndResize()
+    {
+        _resizing = false;
+        // masked axes hand their flex spec back: a Horizontal-only panel
+        // must keep stretching on the cross axis when the terminal resizes
+        if ((ResizeAxes & ResizeAxis.Horizontal) == 0) Node.Width = _rsOrigWidth;
+        if ((ResizeAxes & ResizeAxis.Vertical) == 0) Node.Height = _rsOrigHeight;
+    }
 
     /// <summary>Mouse hit-test. Overlays override this: a floating popup
     /// only owns clicks inside its box, so clicks beside it reach the

@@ -467,3 +467,30 @@ public class CrossAxisIntrinsicTests
         Assert.Equal(2, after.Rect.H);
     }
 }
+
+public class CollapsedLayoutTests
+{
+    [Fact]
+    public void CollapsedChild_TakesNoSpaceOrGap_SubtreeStaysMounted()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column, Gap = 1 };
+        var a = new LayoutNode { Height = 3 };
+        var b = new LayoutNode { Height = 5, Collapsed = true };
+        var grand = new LayoutNode { Height = 2 };
+        b.Add(grand);
+        var c = new LayoutNode { Height = 2 };
+        root.Add(a);
+        root.Add(b);
+        root.Add(c);
+
+        LayoutNode.Compute(root, 20, 20);
+
+        Assert.Equal(3, a.Rect.H);
+        Assert.Equal(0, b.Rect.H);
+        Assert.Equal(0, b.Rect.W);
+        Assert.Equal(0, grand.Rect.H); // mounted, just zeroed
+        // gaps count LIVE children only: a, gap, c — no gap for b
+        Assert.Equal(4, c.Rect.Y);
+        Assert.Equal(2, c.Rect.H);
+    }
+}
