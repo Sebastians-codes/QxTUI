@@ -31,15 +31,22 @@ script = [
     (4.7, b"/"),             # focus the filter field
     (4.9, b"vocabulary"),    # live subject filter
     (6.2, b"\x1b"),          # Esc: clear filter, refocus table
-    (7.2, b"\r"),            # Enter: full-diff overlay modal
-    (8.5, b"\x1b"),          # Esc: close the modal
-    (8.8, b"\x1b[<0;61;9M"),   # click a table row…
-    (9.0, b"\x1b[<0;61;9m"),
-    (9.1, b"\x1b[<0;61;9M"),   # …double-click: full diff opens again
-    (9.2, b"\x1b[<0;61;9m"),
-    (9.9, b"\x1b"),          # Esc: close it
-    (10.6, b"r"),            # refresh log + files
-    (11.6, b"q"),            # quit
+    (6.5, b"\x1b[<0;35;2M"),   # click the panel's < chip: collapse to rail
+    (6.6, b"\x1b[<0;35;2m"),
+    (7.0, b"\x1b[<0;1;2M"),    # click the rail's > chip: expand again
+    (7.1, b"\x1b[<0;1;2m"),
+    (7.4, b"\x1b[<2;21;11M"),  # right-press the worktree panel…
+    (7.6, b"\x1b[<34;31;11M"), # …drag sideways: horizontal-only resize
+    (7.7, b"\x1b[<2;31;11m"),
+    (8.2, b"\r"),            # Enter: full-diff overlay modal
+    (9.5, b"\x1b"),          # Esc: close the modal
+    (9.8, b"\x1b[<0;61;9M"),   # click a table row…
+    (10.0, b"\x1b[<0;61;9m"),
+    (10.1, b"\x1b[<0;61;9M"),  # …double-click: full diff opens again
+    (10.2, b"\x1b[<0;61;9m"),
+    (10.9, b"\x1b"),          # Esc: close it
+    (11.6, b"r"),            # refresh log + files
+    (12.6, b"q"),            # quit
 ]
 
 # a scratch untracked file: the default tree is the STATUS view (changed
@@ -112,6 +119,10 @@ checks = {
     "overlay chips":   "close" in text,
     "help line":       "q: quit" in text,
     "dbl-click hint":  "dbl-click" in text,
+    # collapse + expand + sideways resize each relayout the row, so the
+    # commits panel title repaints at a new x every time (4 = initial + 3)
+    "panel collapse+resize": text.count("commits (") >= 4,
+    "collapse in help":  "chip: tree" in text,
     "clean exit":      "\x1b[?1049l" in text,
 }
 

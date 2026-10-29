@@ -40,6 +40,8 @@ string repoRoot = startDir;
 Dictionary<string, char> fileStatus = new();
 string[] lastFiles = [];      // cached FilesMsg payload for tree rebuilds
 bool showAllFiles = false;    // default: the STATUS view (changed files only)
+// the worktree panel owns its collapse state; the </> chip and 't' both
+// flip IsCollapsed (opt-in per component: Collapsible defaults false)
 Modal? diffModal = null;  // the open full-diff window (its close chip needs it)
 
 var branch = new Signal<string>("…");
@@ -105,13 +107,29 @@ var hud = new Label(() =>
     $" qxgit · {repoRoot} [{branch.Value}]{(busy.Value.Length > 0 ? "  " + busy.Value : "")}",
     fg: ThemeRole.Title, bg: ThemeRole.Faint);
 var help = new Label(() =>
-    " Tab: focus   /: filter   Enter/dbl-click: full diff   a: all/changed files   r: refresh   q: quit ",
+    " Tab: focus   /: filter   Enter/dbl-click: full diff   t or < chip: tree   a: all/changed   r: refresh   q: quit ",
     fg: ThemeRole.Text, bg: ThemeRole.Faint);
 
-var filesPanel = new Panel(() => showAllFiles ? "worktree · all" : "worktree · changed");
+// the </> collapse chip lives in the panel's own title bar; collapsing
+// leaves a one-column rail whose > chip brings it back at the last width
+var filesPanel = new Panel(() => showAllFiles ? "worktree · all" : "worktree · changed")
+{
+    Collapsible = true,
+};
 tree.Node.Grow = 1f;
 filesPanel.AddChild(tree);
 filesPanel.Node.Width = 36;
+// long paths get room by dragging SIDEWAYS only — height stays owned by
+// the row's cross-axis stretch (a pinned height would freeze on resize)
+filesPanel.Resizable = true;
+filesPanel.ResizeAxes = ResizeAxis.Horizontal;
+
+void ToggleTree() => filesPanel.IsCollapsed = !filesPanel.IsCollapsed;
+filesPanel.CollapseChanged += b =>
+{
+    // focus must not stay trapped in an invisible pane
+    if (b && ReferenceEquals(app.Focused, tree)) app.Focus(logTable);
+};
 
 var commitsPanel = new Panel(() => $"commits ({filtered.Length})");
 var commitsCol = new Container();
@@ -347,6 +365,10 @@ app.OnKey = ev =>
         case Key.Char when ev.Char is 'r':
             LoadLog();
             LoadFiles();
+            return true;
+
+        case Key.Char when ev.Char is 't':
+            ToggleTree();
             return true;
 
         case Key.Char when ev.Char is 'a':
