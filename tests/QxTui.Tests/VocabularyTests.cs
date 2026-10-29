@@ -853,3 +853,105 @@ public class ResizeAxisMaskTests
         Assert.Equal(5, probe.Node.Height); // ...and its spec came back as-is
     }
 }
+
+public class TableSortTests
+{
+    private static (App app, FakeTerminal term, VirtualTimeSource clock) MakeApp(
+        LayoutNode root, int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var clock = new VirtualTimeSource();
+        var app = new App(term, root, targetFps: 60, time: clock, asyncPresenting: false);
+        return (app, term, clock);
+    }
+
+    private static void Mouse(FakeTerminal term, string seq)
+    {
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(seq))
+            term.QueueInput(b);
+    }
+
+    private static bool BackContains(App app, string text)
+    {
+        var cells = app.Back.Cells;
+        int ni = 0;
+        for (int i = 0; i < cells.Length; i++)
+        {
+            ni = cells[i].Char == text[ni] ? ni + 1 : 0;
+            if (ni == text.Length) return true;
+        }
+        return false;
+    }
+
+    [Fact]
+    public void HeaderDoubleClick_SortsAscThenDesc_PaintsIndicator_FiresEvent()
+    {
+        var table = new Table(() => 3,
+            new TableColumn("name", Weight: 1),
+            new TableColumn("size", Width: 6));
+        table.Node.Grow = 1;
+        var events = new List<(int Col, bool Desc)>();
+        table.SortChanged += (c, d) => events.Add((c, d));
+        var (app, term, _) = MakeApp(UI.Column(0, table));
+        app.RunFrame();
+
+        // 'size' header cell: starts at x33 → click x35,y0 → SGR (36,1)
+        void Dbl()
+        {
+            Mouse(term, "\x1b[<0;36;1M\x1b[<0;36;1m");
+            app.RunFrame();
+            Mouse(term, "\x1b[<0;36;1M\x1b[<0;36;1m");
+            app.RunFrame();
+        }
+
+        Dbl();
+        Assert.Equal([(1, false)], events);
+        Assert.True(BackContains(app, "size ▲"));
+
+        Dbl();
+        Assert.Equal([(1, false), (1, true)], events);
+        Assert.True(BackContains(app, "size ▼"));
+
+        table.SetSort(0, false); // programmatic
+        Assert.Equal(3, events.Count);
+        Assert.Equal((0, false), events[2]);
+    }
+}
+
+public class TreeStageMarkTests
+{
+    [Fact]
+    public void SelectingADirectory_MarksAllDescendantRows()
+    {
+        var root = new TreeNode("proj");
+        var dir = new TreeNode("dir");
+        dir.Add("x.cs");
+        dir.Add("y.cs");
+        root.Add(dir);
+        var tv = new TreeView(root);
+        tv.Node.Grow = 1;
+        var term = new FakeTerminal(40, 12);
+        using var app = new App(term, UI.Column(0, tv), targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        // click dir's label row (flat index 1 → y1 → SGR y2)
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\x1b[<0;6;2M\x1b[<0;6;2m"))
+            term.QueueInput(b);
+        app.RunFrame();
+
+        // cursor row (dir) is the accent bar; the two children carry the
+        // ▌ edge marker — what's marked is exactly what would stage
+        var cells = app.Back.Cells;
+        int marks = 0;
+        for (int i = 0; i < cells.Length; i++)
+            if (cells[i].Char == '▌') marks++;
+        Assert.Equal(2, marks);
+
+        tv.ClearSelection();
+        app.RunFrame();
+        marks = 0;
+        for (int i = 0; i < cells.Length; i++)
+            if (cells[i].Char == '▌') marks++;
+        Assert.Equal(0, marks);
+    }
+}

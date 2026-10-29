@@ -14,15 +14,22 @@ public sealed class FileWatcher : IDisposable
     private readonly Func<object> _message;
     private readonly int _quietMs;
     private readonly FileSystemWatcher _watcher;
+    private readonly Func<string, bool>? _include;
     private readonly object _gate = new();
     private Timer? _timer;
     private int _disposed;
 
-    public FileWatcher(App app, string path, Func<object> message, int quietMs = 300)
+    /// <param name="include">Optional event filter on the changed path.
+    /// Repositories need this: `git status` rewrites .git/index, which
+    /// would re-trigger the watcher that triggered the status — a
+    /// perpetual refresh loop. Ignore .git except HEAD/refs.</param>
+    public FileWatcher(App app, string path, Func<object> message, int quietMs = 300,
+        Func<string, bool>? include = null)
     {
         _app = app;
         _message = message;
         _quietMs = quietMs;
+        _include = include;
         _watcher = new FileSystemWatcher(path)
         {
             IncludeSubdirectories = true, // .git lives inside: commits from
@@ -43,7 +50,11 @@ public sealed class FileWatcher : IDisposable
     /// <summary>The watched path (repositories, config dirs, log dirs).</summary>
     public string Path => _watcher.Path;
 
-    private void OnFs(object sender, FileSystemEventArgs e) => Arm();
+    private void OnFs(object sender, FileSystemEventArgs e)
+    {
+        if (_include is { } f && !f(e.FullPath)) return;
+        Arm();
+    }
 
     private void Arm()
     {

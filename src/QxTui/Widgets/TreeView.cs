@@ -142,14 +142,56 @@ public sealed class TreeView : Widget
         Invalidate();
     }
 
+    /// <summary>Drop the multi-selection AND the cursor highlight — e.g.
+    /// after an operation consumed the selection (staging).</summary>
+    public void ClearSelection()
+    {
+        _selection.Clear();
+        _anchor = _selected;
+        Invalidate();
+    }
+
+    /// <summary>Select exactly these nodes (multi-select set) and move the
+    /// cursor to the last of them. Used to carry a selection across model
+    /// rebuilds (match nodes by identity or tag before calling).</summary>
+    public void SelectNodes(IReadOnlyList<TreeNode> nodes)
+    {
+        Flatten();
+        _selection.Clear();
+        foreach (var n in nodes)
+        {
+            int i = _flat.IndexOf(n);
+            if (i >= 0) _selection.Add(i);
+        }
+        if (nodes.Count > 0)
+        {
+            int c = _flat.IndexOf(nodes[^1]);
+            if (c >= 0)
+            {
+                _selected = c;
+                _anchor = c;
+            }
+        }
+        Invalidate();
+    }
+
     /// <summary>Clamp → dedupe → notify: the single funnel for user
     /// navigation so SelectionChanged fires exactly on real moves.</summary>
-    private void MoveSelection(int i)
+    private void MoveSelection(int i, bool resetSet = true)
     {
         Flatten();
         i = Math.Clamp(i, 0, Math.Max(0, _flat.Count - 1));
         if (i == _selected) return;
         _selected = i;
+        if (resetSet)
+        {
+            // keyboard navigation selects as it moves (single), like the
+            // click gesture — the cursor row is always part of the set so
+            // something is always visibly selected
+            _selection.Clear();
+            _selection.Add(i);
+            _anchor = i;
+        }
         SelectionChanged?.Invoke(_flat[i]);
         EnsureVisible();
     }
@@ -255,7 +297,7 @@ public sealed class TreeView : Widget
                 {
                     if (ev.Ctrl)
                     {
-                        MoveSelection(row);
+                        MoveSelection(row, resetSet: false);
                         if (!_selection.Remove(row)) _selection.Add(row);
                         _anchor = row;
                     }
@@ -265,7 +307,7 @@ public sealed class TreeView : Widget
                         int hi = Math.Max(_anchor, row);
                         _selection.Clear();
                         for (int k = lo; k <= hi; k++) _selection.Add(k);
-                        MoveSelection(row);
+                        MoveSelection(row, resetSet: false);
                     }
                     else
                     {
@@ -376,31 +418,52 @@ public sealed class TreeView : Widget
             App?.ScrollHint(r, deltaCells);
 
         int panelBg = Theme.Get(ThemeRole.PanelBg);
+        // rows covered by a selected DIRECTORY get marked too: what you
+        // see marked is exactly what staging the selection would touch
+        var marked = new HashSet<int>(_selection);
+        int markDepth = -1;
+        for (int i = Offset; i < Math.Min(total, Offset + r.H); i++)
+        {
+            if (_selection.Contains(i)) { markDepth = _depth[i]; continue; }
+            if (markDepth >= 0)
+            {
+                if (_depth[i] > markDepth) marked.Add(i);
+                else markDepth = -1;
+            }
+        }
         int last = Math.Min(total, Offset + r.H);
         for (int i = Offset; i < last; i++)
         {
             int y = r.Y + (i - Offset);
             var n = _flat[i];
             int d = _depth[i];
-            bool sel = i == _selected;
-            bool inSet = _selection.Contains(i);
-            if (inSet || (sel && Focused))
+            bool cur = i == _selected;
+            bool inSet = marked.Contains(i);
+            // LOUD selection: the cursor row is a solid accent bar with
+            // dark ink; extra multi-selected rows get a panel-bg fill and
+            // an accent ▌ edge marker — no squinting at dark-on-dark
+            int accent = Theme.Get(ThemeRole.Accent);
+            bool curBar = cur && Focused;
+            int rowBg = curBar ? accent : inSet ? panelBg : -1;
+            if (rowBg != -1)
                 buffer.FillRect(r.X, y, contentW, 1,
-                    new Cell { Char = ' ', Fg = -1, Bg = panelBg });
+                    new Cell { Char = ' ', Fg = -1, Bg = rowBg });
+            if (inSet && !curBar)
+                buffer.WriteTextClipped(Clip, r.X, y, "▌", fg: accent, bg: panelBg);
 
             string glyph = n.IsParent ? (n.Expanded ? "▾" : "▸") : "·";
             int gx = r.X + d * 2;
             buffer.WriteTextClipped(Clip, gx, y, glyph,
-                fg: Theme.Get(n.IsParent ? ThemeRole.Accent : ThemeRole.Faint),
-                bg: sel && Focused ? panelBg : -1);
+                fg: curBar ? 232 : Theme.Get(n.IsParent ? ThemeRole.Accent : ThemeRole.Faint),
+                bg: rowBg);
             // per-node semantic color (git status etc) beats the default
-            // text role; selection shows as background + cursor bold
-            int fg = Theme.Get(n.Role ?? (sel && Focused ? ThemeRole.Title : ThemeRole.Text));
+            // text role — except on the accent bar, where dark ink wins
+            int fg = curBar ? 232 : Theme.Get(n.Role ?? (cur ? ThemeRole.Title : ThemeRole.Text));
             buffer.WriteTextClipped(Clip, gx + 2, y,
                 Text.Ellipsize(n.Label, Math.Max(0, contentW - d * 2 - 2)),
                 fg: fg,
-                bg: inSet || (sel && Focused) ? panelBg : -1,
-                bold: sel && Focused);
+                bg: rowBg,
+                bold: cur);
         }
 
         if (!ShowScrollbar) return;

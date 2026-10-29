@@ -16,7 +16,16 @@ import sys
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CMD = ["./samples/QxTui.QxGit/bin/Release/net10.0/QxTui.QxGit"]
+BIN = os.path.join(REPO, "samples/QxTui.QxGit/bin/Release/net10.0/QxTui.QxGit")
+
+# qxgit's branch switching stashes the worktree it runs in — so the smoke
+# runs inside a throwaway --shared clone, NEVER the live dev repo (a run
+# against the real workspace once stashed+dropped uncommitted work)
+import subprocess
+import tempfile
+CLONE = tempfile.mkdtemp(prefix="qxgit-smoke-")
+subprocess.run(["git", "clone", "--quiet", "--shared", REPO, CLONE], check=True)
+CMD = [BIN, CLONE]
 
 script = [
     (2.5, b"\x1b[B"),        # Down: select commit #2 → diff pane follows
@@ -46,19 +55,55 @@ script = [
     (10.2, b"\x1b[<0;61;9m"),
     (10.9, b"\x1b"),          # Esc: close it
     (11.6, b"r"),            # refresh log + files
-    (12.6, b"q"),            # quit
+    (12.6, b"b"),            # branch picker (search: name/author/email)
+    (12.9, b"smoke-sbx"),    # typed name matches nothing…
+    (13.6, b"\r"),           # …Enter creates+switches (changes carry)
+    (14.3, b"b"),
+    (14.6, b"main"),         # search by name
+    (15.2, b"\r"),           # switch to main: stashes qxgit:smoke-sbx
+    (15.9, b"b"),
+    (16.2, b"smoke"),
+    (16.8, b"\r"),           # back: pops the linked stash automatically
+    (17.6, b"m"),            # merge picker
+    (18.0, b"\x1b"),
+    (18.4, b"w"),            # worktree picker
+    (18.8, b"\x1b"),
+    (19.2, b"c"),            # commit prompt…
+    (19.6, b"\x1b"),         # …Esc: NOTHING is committed
+    (19.8, b"r"),            # deterministic refresh before selecting
+    (20.4, b"\x1b[<0;6;4M"),   # click scratch #1 in the tree
+    (20.5, b"\x1b[<0;6;4m"),
+    (20.7, b"\x1b[<16;6;5M"),  # CTRL-click scratch #2 → multi-select
+    (20.8, b"\x1b[<19;6;5m"),
+    (20.9, b"\x1b[<0;6;3M"),   # click the ROOT dir: selection = subtree,
+    (21.0, b"\x1b[<0;6;3m"),   # diff pane shows the staging preview
+    (21.4, b"s"),            # stage the whole previewed set in one call
+    (21.8, b"a"),            # all-files mode: clean files visible
+    (22.0, b"\x1b[H"),       # Home: tree root
+    (22.2, b"\x1b[B"),       # Down: .gitignore (clean) → CODE view
+    (22.8, b"\x1b[<0;16;23M"),  # double-click the date header → sort asc
+    (22.9, b"\x1b[<0;16;23m"),
+    (23.0, b"\x1b[<0;16;23M"),
+    (23.1, b"\x1b[<0;16;23m"),
+    (23.3, b"\x1b[<0;16;23M"),  # …and again → desc
+    (23.4, b"\x1b[<0;16;23m"),
+    (23.5, b"\x1b[<0;16;23M"),
+    (23.6, b"\x1b[<0;16;23m"),
+    (24.2, b"q"),            # quit
 ]
 
 # a scratch untracked file: the default tree is the STATUS view (changed
 # files only), and the repo is clean at test time — this gives it a leaf
-TMP = os.path.join(REPO, "qxgit-smoke-tmp.txt")
-with open(TMP, "w") as f:
-    f.write("smoke scratch\n")
+TMP = os.path.join(CLONE, "qxgit-smoke-tmp.txt")
+TMP2 = os.path.join(CLONE, "qxgit-smoke-tmp2.txt")
+for path in (TMP, TMP2):
+    with open(path, "w") as f:
+        f.write("smoke scratch\n")
 
 captured = bytearray()
 pid, fd = pty.fork()
 if pid == 0:
-    os.chdir(REPO)
+    os.chdir(CLONE)
     os.environ["TERM"] = "xterm-256color"
     os.execvp(CMD[0], CMD)
 
@@ -67,7 +112,7 @@ fcntl.ioctl(fd, 0x5414, struct.pack("HHHH", 34, 110, 0, 0))  # TIOCSWINSZ 34x110
 si = 0
 status = 0
 try:
-    while time.time() - start < 22:
+    while time.time() - start < 28:
         r, _, _ = select.select([fd], [], [], 0.2)
         if r:
             try:
@@ -93,10 +138,9 @@ finally:
     except ChildProcessError:
         pass
     os.close(fd)
-    try:
-        os.remove(TMP)
-    except OSError:
-        pass
+    # the clone is throwaway: everything the run created (branch, stash,
+    # scratch files) dies with it — the live repo was never touched
+    subprocess.run(["rm", "-rf", CLONE], capture_output=True)
 
 text = captured.decode("utf-8", errors="replace")
 with open("/tmp/opencode/qxgit.log", "w") as f:
@@ -122,6 +166,13 @@ checks = {
     # collapse + expand + sideways resize each relayout the row, so the
     # commits panel title repaints at a new x every time (4 = initial + 3)
     "panel collapse+resize": text.count("commits (") >= 4,
+    "multi-stage":      "A  qxgit-smoke-tmp2" in text,   # ctrl-click set staged together
+    "branch created":   "created smoke-sbx" in text,
+    "stash linked":     "restored stash" in text,        # auto-pop on return
+    "branch search":    "> smoke-sbx" in text,           # picker query echo
+    "code view":        "(code)" in text,                # clean file → code, not diff
+    "stage preview":    "file(s) in selection" in text,   # dir cursor lists what stages
+    "sort asc+desc":    "\u25b2" in text and "\u25bc" in text,  # header indicators
     "collapse in help":  "chip: tree" in text,
     "clean exit":      "\x1b[?1049l" in text,
 }

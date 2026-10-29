@@ -45,6 +45,28 @@ public sealed class Table : Widget
     /// detail panes follow.</summary>
     public event Action<int, int>? SelectionChanged;
 
+    /// <summary>Column the rows are sorted by (-1 = natural/data order).
+    /// Double-click a header to sort it; double-click again to flip
+    /// direction. The TABLE owns the state and the indicator; the APP
+    /// owns the ordering (it owns the data) via <see cref="SortChanged"/>.</summary>
+    public int SortColumn { get; private set; } = -1;
+    public bool SortDescending { get; private set; }
+
+    /// <summary>(column, descending) after every header double-click or
+    /// <see cref="SetSort"/>. Reorder your data and Invalidate().</summary>
+    public event Action<int, bool>? SortChanged;
+
+    /// <summary>Programmatic sort (restore saved view state, menu items).
+    /// col &lt; 0 clears back to natural order.</summary>
+    public void SetSort(int col, bool descending)
+    {
+        if (col == SortColumn && descending == SortDescending) return;
+        SortColumn = col;
+        SortDescending = descending;
+        SortChanged?.Invoke(col, descending);
+        Invalidate();
+    }
+
     private bool _dragThumb;
     private int _grabDelta;         // cursor offset inside the thumb at grab
     private int _grabDeltaPx;       // same, in pixels (sub-cell drags)
@@ -193,10 +215,18 @@ public sealed class Table : Widget
         return (Offset + local.Y - HeaderRows, col);
     }
 
-    /// <summary>Double-click = Enter: activate the cursor cell (the press
-    /// of the first click already moved the cursor there).</summary>
+    /// <summary>Double-click on a HEADER sorts (asc → desc → asc…);
+    /// anywhere else it activates the cursor cell, like Enter.</summary>
     public override void OnDoubleClick(Point local)
     {
+        if (local.Y < HeaderRows)
+        {
+            LayoutColumns(Math.Max(1, Rect.W - TrackW));
+            int col = ColumnAt(local.X);
+            if (col < 0) return;
+            SetSort(col, col == SortColumn ? !SortDescending : false);
+            return;
+        }
         int total = RowCount();
         if (total > 0)
             Activated?.Invoke(Math.Clamp(SelectedRow, 0, total - 1),
@@ -359,8 +389,10 @@ public sealed class Table : Widget
             for (int i = 0; i < Columns.Count; i++)
             {
                 var c = Columns[i];
+                // sort indicator lives inside the header cell
+                string mark = i == SortColumn ? (SortDescending ? " ▼" : " ▲") : "";
                 buffer.WriteTextClipped(Clip, r.X + _starts[i], r.Y,
-                    Align(Text.Ellipsize(c.Header, _widths[i]), _widths[i], c.Align),
+                    Align(Text.Ellipsize(c.Header + mark, _widths[i]), _widths[i], c.Align),
                     fg: i == SelectedCol ? accent : Theme.Get(ThemeRole.Title), bold: true);
                 if (i < Columns.Count - 1)
                     buffer.WriteTextClipped(Clip, r.X + _starts[i] + _widths[i], r.Y, "│", fg: dim);
