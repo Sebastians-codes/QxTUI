@@ -241,3 +241,21 @@ public class TreeStatusColorTests
         Assert.Equal(theme.Get(ThemeRole.Danger), FgOf(app, "src"));
     }
 }
+
+public class SubmoduleStatusTests
+{
+    [Fact]
+    public void PorcelainSubmoduleSuffixes_DoNotLeakIntoPaths()
+    {
+        var porcelain =
+            " M libs/foo (new commits, untracked content)\n" +
+            " M libs/bar (new commits)\n" +
+            " M notes (old).txt\n";           // real file with parens: untouched
+        var map = Git.ParseStatus(porcelain);
+
+        Assert.Equal(new Git.FileStatus(' ', 'M'), map["libs/foo"]);
+        Assert.Equal(new Git.FileStatus(' ', 'M'), map["libs/bar"]);
+        Assert.True(map.ContainsKey("notes (old).txt"));
+        Assert.False(map.Keys.Any(k => k.Contains("untracked content")));
+    }
+}

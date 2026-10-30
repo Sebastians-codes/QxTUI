@@ -196,3 +196,41 @@ public class CellBufferTests
         Assert.Equal(Cell.Empty, buf[1, 1]);
     }
 }
+
+public class ControlCharRenderTests
+{
+    [Fact]
+    public void Tabs_ExpandToStops_AsSpaceCells()
+    {
+        var buf = new CellBuffer(20, 3);
+        buf.WriteTextClipped(new RenderClip(0, 0, 20, 3), 0, 0, "a\tb");
+        // 'a' at 0, tab expands to stop 8, 'b' lands at 8
+        Assert.Equal('a', buf.Cells[0].Char);
+        for (int x = 1; x < 8; x++) Assert.Equal(' ', buf.Cells[x].Char);
+        Assert.Equal('b', buf.Cells[8].Char);
+    }
+
+    [Fact]
+    public void CarriageReturn_AndControls_NeverReachCellsRaw()
+    {
+        var buf = new CellBuffer(20, 3);
+        buf.WriteTextClipped(new RenderClip(0, 0, 20, 3), 0, 0, "a\r b");
+        for (int x = 0; x < 4; x++)
+            Assert.True(buf.Cells[x].Char >= ' ', $"raw control at {x}");
+        Assert.Equal('a', buf.Cells[0].Char);
+        Assert.Equal(' ', buf.Cells[1].Char); // the \r became a space cell
+        Assert.Equal('b', buf.Cells[3].Char);
+    }
+
+    [Fact]
+    public void TabNearClipEdge_StopsAtTheEdge()
+    {
+        var buf = new CellBuffer(20, 3);
+        var clip = new RenderClip(0, 0, 6, 3);
+        buf.WriteTextClipped(clip, 4, 0, "a\tb", fg: 5);
+        // 'a' at 4, tab would run to 8 but the clip ends at 6
+        Assert.Equal(5, buf.Cells[4].Fg);
+        Assert.Equal(5, buf.Cells[5].Fg);   // tab space inside the clip
+        Assert.NotEqual(5, buf.Cells[6].Fg); // nothing painted past it
+    }
+}

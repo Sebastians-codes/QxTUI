@@ -60,7 +60,25 @@ internal static class Git
 
     /// <summary>porcelain v1 → path → (index, worktree) letters. Renames
     /// key the NEW path. Directory entries ("dir/") are skipped — their
-    /// files are listed individually.</summary>
+    /// files are listed individually.
+    ///
+    /// SUBMODULES: porcelain annotates gitlink entries with " (new
+    /// commits)", " (untracked content)" and combinations. Left in, the
+    /// suffix became part of the path — ghost tree leaves, failing diffs
+    /// and failing `git add` on every repo with submodules. Strip the
+    /// exact known suffixes (a generic ')' trim would mangle real files
+    /// named "notes (old)").</summary>
+    private static readonly string[] SubmoduleSuffixes =
+    [
+        " (new commits, modified content, untracked content)",
+        " (new commits, modified content)",
+        " (new commits, untracked content)",
+        " (modified content, untracked content)",
+        " (new commits)",
+        " (modified content)",
+        " (untracked content)",
+    ];
+
     public static Dictionary<string, FileStatus> ParseStatus(string porcelain)
     {
         var map = new Dictionary<string, FileStatus>();
@@ -71,6 +89,12 @@ internal static class Git
             string path = line[3..];
             int arrow = path.IndexOf(" -> ", StringComparison.Ordinal);
             if (arrow >= 0 && x is 'R' or 'C') path = path[(arrow + 4)..];
+            foreach (var suffix in SubmoduleSuffixes)
+                if (path.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    path = path[..^suffix.Length];
+                    break;
+                }
             if (path.EndsWith('/')) continue;
             map[path] = new FileStatus(x, y);
         }
