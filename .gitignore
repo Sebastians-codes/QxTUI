@@ -9,6 +9,8 @@ obj/
 [Rr]elease/
 TestResults/
 *.nupkg
+*.snupkg
+artifacts/
 
 ## OS
 .DS_Store
