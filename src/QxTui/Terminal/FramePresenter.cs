@@ -23,6 +23,7 @@ public sealed class FramePresenter : IDisposable
     private int _length;
     private long _pendingId;
     private long _writtenId;
+    private long _claimedId;
     private bool _hasFrame;
     private bool _stopped;
 
@@ -30,6 +31,25 @@ public sealed class FramePresenter : IDisposable
     /// Dropped submits never reach it — rebasing repair on anything else
     /// diffs against content the terminal never showed (frozen holes).</summary>
     public long WrittenId => Volatile.Read(ref _writtenId);
+
+    /// <summary>Id of the newest frame the writer has taken: it WILL reach
+    /// the terminal in full, ahead of anything submitted later, so it is
+    /// the only safe base for the next delta. WrittenId lags it.</summary>
+    public long ClaimedId { get { lock (_gate) return _claimedId; } }
+
+    /// <summary>Withdraw a frame the writer has not taken yet. Call BEFORE
+    /// diffing: with the mailbox empty the next Submit cannot replace a
+    /// delta, so no delta is ever lost.</summary>
+    public bool CancelPending()
+    {
+        lock (_gate)
+        {
+            if (!_hasFrame) return false;
+            _hasFrame = false;
+            Interlocked.Increment(ref _dropped);
+            return true;
+        }
+    }
 
     /// <summary>Frames actually handed to the terminal (emulator-limited).</summary>
     public long PresentedCount => Volatile.Read(ref _presented);
@@ -115,6 +135,7 @@ public sealed class FramePresenter : IDisposable
                 buffer = _buffer!;
                 length = _length;
                 id = _pendingId;
+                _claimedId = id;
                 _buffer = null;
                 _hasFrame = false;
             }

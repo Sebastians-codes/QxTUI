@@ -86,7 +86,6 @@ public sealed class App : IDisposable
     // Quit() flips it, Run() re-arms it
     private bool _running = true;
     private long _lastPresentedCount;
-    private long _droppedSeen;
     private int _presentedWindowFrames;
     private int _renderedWindowFrames;
     private int _mouseWindowEvents;
@@ -1283,30 +1282,17 @@ public sealed class App : IDisposable
         RenderResult result = default;
         if (composed)
         {
-            // dropped delta frames desync the terminal (it never applied
-            // those diffs): the next frame after any drop must be FULL.
-            // Capture the count BEFORE submitting: a drop caused by this
-            // frame's own submit must trigger the NEXT frame's resync.
-            bool dropped = _presenter is not null &&
-                           _presenter.DroppedCount != _droppedSeen;
-            if (_presenter is not null)
-                _droppedSeen = _presenter.DroppedCount;
-
-            // a drop means the terminal never saw those diffs: re-base the
-            // front buffer on the last SUBMITTED content and repair with a
-            // minimal delta (a full repaint here would flood a terminal
-            // that is already drowning: drop → 40KB → more drops)
-            if (dropped && _presenter is not null)
+            // a frame still in the mailbox never reached the terminal:
+            // withdraw it and diff against the frame the writer holds. The
+            // mailbox is then empty, so this submit cannot lose a delta.
+            if (_presenter is not null && _presenter.CancelPending())
             {
-                // rebase on the frame the writer ACTUALLY wrote: a dropped
-                // submit's snapshot is content the terminal never saw, and
-                // diffing against it freezes holes forever
-                var written = _presenter.WrittenId;
-                var snap = written == _snapIdA ? _snapA
-                           : written == _snapIdB ? _snapB
-                           : _lastSubmitted;
-                if (snap is not null)
-                    _renderer.AdoptPrev(snap);
+                long claimed = _presenter.ClaimedId;
+                var snap = claimed == _snapIdA ? _snapA
+                           : claimed == _snapIdB ? _snapB
+                           : null;
+                if (snap is not null) _renderer.AdoptPrev(snap);
+                else _renderer.Resync();
             }
 
             _output.Clear();
@@ -1324,13 +1310,14 @@ public sealed class App : IDisposable
 
             if (_back.Width == _snapW && _back.Height == _snapH)
             {
-                // two-slot ring: {the written frame, the latest frame}.
-                // The written slot is PROTECTED — overwriting it would
+                // two-slot ring: {the claimed frame, the latest frame}.
+                // The claimed slot is PROTECTED — overwriting it would
                 // leave the drop-repair without the terminal's true base
                 // and freeze holes again (the id%2 version did exactly
-                // that once submits outran writes).
+                // that once submits outran writes, and protecting only
+                // the finished frame did while one was in flight).
                 bool useA = UseSlotA(_snapIdA, _snapIdB,
-                                     _presenter?.WrittenId ?? long.MinValue);
+                                     _presenter?.ClaimedId ?? long.MinValue);
                 if (useA)
                 {
                     _snapA ??= new CellBuffer(_back.Width, _back.Height);
@@ -1405,11 +1392,12 @@ public sealed class App : IDisposable
     }
 
     /// <summary>Slot choice for the next snapshot: never overwrite the
-    /// snapshot the terminal is actually showing; otherwise the older one.</summary>
-    internal static bool UseSlotA(long idA, long idB, long written)
+    /// frame the writer holds, the next delta's base if the mailbox is
+    /// withdrawn; otherwise the older one.</summary>
+    internal static bool UseSlotA(long idA, long idB, long claimed)
     {
-        if (idA == written) return false;
-        if (idB == written) return true;
+        if (idA == claimed) return false;
+        if (idB == claimed) return true;
         return idA <= idB; // neither protected: recycle the older slot
     }
 

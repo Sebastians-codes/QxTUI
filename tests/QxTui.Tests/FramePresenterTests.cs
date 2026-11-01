@@ -268,15 +268,74 @@ public class WrittenIdTests
     }
 }
 
+public class ClaimedIdTests
+{
+    [Fact]
+    public void ClaimedId_MovesWhenTheWriterTakesAFrame_BeforeWrittenId()
+    {
+        var gate = new ManualResetEventSlim(false);
+        using var p = new FramePresenter(_ => gate.Wait(TimeSpan.FromSeconds(2)));
+
+        p.Submit("frame1"u8, 1);
+        Assert.True(SpinWait.SpinUntil(() => p.ClaimedId == 1, TimeSpan.FromSeconds(2)));
+        Assert.Equal(0, p.WrittenId); // still inside write()
+
+        gate.Set();
+        Assert.True(SpinWait.SpinUntil(() => p.WrittenId == 1, TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
+    public void CancelPending_WithdrawsAnUnclaimedFrame_AndCountsTheDrop()
+    {
+        var seen = new List<string>();
+        var gate = new ManualResetEventSlim(false);
+        using var p = new FramePresenter(b =>
+        {
+            gate.Wait(TimeSpan.FromSeconds(2));
+            lock (seen) seen.Add(System.Text.Encoding.UTF8.GetString(b));
+        });
+
+        p.Submit("frame1"u8, 1);
+        Assert.True(SpinWait.SpinUntil(() => p.ClaimedId == 1, TimeSpan.FromSeconds(2)));
+        p.Submit("frame2"u8, 2);       // mailbox
+
+        Assert.True(p.CancelPending());
+        Assert.False(p.CancelPending()); // mailbox already empty
+        Assert.Equal(1, p.DroppedCount);
+
+        p.Submit("frame3"u8, 3);       // the empty mailbox costs no drop
+        Assert.Equal(1, p.DroppedCount);
+
+        gate.Set();
+        Assert.True(SpinWait.SpinUntil(() => p.WrittenId == 3, TimeSpan.FromSeconds(2)));
+        lock (seen) Assert.Equal(["frame1", "frame3"], seen);
+    }
+
+    [Fact]
+    public void CancelPending_LeavesAClaimedFrameAlone()
+    {
+        var gate = new ManualResetEventSlim(false);
+        using var p = new FramePresenter(_ => gate.Wait(TimeSpan.FromSeconds(2)));
+
+        p.Submit("frame1"u8, 1);
+        Assert.True(SpinWait.SpinUntil(() => p.ClaimedId == 1, TimeSpan.FromSeconds(2)));
+
+        Assert.False(p.CancelPending());
+
+        gate.Set();
+        Assert.True(SpinWait.SpinUntil(() => p.WrittenId == 1, TimeSpan.FromSeconds(2)));
+    }
+}
+
 public class SnapshotSlotTests
 {
     [Fact]
-    public void UseSlotA_ProtectsTheWrittenSnapshot()
+    public void UseSlotA_ProtectsTheWritersSnapshot()
     {
-        // the written frame's slot must never be recycled, or drop-repair
-        // loses the terminal's true base and freezes holes
-        Assert.False(App.UseSlotA(5, 6, 5)); // A is on screen -> write B
-        Assert.True(App.UseSlotA(5, 6, 6));  // B is on screen -> write A
+        // the writer's frame must never be recycled, or drop-repair loses
+        // the terminal's true base and freezes holes
+        Assert.False(App.UseSlotA(5, 6, 5)); // writer holds A -> write B
+        Assert.True(App.UseSlotA(5, 6, 6));  // writer holds B -> write A
         Assert.True(App.UseSlotA(5, 6, 9));  // neither -> recycle older (A)
         Assert.False(App.UseSlotA(8, 6, 9)); // neither -> recycle older (B)
     }

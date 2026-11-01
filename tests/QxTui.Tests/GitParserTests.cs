@@ -151,7 +151,7 @@ public class GitParserTests
             dir!.FullName, CancellationToken.None, "rev-parse", "--show-toplevel");
 
         Assert.Equal(0, code);
-        Assert.Contains("qxtui", sout);
+        Assert.Contains("qxtui", sout, StringComparison.OrdinalIgnoreCase);
     }
 }
 

@@ -67,7 +67,9 @@ writer thread      → the ONLY place a blocking tty write may happen
   the pty queue is a few KB and a blocking write couples our fps to the
   terminal emulator's drain rate (which scales with window size). If the
   writer is behind, intermediate frames are DROPPED (latest wins): render
-  the latest state, never queue frames.
+  the latest state, never queue frames. Frames are deltas, so a frame is
+  only ever dropped by withdrawing it BEFORE the next diff, which rebases
+  on the frame the writer holds: no delta is lost, however writes interleave.
 - Stats must report produced fps (pacer) AND presented fps (writer
   hand-offs) separately; presented is terminal-capped and that is expected.
 - Frame pacer renders the LATEST state; if behind, skip ahead (drop
