@@ -1068,6 +1068,9 @@ public sealed class App : IDisposable
 
         while (_running && _keyParser.TryReadKey(out var keyEvent))
         {
+            // typing means you've moved on from the hint, wherever the mouse rests
+            CancelTooltip();
+
             if (KeyPreview is { } preview && preview(keyEvent))
                 continue;
 

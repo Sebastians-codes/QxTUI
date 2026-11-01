@@ -584,6 +584,53 @@ public class VocabularyTests
     }
 
     [Fact]
+    public void Tooltip_AnyKeyHidesIt_WithTheMouseResting()
+    {
+        var a = new ParserFuzzProbe { Tooltip = "hint" };
+        a.Node.Height = 4;
+        a.Node.Grow = 1;
+        var (app, term, clock) = MakeApp(UI.Column(0, a), w: 40, h: 8);
+        app.TooltipDelayMs = 500;
+        app.RunFrame();
+        Mouse(term, "\x1b[<35;5;2M");
+        app.RunFrame();
+        clock.Advance(TimeSpan.FromMilliseconds(600));
+        app.RunFrame();
+        app.RunFrame();
+        Assert.IsType<TooltipBox>(app.Overlay);
+
+        term.QueueInput((byte)'j');
+        app.RunFrame();
+        Assert.Null(app.Overlay);
+
+        clock.Advance(TimeSpan.FromMilliseconds(600));
+        app.RunFrame();
+        app.RunFrame();
+        Assert.Null(app.Overlay); // no motion, so it stays gone
+    }
+
+    [Fact]
+    public void Tooltip_AKeyCancelsOneStillWaitingToShow()
+    {
+        var a = new ParserFuzzProbe { Tooltip = "hint" };
+        a.Node.Height = 4;
+        a.Node.Grow = 1;
+        var (app, term, clock) = MakeApp(UI.Column(0, a), w: 40, h: 8);
+        app.TooltipDelayMs = 500;
+        app.RunFrame();
+        Mouse(term, "\x1b[<35;5;2M");
+        app.RunFrame();
+
+        term.QueueInput((byte)'j');
+        app.RunFrame();
+        clock.Advance(TimeSpan.FromMilliseconds(600));
+        app.RunFrame();
+        app.RunFrame();
+
+        Assert.Null(app.Overlay);
+    }
+
+    [Fact]
     public void Tooltip_PressCancels_EvenBeforeDelay()
     {
         var a = new ParserFuzzProbe { Tooltip = "hint" };
