@@ -328,6 +328,9 @@ public sealed class TreeView : Widget
                 }
                 return false;
 
+            case MouseKind.WheelLeft or MouseKind.WheelRight:
+                return false;
+
             default: // release
                 _dragThumb = false;
                 return false;

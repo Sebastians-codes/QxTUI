@@ -7,6 +7,8 @@ public enum MouseKind
     Motion,
     WheelUp,
     WheelDown,
+    WheelLeft,
+    WheelRight,
 }
 
 /// <summary>Terminal mouse event in 0-based cell coordinates. Px/Py are the

@@ -48,6 +48,9 @@ public sealed class Slider : Widget
             case MouseKind.WheelDown:
                 Nudge(-WheelStep);
                 return true;
+            case MouseKind.WheelLeft or MouseKind.WheelRight:
+                return false;
+
             default: // release
                 _dragging = false;
                 return true;

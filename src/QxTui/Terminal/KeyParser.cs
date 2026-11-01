@@ -275,11 +275,18 @@ public sealed class KeyParser
             acc = 0;
         }
 
+        bool wheel = (btn & 64) != 0 && final != (byte)'m';
         MouseKind kind;
         if (final == (byte)'m')
             kind = MouseKind.Release;
-        else if ((btn & 64) != 0)
-            kind = (btn & 1) == 0 ? MouseKind.WheelUp : MouseKind.WheelDown;
+        else if (wheel)
+            kind = (btn & 3) switch
+            {
+                0 => MouseKind.WheelUp,
+                1 => MouseKind.WheelDown,
+                2 => MouseKind.WheelLeft,
+                _ => MouseKind.WheelRight,
+            };
         else if ((btn & 32) != 0)
             kind = MouseKind.Motion;
         else
@@ -287,7 +294,9 @@ public sealed class KeyParser
 
         // SGR modifier bits: +4 shift, +8 alt, +16 ctrl — multi-select
         // gestures (shift-click range, ctrl-click toggle) read these
-        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, btn & 3, kind, x - 1, y - 1,
+        // a wheel has no button: its low bits are the direction, and 2 would
+        // read as the right mouse button
+        _mouse.Enqueue(new MouseEvent(x - 1, y - 1, wheel ? 0 : btn & 3, kind, x - 1, y - 1,
             Shift: (btn & 4) != 0, Ctrl: (btn & 16) != 0, Alt: (btn & 8) != 0));
     }
 
