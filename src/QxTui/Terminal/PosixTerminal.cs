@@ -5,26 +5,33 @@ using System.Runtime.Versioning;
 
 namespace QxTui.Terminal;
 
-/// <summary>Terminal abstraction so the app loop is testable headless.</summary>
-public interface ITerminal : IDisposable
+/// <summary>The parts of `stty` handling that differ per OS. Pure, so both
+/// variants are testable on any machine.</summary>
+internal static class PosixStty
 {
-    int Width { get; }
-    int Height { get; }
-    /// <summary>True once since the last call when a resize occurred.</summary>
-    bool ConsumeResize();
-    /// <summary>Drain pending input; returns plain bytes ('q', 'r', ...). PoC scope.</summary>
-    bool TryReadInput(out byte b);
-    void Write(ReadOnlySpan<byte> bytes);
-    void Enter();
-    void Exit();
+    /// <summary>GNU stty names the device with -F, BSD stty (macOS) with -f.</summary>
+    internal static string Arguments(bool bsd, string args) =>
+        $"{(bsd ? "-f" : "-F")} /dev/tty {args}";
+
+    /// <summary>Parses `stty size` output ("rows cols"); null if malformed.</summary>
+    internal static (int Rows, int Cols)? ParseSize(string output)
+    {
+        var parts = output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2 && int.TryParse(parts[0], out int rows) &&
+            int.TryParse(parts[1], out int cols) && rows > 0 && cols > 0)
+            return (rows, cols);
+        return null;
+    }
 }
 
 /// <summary>
-/// POSIX terminal (Linux first — AGENT.md §5 PoC scope).
-/// Raw mode + alternate screen via stty/ANSI, size via TIOCGWINSZ ioctl,
-/// resize via SIGWINCH, input via a background reader into a lock-free queue.
+/// POSIX terminal (Linux and macOS).
+/// Raw mode + alternate screen via stty/ANSI, size via TIOCGWINSZ ioctl on
+/// Linux and `stty size` on macOS, resize via SIGWINCH, input via a
+/// background reader into a lock-free queue.
 /// </summary>
 [SupportedOSPlatform("linux")]
+[SupportedOSPlatform("macos")]
 public sealed class PosixTerminal : ITerminal
 {
     private const int TIOCGWINSZ = 0x5413; // Linux (x64/arm64)
@@ -78,26 +85,12 @@ public sealed class PosixTerminal : ITerminal
     public void Enter()
     {
         Stty("raw -echo");
-        WriteRaw("\x1b[?1049h"); // alternate screen
-        WriteRaw("\x1b[?25l");    // hide cursor
-        WriteRaw("\x1b[?1003h"); // mouse press/release + any-motion (hover)
-        WriteRaw("\x1b[?1006h"); // SGR encoding (unlimited coordinates)
-        // pixel mode (?1016) is enabled LATER, only once the CSI 16 t reply
-        // proves the terminal can answer it — pixel coords misread as cells
-        // would break all input otherwise
-        WriteRaw("\x1b[16t");    // cell size in px
-        WriteRaw("\x1b[14t");    // window size in px (fallback cell probe)
-        WriteRaw("\x1b[>q");     // XTVERSION: who are we talking to?
-        WriteRaw("\x1b[2J");      // clear
+        Write(TerminalSequences.Enter);
     }
 
     public void Exit()
     {
-        WriteRaw("\x1b[?1003l"); // mouse off
-        WriteRaw("\x1b[?1016l");
-        WriteRaw("\x1b[?1006l");
-        WriteRaw("\x1b[?25h");    // show cursor
-        WriteRaw("\x1b[?1049l");  // leave alternate screen
+        Write(TerminalSequences.Exit);
         Stty(_savedSttyState);
     }
 
@@ -121,17 +114,30 @@ public sealed class PosixTerminal : ITerminal
 
     private void QuerySize()
     {
-        WinSize ws = default;
-        if (ioctl(_ttyHandle.DangerousGetHandle().ToInt32(), TIOCGWINSZ, ref ws) == 0 && ws.Col > 0 && ws.Row > 0)
+        if (TryQuerySize() is var (rows, cols))
         {
-            Width = ws.Col;
-            Height = ws.Row;
+            Width = cols;
+            Height = rows;
         }
         else
         {
             Width = 80;
             Height = 24;
         }
+    }
+
+    // macOS gets stty instead of the ioctl: the request code differs there,
+    // and ioctl is variadic, so this P/Invoke would pass its pointer in the
+    // wrong place on Apple Silicon. A spawn is fine at resize frequency.
+    private (int Rows, int Cols)? TryQuerySize()
+    {
+        if (OperatingSystem.IsMacOS())
+            return PosixStty.ParseSize(Stty("size"));
+
+        WinSize ws = default;
+        if (ioctl(_ttyHandle.DangerousGetHandle().ToInt32(), TIOCGWINSZ, ref ws) == 0 && ws.Col > 0 && ws.Row > 0)
+            return (ws.Row, ws.Col);
+        return null;
     }
 
     // Blocking reads on a dedicated thread: async tty reads can miss epoll
@@ -157,16 +163,10 @@ public sealed class PosixTerminal : ITerminal
         }
     }
 
-    private void WriteRaw(string s)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(s);
-        _ttyOut.Write(bytes, 0, bytes.Length);
-        _ttyOut.Flush();
-    }
-
     private static string Stty(string args)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo("stty", $"-F /dev/tty {args}")
+        var psi = new System.Diagnostics.ProcessStartInfo("stty",
+            PosixStty.Arguments(OperatingSystem.IsMacOS(), args))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

@@ -363,7 +363,7 @@ internal sealed class Procs : Widget
                     .Select(row => row with { CpuPercent = _smoothCpu.GetValueOrDefault(row.Pid) })
                     .OrderByDescending(row => row.CpuPercent)
                     .ToList();
-                return (object)new ProcRowsMsg(rows);
+                return (object?)new ProcRowsMsg(rows);
             }
             finally
             {

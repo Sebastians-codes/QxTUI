@@ -115,6 +115,10 @@ belongs there, not in `Dispose`.
   `OutsideClickCloses` opts into dismiss-on-outside-press; title bar drags,
   right-drag resizes (`Resizable = true`) come free. Z-order is structural
   (per-overlay layers), so moving/resizing/closing never ghosts.
+- Context menus: `MenuItems` for a fixed menu; `MenuAt` when it depends on
+  what was clicked. A right-click moves no cursor, so resolve the row from
+  the cell: `list.MenuAt = at => list.RowAt(at.Y) is int row ? MenuFor(row) : null`
+  (`tree.NodeAt` for trees). Null falls through to the ancestors' menus.
 
 ## 6. Testing
 

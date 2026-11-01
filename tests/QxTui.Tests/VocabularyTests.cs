@@ -407,6 +407,149 @@ public class VocabularyTests
         Assert.Equal("i", got?.What);
     }
 
+    [Fact]
+    public void MenuAt_BuildsTheMenuForTheClickedCell()
+    {
+        var probe = new ParserFuzzProbe();
+        probe.Node.Height = 5;
+        Point? asked = null;
+        MenuMsg? got = null;
+        probe.MenuAt = at =>
+        {
+            asked = at;
+            return [new MenuItem("here", Msg: new MenuMsg($"row {at.Y}"))];
+        };
+        var above = new ParserFuzzProbe();
+        above.Node.Height = 2;
+        var (app, term, _) = MakeApp(UI.Column(0, above, probe));
+        app.OnMessage<MenuMsg>(m => got = m);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<2;5;4M\x1b[<2;5;4m"); // screen row 3, local row 1
+        app.RunFrame();
+
+        Assert.Equal(new Point(4, 1), asked);
+        Assert.IsType<ContextMenuPopup>(app.Overlay);
+        term.QueueInput((byte)'\r');
+        app.RunFrame();
+        Assert.Equal("row 1", got?.What);
+    }
+
+    [Fact]
+    public void MenuAt_IsAskedOnlyForAClickNotADrag()
+    {
+        var probe = new ParserFuzzProbe();
+        probe.Node.Height = 5;
+        int asked = 0;
+        probe.MenuAt = _ =>
+        {
+            asked++;
+            return [new MenuItem("x")];
+        };
+        var (app, term, _) = MakeApp(UI.Column(0, probe));
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<2;5;2M\x1b[<34;9;2M\x1b[<2;9;2m");
+        app.RunFrame();
+
+        Assert.Equal(0, asked);
+        Assert.Null(app.Overlay);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MenuAt_WithNothingToOffer_FallsThrough(bool empty)
+    {
+        var child = new ParserFuzzProbe { MenuAt = _ => empty ? [] : null };
+        child.Node.Height = 3;
+        var parent = new Container { MenuItems = [new MenuItem("above", Msg: new MenuMsg("a"))] };
+        parent.AddChild(child);
+        parent.Node.Grow = 1;
+        MenuMsg? got = null;
+        var (app, term, _) = MakeApp(UI.Column(0, parent));
+        app.OnMessage<MenuMsg>(m => got = m);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<2;5;2M\x1b[<2;5;2m");
+        app.RunFrame();
+        term.QueueInput((byte)'\r');
+        app.RunFrame();
+
+        Assert.Equal("a", got?.What);
+    }
+
+    [Fact]
+    public void MenuAt_WinsOverMenuItemsOnTheSameWidget()
+    {
+        var probe = new ParserFuzzProbe
+        {
+            MenuItems = [new MenuItem("static", Msg: new MenuMsg("static"))],
+            MenuAt = _ => [new MenuItem("live", Msg: new MenuMsg("live"))],
+        };
+        probe.Node.Height = 3;
+        MenuMsg? got = null;
+        var (app, term, _) = MakeApp(UI.Column(0, probe));
+        app.OnMessage<MenuMsg>(m => got = m);
+        app.RunFrame();
+
+        Mouse(term, "\x1b[<2;5;2M\x1b[<2;5;2m");
+        app.RunFrame();
+        term.QueueInput((byte)'\r');
+        app.RunFrame();
+
+        Assert.Equal("live", got?.What);
+    }
+
+    [Fact]
+    public void ListView_RowAt_CountsFromTheScrollOffset()
+    {
+        var list = new ListView(() => 50) { RowHeight = 2 };
+        list.Node.Grow = 1;
+        var (app, _, _) = MakeApp(UI.Column(0, list), w: 40, h: 12);
+        app.RunFrame();
+
+        Assert.Equal(1, list.RowAt(3));
+        list.ScrollTo(10);
+        Assert.Equal(10, list.RowAt(0));
+        Assert.Equal(11, list.RowAt(2));
+        Assert.Null(list.RowAt(-1));
+    }
+
+    [Fact]
+    public void ListView_RowAt_IsNullBelowTheLastRow()
+    {
+        var list = new ListView(() => 2);
+        list.Node.Grow = 1;
+        var (app, _, _) = MakeApp(UI.Column(0, list), w: 40, h: 12);
+        app.RunFrame();
+
+        Assert.Equal(1, list.RowAt(1));
+        Assert.Null(list.RowAt(2));
+    }
+
+    [Fact]
+    public void TreeView_NodeAt_SkipsWhatIsFolded()
+    {
+        var kept = new TreeNode("kept");
+        var hidden = new TreeNode("hidden");
+        var folded = new TreeNode("folded") { Expanded = false };
+        folded.Add(hidden);
+        var root = new TreeNode("root");
+        root.Add(folded);
+        root.Add(kept);
+        var tree = new TreeView(root);
+        tree.Node.Grow = 1;
+        var (app, _, _) = MakeApp(UI.Column(0, tree), w: 40, h: 12);
+        app.RunFrame();
+
+        Assert.Same(root, tree.NodeAt(0));
+        Assert.Same(folded, tree.NodeAt(1));
+        Assert.Same(kept, tree.NodeAt(2));
+        Assert.Null(tree.NodeAt(3));
+        Assert.Null(tree.NodeAt(-1));
+    }
+
     // ---- Tooltip --------------------------------------------------------------
 
     [Fact]

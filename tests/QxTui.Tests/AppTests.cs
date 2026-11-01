@@ -210,7 +210,7 @@ public class AppTests
     }
 
     [Fact]
-    public void OnDemandRendering_IdleLoopDoesNotRunAtTargetRate()
+    public async Task OnDemandRendering_IdleLoopDoesNotRunAtTargetRate()
     {
         // Regression: the 60fps loop spin-waiting between empty frames burned
         // ~12-18% CPU in qxtop. With only discrete timers active, the loop
@@ -231,7 +231,8 @@ public class AppTests
         int writes = term.WriteCount;
 
         term.QueueInput((byte)'q');
-        Assert.True(runTask.Wait(TimeSpan.FromSeconds(2)), "app did not quit");
+        var finished = await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.True(finished == runTask, "app did not quit");
 
         // a 60fps spin loop would emit ~27 frames in 450ms; on-demand emits
         // ~4-5 (one per 100ms tick) plus the initial paint.

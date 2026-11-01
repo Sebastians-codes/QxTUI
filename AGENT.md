@@ -158,7 +158,7 @@ writer thread      → the ONLY place a blocking tty write may happen
   `internal` + `InternalsVisibleTo` for tests.
 - No external NuGet dependencies in `src/QxTui` — BCL only.
 - Platform interop (stty, ioctl, signals) is isolated in `Terminal/` and
-  behind interfaces; PoC targets Linux/POSIX first, Windows later.
+  behind interfaces; `TerminalFactory` picks POSIX (Linux, macOS) or Windows.
 
 ## 5. Roadmap
 

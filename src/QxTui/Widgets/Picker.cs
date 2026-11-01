@@ -99,6 +99,11 @@ public sealed class Picker : Widget
                                (_search is null || ev.Char < ' '):
                 _extraKey(ev.Char, Math.Clamp(_cursor, 0, Math.Max(0, n - 1)), _query);
                 return true;
+            case Key.Space when _search is not null:   // parsed apart from chars
+                _query += ' ';
+                _cursor = 0;
+                Invalidate();
+                return true;
             case Key.Char when _search is not null && ev.Char >= ' ':
                 _query += ev.Char;   // search mode: typing edits the query
                 _cursor = 0;

@@ -69,7 +69,7 @@ Animation  Transition, Easing, AnimationScheduler (one clock, injectable time)
 Layout     flexbox tree, pure integer cell math, rect-change tracking
 Render     Cell/CellBuffer, damage rects + coalescing, ANSI serializer, pacer
 Core       Widget (retained, dirty-tracked), App (the frame loop)
-Terminal   POSIX raw mode, alt screen, SIGWINCH, background input reader
+Terminal   raw mode, alt screen, resize and input per OS (POSIX, Windows)
 ```
 
 Layer rule: no upward dependencies; `Render` and `Layout` are pure and fully
@@ -103,5 +103,10 @@ definition of done.
 
 ## Status
 
-Phase 0 (PoC): Linux/POSIX only. No text wrapping, no mouse, no Windows,
-no component-kit beyond the demo widgets. See AGENT.md §5 roadmap.
+Phase 0 (PoC): no text wrapping, no mouse, no component-kit beyond the demo
+widgets. See AGENT.md §5 roadmap.
+
+Platforms: Linux is the tested platform. Windows (10 1809+, Windows Terminal)
+and macOS support is new and has not been verified on real machines yet.
+`TerminalFactory.Create()` picks the right terminal at runtime. The SysMon
+sample stays Linux-only because it reads `/proc`.

@@ -177,6 +177,11 @@ public sealed class App : IDisposable
     /// mouse events, or posted messages — never as raw bytes.</summary>
     public Func<KeyEvent, bool>? OnKey { get; set; }
 
+    /// <summary>Sees every key first, ahead of overlays and focus; true
+    /// consumes it. For modes that own the keyboard without being a window,
+    /// like a command line: Esc there must not close the overlay below.</summary>
+    public Func<KeyEvent, bool>? KeyPreview { get; set; }
+
     /// <summary>When false, Tab is delivered like any other key (focused
     /// widget first, then <see cref="OnKey"/>) instead of cycling focus.
     /// Apps with modal/edit modes (vim-style insert) own Tab themselves.</summary>
@@ -641,8 +646,7 @@ public sealed class App : IDisposable
                 var owner = _rightPressTarget;
                 bool moved = _rightMoved;
                 _rightPressTarget = null;
-                if (!moved && owner is not null && MenuOwnerOf(owner) is { } mw)
-                    PushOverlay(new ContextMenuPopup(mw.MenuItems!, ev.X, ev.Y));
+                if (!moved && owner is not null) OpenContextMenu(owner, ev);
                 return; // a right-click is never an OnClick
             }
             return;
@@ -773,12 +777,21 @@ public sealed class App : IDisposable
     /// name slot; per-toast override via desktopTitle).</summary>
     public string DesktopNotifyTitle { get; set; } = "qxtui";
 
-    /// <summary>The nearest widget at/above `w` that carries a context menu.</summary>
-    private static Widget? MenuOwnerOf(Widget w)
+    /// <summary>Opens the menu of the nearest widget at/above `w` that has
+    /// something to offer at the clicked cell.</summary>
+    private void OpenContextMenu(Widget w, MouseEvent ev)
     {
         for (Widget? t = w; t is not null; t = t.Parent)
-            if (t.MenuItems is { Length: > 0 }) return t;
-        return null;
+        {
+            var items = t.MenuAt is { } menuAt
+                ? menuAt(new Point(ev.X - t.Rect.X, ev.Y - t.Rect.Y))
+                : t.MenuItems;
+            if (items is { Length: > 0 })
+            {
+                PushOverlay(new ContextMenuPopup(items, ev.X, ev.Y));
+                return;
+            }
+        }
     }
 
     private void CancelTooltip()
@@ -1055,6 +1068,9 @@ public sealed class App : IDisposable
 
         while (_running && _keyParser.TryReadKey(out var keyEvent))
         {
+            if (KeyPreview is { } preview && preview(keyEvent))
+                continue;
+
             // overlay stack gets first chance at keys, top first
             bool consumed = false;
             for (int oi = _overlays.Count - 1; oi >= 0; oi--)
@@ -1370,7 +1386,7 @@ public sealed class App : IDisposable
     private static System.IO.StreamWriter TraceWriter =>
         _traceWriter ??= new System.IO.StreamWriter(
             Environment.GetEnvironmentVariable("QXTUI_TRACE_FILE")
-                ?? "/tmp/qxtui_trace.log", append: false);
+                ?? Path.Combine(Path.GetTempPath(), "qxtui_trace.log"), append: false);
     private int _traceFrame;
     private readonly List<string> _traceErases = new();
     private readonly List<string> _traceRendered = new();

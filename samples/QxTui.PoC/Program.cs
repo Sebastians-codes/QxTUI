@@ -17,13 +17,7 @@ using QxTui.Terminal;
 //                           bytes/frame stays tiny (damage isolation)
 // ---------------------------------------------------------------------------
 
-if (!OperatingSystem.IsLinux())
-{
-    Console.Error.WriteLine("qxtui PoC: Linux only for now (Phase 3 adds Windows).");
-    return 1;
-}
-
-var terminal = new PosixTerminal(); // owned (and disposed) by App
+var terminal = TerminalFactory.Create(); // owned (and disposed) by App
 
 // ---- widgets ----------------------------------------------------------------
 

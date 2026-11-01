@@ -165,6 +165,53 @@ public class PickerSearchTests
     }
 
     [Fact]
+    public void KeyPreview_ConsumesAKeyAheadOfOverlays()
+    {
+        var (app, term, _) = MakeApp(new LayoutNode());
+        int commits = 0;
+        app.PushOverlay(new Picker("t", () => ["a"], (_, _) => commits++));
+        app.RunFrame();
+        bool take = true;
+        int seen = 0;
+        app.KeyPreview = _ =>
+        {
+            seen++;
+            return take;
+        };
+
+        term.QueueInput((byte)'\r');
+        app.RunFrame();
+        Assert.Equal(1, seen);
+        Assert.Equal(0, commits); // taken by the preview: the picker never saw it
+
+        take = false;
+        term.QueueInput((byte)'\r');
+        app.RunFrame();
+        Assert.Equal(2, seen);
+        Assert.Equal(1, commits); // passed on
+    }
+
+    [Fact]
+    public void Search_TakesSpacesInTheQuery()
+    {
+        string? seen = null;
+        var picker = new Picker("t", () => ["a"], (_, _) => { },
+            search: q =>
+            {
+                seen = q;
+                return ["a"];
+            });
+        var (app, term, _) = MakeApp(new LayoutNode());
+        app.PushOverlay(picker);
+        app.RunFrame();
+
+        foreach (byte b in "a b"u8) term.QueueInput(b);
+        app.RunFrame();
+
+        Assert.Equal("a b", seen);
+    }
+
+    [Fact]
     public void Search_NoMatch_EnterCallsOnCreate_WithTheQuery()
     {
         string? created = null;

@@ -13,13 +13,7 @@ using QxTui.Terminal;
 // the playfield ticks away beside it.
 // ---------------------------------------------------------------------------
 
-if (!OperatingSystem.IsLinux())
-{
-    Console.Error.WriteLine("qxtui snake: Linux only for now.");
-    return 1;
-}
-
-var terminal = new PosixTerminal();
+var terminal = TerminalFactory.Create();
 var app = new App(terminal, new LayoutNode(), targetFps: 165);
 
 var score = new Signal<int>(0);

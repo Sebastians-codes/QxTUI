@@ -21,13 +21,7 @@ using QxTui.Widgets;
 //   damage isolation  static panel renders once; stats prove it live
 // ---------------------------------------------------------------------------
 
-if (!OperatingSystem.IsLinux())
-{
-    Console.Error.WriteLine("qxtui playground: Linux only for now.");
-    return 1;
-}
-
-var terminal = new PosixTerminal();
+var terminal = TerminalFactory.Create();
 var app = new App(terminal, new LayoutNode(), targetFps: 120);
 
 // ---- signals + declarative transitions (one scheduler clock) ---------------
@@ -69,7 +63,7 @@ var wrapDemo = new Paragraph(() =>
 var speedLabel = new Label(speed, v =>
 {
     float m = Ball.MultFor(v);
-    return $"speed {(m < 10 ? m.ToString("F1") : m.ToString("F0"))}x";
+    return $"speed {m.ToString(m < 10 ? "F1" : "F0", System.Globalization.CultureInfo.InvariantCulture)}x";
 }, bg: ThemeRole.PanelBg); // opaque strip: ball must not show through
 var speedSlider = new Slider(speed, ThemeRole.Warning);
 

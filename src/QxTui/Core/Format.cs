@@ -17,9 +17,9 @@ public static class Format
     /// <summary>btop-style compact from KiB: 720M, 8.2M, 512K, 1.4G.</summary>
     public static string CompactKiB(long kb) => kb switch
     {
-        >= 10 * 1024 * 1024 => $"{kb / (1024.0 * 1024.0):F1}G",
-        >= 10 * 1024 => $"{kb / 1024.0:F0}M",
-        >= 1024 => $"{kb / 1024.0:F1}M",
+        >= 10 * 1024 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{kb / (1024.0 * 1024.0):F1}G"),
+        >= 10 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{kb / 1024.0:F0}M"),
+        >= 1024 => string.Create(CultureInfo.InvariantCulture, $"{kb / 1024.0:F1}M"),
         _ => $"{kb}K",
     };
 }

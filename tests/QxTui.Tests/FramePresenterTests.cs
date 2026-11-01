@@ -203,7 +203,6 @@ public class DropResyncTests
     {
         public int Width { get; } = 40;
         public int Height { get; } = 10;
-        public long Dropped;
 
         public bool ConsumeResize() => false;
         public bool TryReadInput(out byte b) { b = 0; return false; }

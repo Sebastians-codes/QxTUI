@@ -144,4 +144,24 @@ public class FormatTests
     [InlineData(14680064, "14.0G")]
     public void CompactKiB(long kb, string expected) =>
         Assert.Equal(expected, Format.CompactKiB(kb));
+
+    [Fact]
+    public void OutputIgnoresTheMachineLocale()
+    {
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+        var commaDecimal = (System.Globalization.CultureInfo)
+            System.Globalization.CultureInfo.InvariantCulture.Clone();
+        commaDecimal.NumberFormat.NumberDecimalSeparator = ",";
+        System.Globalization.CultureInfo.CurrentCulture = commaDecimal;
+        try
+        {
+            Assert.Equal("8.0M", Format.CompactKiB(8192));
+            Assert.Equal("14.0G", Format.CompactKiB(14680064));
+            Assert.Equal("8.0GiB", Format.HumanBytes(8598323200.0));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
 }

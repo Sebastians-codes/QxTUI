@@ -104,6 +104,16 @@ public sealed class TreeView : Widget
         }
     }
 
+    /// <summary>The node at a widget-local line, or null past the last one.
+    /// A right-click reports the cell through <see cref="Widget.MenuAt"/>
+    /// and moves no cursor, so a menu must resolve its node itself.</summary>
+    public TreeNode? NodeAt(int localY)
+    {
+        Flatten();
+        int row = Offset + localY;
+        return localY >= 0 && row < _flat.Count ? _flat[row] : null;
+    }
+
     private void Flatten()
     {
         _flat.Clear();

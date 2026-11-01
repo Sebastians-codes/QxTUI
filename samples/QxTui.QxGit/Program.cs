@@ -31,12 +31,6 @@ using QxTui.Widgets;
 //   / filter · t tree · a all/changed · r refresh · q quit · Tab focus
 // ---------------------------------------------------------------------------
 
-if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-{
-    Console.Error.WriteLine("qxgit: POSIX only (the terminal layer is).");
-    return 1;
-}
-
 string startDir = Path.GetFullPath(args.Length > 0 ? args[0] : Directory.GetCurrentDirectory());
 const string LogFormat = "%H%x09%an%x09%ad%x09%s";
 const string BranchFormat =
@@ -62,7 +56,7 @@ var branch = new Signal<string>("…");
 var busy = new Signal<string>("");
 var diffTitle = new Signal<string>("select a commit or file");
 
-var terminal = new PosixTerminal();
+var terminal = TerminalFactory.Create();
 var app = new App(terminal, new LayoutNode(), targetFps: 120);
 app.DesktopNotifyTitle = "qxgit";
 
@@ -756,9 +750,14 @@ app.OnMessage<RepoMsg>(m =>
     // perpetual refresh loop that rebuilt the tree (and cleared its
     // selection) twice a second
     watcher = new FileWatcher(app, repoRoot, () => new WatchMsg(),
-        include: p => !p.Contains("/.git/", StringComparison.Ordinal)
-                      || p.EndsWith("/HEAD", StringComparison.Ordinal)
-                      || p.Contains("/.git/refs/", StringComparison.Ordinal));
+        include: changed =>
+        {
+            // the watcher reports native separators: \ on Windows
+            string p = changed.Replace(Path.DirectorySeparatorChar, '/');
+            return !p.Contains("/.git/", StringComparison.Ordinal)
+                   || p.EndsWith("/HEAD", StringComparison.Ordinal)
+                   || p.Contains("/.git/refs/", StringComparison.Ordinal);
+        });
     RefreshAll();
 });
 

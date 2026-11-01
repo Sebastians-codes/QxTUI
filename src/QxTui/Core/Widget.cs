@@ -360,6 +360,14 @@ public abstract class Widget
     /// the two right-button gestures never collide.</summary>
     public MenuItem[]? MenuItems { get; set; }
 
+    /// <summary>OPT-IN live context menu: called on a right-click with the
+    /// clicked cell (widget-local), for menus that depend on what is under
+    /// the pointer: the row of a list, say, which <see cref="ListView.RowAt"/>
+    /// and <see cref="TreeView.NodeAt"/> resolve. Wins over
+    /// <see cref="MenuItems"/>. Null or empty means nothing to offer here,
+    /// and the lookup goes on to the ancestors.</summary>
+    public Func<Point, MenuItem[]?>? MenuAt { get; set; }
+
     /// <summary>OPT-IN tooltip: hovering this widget for
     /// <see cref="TooltipDelayMs"/> (default: App.TooltipDelayMs) shows a
     /// floating label; leaving or pressing pops it.</summary>

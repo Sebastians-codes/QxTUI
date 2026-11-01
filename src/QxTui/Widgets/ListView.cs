@@ -139,6 +139,16 @@ public sealed class ListView : Widget
 
     private int ThumbX() => Rect.X + OffsetX * (ViewWidth - ThumbW()) / Math.Max(1, MaxOffsetX);
 
+    /// <summary>The row at a widget-local line, or null past the last one.
+    /// A right-click reports the cell through <see cref="Widget.MenuAt"/>
+    /// and moves no cursor, so a menu must resolve its row itself.</summary>
+    public int? RowAt(int localY)
+    {
+        if (localY < 0) return null;
+        int row = Offset + localY / Math.Max(1, RowHeight);
+        return row < Count() ? row : null;
+    }
+
     public override bool HandleKey(KeyEvent ev)
     {
         if (!Focused) return false;

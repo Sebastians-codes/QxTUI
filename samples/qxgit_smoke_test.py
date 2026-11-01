@@ -25,6 +25,17 @@ import subprocess
 import tempfile
 CLONE = tempfile.mkdtemp(prefix="qxgit-smoke-")
 subprocess.run(["git", "clone", "--quiet", "--shared", REPO, CLONE], check=True)
+
+
+def git_out(*args):
+    return subprocess.run(["git", "-C", CLONE, *args], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+# read from the clone, not hard-coded: the run must hold on any branch and
+# after any commit
+BRANCH = git_out("rev-parse", "--abbrev-ref", "HEAD")
+HEAD_SUBJECT = git_out("log", "-1", "--format=%s")
 CMD = [BIN, CLONE]
 
 script = [
@@ -154,15 +165,15 @@ with open("/tmp/opencode/qxgit.log", "w") as f:
 checks = {
     "hud brand":       "qxgit" in text,
     # damage-isolated repaints only emit CHANGED cells, so the bracket
-    # (unchanged since the placeholder) is not in the stream — "main]" is
-    "branch shown":    "main]" in text,
+    # (unchanged since the placeholder) is not in the stream — "<branch>]" is
+    "branch shown":    f"{BRANCH}]" in text,
     "worktree panel":  "worktree" in text,
     "tree rendered":   "\u25be" in text,          # ▾ expanded dir glyph
     "status markers":  "? qxgit-smoke-tmp" in text,  # untracked leaf, changed-only view
     "full tree toggle": "qxtui.slnx" in text,        # clean file, only in all-files mode
     "commits panel":   "commits (" in text,
     "table headers":   "hash" in text and "subject" in text,
-    "commit rows":     "One component per file" in text,
+    "commit rows":     HEAD_SUBJECT in text,
     "first diff auto": "diff --git" in text,      # pane loads selection on LogMsg
     "filter applied":  "Widget vocabulary batch" in text,
     "overlay chips":   "close" in text,
