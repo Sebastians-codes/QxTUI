@@ -178,6 +178,11 @@ public sealed class App : IDisposable
     /// mouse events, or posted messages — never as raw bytes.</summary>
     public Func<KeyEvent, bool>? OnKey { get; set; }
 
+    /// <summary>When false, Tab is delivered like any other key (focused
+    /// widget first, then <see cref="OnKey"/>) instead of cycling focus.
+    /// Apps with modal/edit modes (vim-style insert) own Tab themselves.</summary>
+    public bool TabCyclesFocus { get; set; } = true;
+
     private readonly KeyParser _keyParser = new();
 
     public AnimationScheduler Scheduler => _scheduler;
@@ -1064,8 +1069,10 @@ public sealed class App : IDisposable
             if (consumed)
                 continue;
 
-            // Tab cycles focus among focusable widgets
-            if (keyEvent.Key == Key.Tab)
+            // Tab cycles focus among focusable widgets — unless the app
+            // owns Tab itself (vim-style insert modes: fedup's search field
+            // enters insert on Tab, so global cycling would fight it)
+            if (keyEvent.Key == Key.Tab && TabCyclesFocus)
             {
                 CycleFocus();
                 continue;

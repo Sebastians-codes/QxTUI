@@ -150,7 +150,7 @@ public sealed class Panel : Widget
             return;
         }
 
-        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Single,
+        Box.Draw(buffer, r.X, r.Y, r.W, r.H, BoxStyles.Rounded,
             Theme.Get(BorderRole), _title?.Invoke() ?? "", Theme.Get(TitleRole));
         if (Collapsible)
             buffer.WriteTextClipped(Clip, r.Right - 2, r.Y, "<", fg: 232, bg: chipBg, bold: true);

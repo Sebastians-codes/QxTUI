@@ -61,7 +61,7 @@ public sealed class TooltipBox : Widget
         var b = TipRect(Rect);
         buffer.FillRect(b.X, b.Y, b.W, b.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
-        QxTui.Render.Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Single,
+        QxTui.Render.Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), "", Theme.Get(ThemeRole.Title));
         buffer.WriteTextClipped(Clip, b.X + 2, b.Y + 1,
             QxTui.Render.Text.Ellipsize(_text, Math.Max(0, b.W - 4)),

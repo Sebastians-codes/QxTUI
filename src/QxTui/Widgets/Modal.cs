@@ -185,7 +185,11 @@ public sealed class Modal : Widget
                 InvokeChip(idx);
             return true;
         }
-        return true; // modal: swallow everything else
+        // floating cards (dim:false) are visual, not modal: keys they don't
+        // own (esc, chip digits) belong to whatever is focused — you can
+        // keep typing in a search field while a detail card is open.
+        // dimmed modals own the session and swallow everything else.
+        return _dim;
     }
 
     private Rect BoxRect(Rect screen)
@@ -355,7 +359,7 @@ public sealed class Modal : Widget
         // must overwrite the rows it no longer owns)
         buffer.FillRect(box.X, box.Y, box.W, box.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
-        Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Double,
+        Box.Draw(buffer, box.X, box.Y, box.W, box.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
         // [x] as a filled chip, same language as the action buttons
         buffer.WriteTextClipped(Clip, box.Right - 4, box.Y, " x ",

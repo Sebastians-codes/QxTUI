@@ -1,5 +1,7 @@
+using System.Text;
 using QxTui.Core;
 using QxTui.Layout;
+using QxTui.Terminal;
 using QxTui.Reactive;
 using QxTui.Render;
 using QxTui.Widgets;
@@ -340,5 +342,144 @@ public class HandlerLifetimeTests
         app.Send(new Ping());
         Assert.Equal(0, first);
         Assert.Equal(1, second);
+    }
+}
+
+public class FloatingModalKeyTests
+{
+    private static (App app, FakeTerminal term) MakeApp(LayoutNode root,
+        int w = 40, int h = 12)
+    {
+        var term = new FakeTerminal(w, h);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        return (app, term);
+    }
+
+    [Fact]
+    public void FloatingModal_PassesTypingToFocusedWidget()
+    {
+        var field = new TextField();
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        root.Add(field.Node);
+        var (app, term) = MakeApp(root);
+        app.RunFrame();
+        app.Focus(field);
+
+        var card = new Modal("t", () => ["x"], dim: false, chips: [new ChipAction("c")]);
+        app.PushOverlay(card);
+        app.RunFrame();
+
+        term.QueueInput((byte)'h');
+        app.RunFrame();
+        Assert.Equal("h", field.Text);   // the keystroke reached the field
+        Assert.Same(card, app.Overlay);  // and the card stayed open
+
+        term.QueueInput(0x1b);
+        app.RunFrame();                            // feeds the ESC; parser waits out the settle window
+        Thread.Sleep(KeyParser.EscSettleMs + 20);  // a lone ESC settles before it is a keypress
+        app.RunFrame();                            // flush releases Escape -> the card closes
+        Assert.Null(app.Overlay);
+    }
+
+    [Fact]
+    public void DimmedModal_SwallowsTyping()
+    {
+        var field = new TextField();
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        root.Add(field.Node);
+        var (app, term) = MakeApp(root);
+        app.RunFrame();
+        app.Focus(field);
+
+        app.PushOverlay(new Modal("t", () => ["x"], dim: true, chips: [new ChipAction("c")]));
+        app.RunFrame();
+        term.QueueInput((byte)'h');
+        app.RunFrame();
+        Assert.Equal("", field.Text);    // a blocking modal owns the session
+    }
+}
+
+public class ListViewActivationTests
+{
+    [Fact]
+    public void ListView_DoubleClick_FiresActivatedWithRow()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(40, 12);
+        var list = new ListView(() => 10) { RenderRow = (b, c, r, i, _) =>
+            b.WriteTextClipped(c, r.X, r.Y, $"row {i}") };
+        list.Node.Grow = 1f;
+        root.Add(list.Node);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+
+        int activated = -1;
+        list.Activated += i => activated = i;
+
+        // two press/release pairs on the same cell within the double window
+        foreach (var b in Encoding.UTF8.GetBytes(
+                     "\x1b[<0;5;4M\x1b[<0;5;4m\x1b[<0;5;4M\x1b[<0;5;4m"))
+            term.QueueInput(b);
+        app.RunFrame();
+        Assert.Equal(3, activated); // SGR y=4 => 0-based row 3
+    }
+
+    [Fact]
+    public void ListView_SelectionVisibleUnfocused_ReportsSelected()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(40, 12);
+        bool gotSelected = false;
+        var list = new ListView(() => 10)
+        {
+            SelectionVisibleUnfocused = true,
+            Selected = 3,
+            RenderRow = (_, _, r, i, sel) => { if (i == 3 && sel) gotSelected = true; },
+        };
+        list.Node.Grow = 1f;
+        root.Add(list.Node);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame(); // list never focused
+        Assert.True(gotSelected);
+    }
+}
+
+public class TabGateTests
+{
+    [Fact]
+    public void TabCyclesFocus_False_DeliversTabToOnKey()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(40, 12);
+        var a = new TextField();
+        var b = new TextField();
+        root.Add(a.Node);
+        root.Add(b.Node);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.TabCyclesFocus = false;
+        int tabs = 0;
+        app.OnKey = ev => { if (ev.Key == Key.Tab) tabs++; return true; };
+        app.RunFrame();
+
+        term.QueueInput((byte)'\t');
+        app.RunFrame();
+        Assert.Equal(1, tabs);          // OnKey saw the Tab
+        Assert.Null(app.Focused);       // and no focus cycling happened
+    }
+
+    [Fact]
+    public void TabCyclesFocus_True_StillCycles()
+    {
+        var root = new LayoutNode { Direction = FlexDirection.Column };
+        var term = new FakeTerminal(40, 12);
+        var a = new TextField();
+        var b = new TextField();
+        root.Add(a.Node);
+        root.Add(b.Node);
+        var app = new App(term, root, targetFps: 60, asyncPresenting: false);
+        app.RunFrame();
+        term.QueueInput((byte)'\t');
+        app.RunFrame();
+        Assert.Same(a, app.Focused);
     }
 }

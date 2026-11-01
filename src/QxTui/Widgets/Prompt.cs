@@ -58,7 +58,7 @@ public sealed class Prompt : Widget
         var b = BoxRect(Rect);
         buffer.FillRect(b.X, b.Y, b.W, b.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
-        Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Single,
+        Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
         var inner = new Rect(b.X + 2, b.Y + 1, b.W - 4, 1);
         if (!_field.Rect.Equals(inner))

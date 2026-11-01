@@ -36,6 +36,22 @@ public sealed class ListView : Widget
     /// <summary>Focused/selected row (highlighted in RenderRow's last arg).</summary>
     public int Selected { get; set; }
 
+    /// <summary>Report `selected` to RenderRow even while unfocused, for
+    /// apps whose selection must stay visible after focus moves on (dashboards
+    /// where a button or field takes focus but the cursor row must not
+    /// vanish). Default false = highlight only while focused.</summary>
+    public bool SelectionVisibleUnfocused { get; set; }
+
+    /// <summary>Fired with the row index on double-click (the "open this"
+    /// gesture). Element identity is the data row, so fast clicks on two
+    /// different rows are two singles, never an accidental activation.</summary>
+    public event Action<int>? Activated;
+
+    public override void OnDoubleClick(Point local)
+    {
+        if (ClickElementAt(local) is int row) Activated?.Invoke(row);
+    }
+
     public ListView(Func<int> count)
     {
         Count = count;
@@ -250,7 +266,8 @@ public sealed class ListView : Widget
         for (int i = Offset; i < last; i++)
         {
             var rowRect = new Rect(r.X, r.Y + (i - Offset) * RowHeight, contentW, RowHeight);
-            RenderRow(buffer, Clip, rowRect, i, i == Selected && Focused);
+            RenderRow(buffer, Clip, rowRect, i,
+                i == Selected && (Focused || SelectionVisibleUnfocused));
         }
 
         if (!ShowScrollbar || total <= rows) return;

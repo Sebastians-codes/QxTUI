@@ -96,7 +96,7 @@ public sealed class DropdownPopup : Widget
         var b = ListRect(Rect);
         buffer.FillRect(b.X, b.Y, b.W, b.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
-        QxTui.Render.Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Single,
+        QxTui.Render.Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), "", Theme.Get(ThemeRole.Title));
         for (int i = 0; i < _options.Length; i++)
         {

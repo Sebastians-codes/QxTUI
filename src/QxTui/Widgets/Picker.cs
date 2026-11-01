@@ -134,7 +134,7 @@ public sealed class Picker : Widget
         var lines = Lines();
         buffer.FillRect(b.X, b.Y, b.W, b.H,
             new Cell { Char = ' ', Fg = Theme.Get(ThemeRole.Text), Bg = Theme.Get(ThemeRole.PanelBg) });
-        Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Single,
+        Box.Draw(buffer, b.X, b.Y, b.W, b.H, BoxStyles.Rounded,
             Theme.Get(ThemeRole.Border), _title, Theme.Get(ThemeRole.Title));
 
         int firstLine = b.Y + 1;
