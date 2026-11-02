@@ -23,6 +23,7 @@ public sealed class WindowsTerminal : ITerminal
     private const uint TimerResolutionMs = 1;
 
     private const ushort KeyEvent = 0x0001;
+    private const ushort MouseEventRecord = 0x0002;
     private const ushort WindowBufferSizeEvent = 0x0004;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -59,6 +60,13 @@ public sealed class WindowsTerminal : ITerminal
         [FieldOffset(12)] public ushort VirtualScanCode;
         [FieldOffset(14)] public ushort UnicodeChar;
         [FieldOffset(16)] public uint ControlKeyState;
+
+        // MOUSE_EVENT_RECORD overlays the same 16 bytes after the tag
+        [FieldOffset(4)] public short MouseX;
+        [FieldOffset(6)] public short MouseY;
+        [FieldOffset(8)] public uint ButtonState;
+        [FieldOffset(12)] public uint MouseControlKeyState;
+        [FieldOffset(16)] public uint MouseEventFlags;
     }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateFileW", SetLastError = true)]
@@ -119,6 +127,9 @@ public sealed class WindowsTerminal : ITerminal
     private readonly uint _savedOutputCodePage;
     private readonly System.Collections.Concurrent.ConcurrentQueue<byte> _input = new();
     private readonly WindowsInputDecoder _decoder;
+    private readonly WindowsMouseDecoder _mouse;
+    private int _windowLeft;
+    private int _windowTop;
     private readonly CancellationTokenSource _cts = new();
     private readonly Thread _readerThread;
     private int _resized;
@@ -141,6 +152,7 @@ public sealed class WindowsTerminal : ITerminal
 
         QuerySize();
         _decoder = new WindowsInputDecoder(_input.Enqueue);
+        _mouse = new WindowsMouseDecoder(_input.Enqueue);
 
         _readerThread = new Thread(ReadLoop)
         {
@@ -232,6 +244,8 @@ public sealed class WindowsTerminal : ITerminal
         {
             int width = info.Window.Right - info.Window.Left + 1;
             int height = info.Window.Bottom - info.Window.Top + 1;
+            _windowLeft = info.Window.Left;
+            _windowTop = info.Window.Top;
             if (width > 0 && height > 0)
             {
                 Width = width;
@@ -264,6 +278,10 @@ public sealed class WindowsTerminal : ITerminal
                     if (record.EventType == KeyEvent)
                         _decoder.OnKey(record.KeyDown != 0, record.RepeatCount,
                             record.VirtualKeyCode, (char)record.UnicodeChar);
+                    else if (record.EventType == MouseEventRecord)
+                        // record coordinates are buffer cells; KeyParser wants window cells
+                        _mouse.OnMouse(record.MouseX - _windowLeft, record.MouseY - _windowTop,
+                            record.ButtonState, record.MouseControlKeyState, record.MouseEventFlags);
                     else if (record.EventType == WindowBufferSizeEvent)
                         Volatile.Write(ref _resized, 1);
                 }

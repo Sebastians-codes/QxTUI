@@ -93,3 +93,87 @@ internal sealed class WindowsInputDecoder(Action<byte> emit)
                 emit(utf8[j]);
     }
 }
+
+/// <summary>Turns console mouse records into the SGR mouse reports KeyParser
+/// reads (<c>ESC [ &lt; b ; x ; y M|m</c>). Modern terminals deliver mouse
+/// input as those sequences inside key records already; a console that
+/// doesn't (classic conhost, or one that never saw the mouse-mode request)
+/// hands over MOUSE_EVENT records instead, which would otherwise be dropped.
+/// Pure and stateful only in the held-button mask, so it is testable off
+/// Windows.</summary>
+internal sealed class WindowsMouseDecoder(Action<byte> emit)
+{
+    private const uint LeftButton = 0x0001;   // FROM_LEFT_1ST_BUTTON_PRESSED
+    private const uint RightButton = 0x0002;  // RIGHTMOST_BUTTON_PRESSED
+    private const uint MiddleButton = 0x0004; // FROM_LEFT_2ND_BUTTON_PRESSED
+    private const uint ButtonMask = LeftButton | RightButton | MiddleButton;
+
+    private const uint Moved = 0x0001;        // MOUSE_MOVED
+    private const uint Wheeled = 0x0004;      // MOUSE_WHEELED
+    private const uint HorizontalWheeled = 0x0008;
+
+    private const uint RightAlt = 0x0001;
+    private const uint LeftAlt = 0x0002;
+    private const uint RightCtrl = 0x0004;
+    private const uint LeftCtrl = 0x0008;
+    private const uint ShiftPressed = 0x0010;
+
+    private const int WheelNotch = 120;
+
+    private uint _held;
+
+    /// <param name="column">0-based cell column relative to the window.</param>
+    /// <param name="row">0-based cell row relative to the window.</param>
+    /// <param name="buttonState">dwButtonState; the high word is the wheel delta.</param>
+    /// <param name="controlState">dwControlKeyState (modifiers).</param>
+    /// <param name="eventFlags">dwEventFlags (moved, wheeled, ...).</param>
+    public void OnMouse(int column, int row, uint buttonState, uint controlState, uint eventFlags)
+    {
+        int modifiers = ((controlState & ShiftPressed) != 0 ? 4 : 0)
+                      | ((controlState & (LeftAlt | RightAlt)) != 0 ? 8 : 0)
+                      | ((controlState & (LeftCtrl | RightCtrl)) != 0 ? 16 : 0);
+        int x = Math.Max(0, column) + 1;
+        int y = Math.Max(0, row) + 1;
+
+        if ((eventFlags & Wheeled) != 0)
+        {
+            int delta = (short)(buttonState >> 16);
+            int notches = Math.Max(1, Math.Abs(delta) / WheelNotch);
+            for (int i = 0; i < notches; i++)
+                Report((delta > 0 ? 64 : 65) | modifiers, x, y, 'M');
+            return;
+        }
+        if ((eventFlags & HorizontalWheeled) != 0)
+            return; // KeyParser has no horizontal wheel
+
+        uint now = buttonState & ButtonMask;
+        uint changed = now ^ _held;
+        _held = now;
+
+        ReportChange(changed, now, LeftButton, 0, modifiers, x, y);
+        ReportChange(changed, now, MiddleButton, 1, modifiers, x, y);
+        ReportChange(changed, now, RightButton, 2, modifiers, x, y);
+
+        if ((eventFlags & Moved) != 0 && changed == 0)
+        {
+            // drag reports the held button; plain hover is "no button" (3)
+            int button = (now & LeftButton) != 0 ? 0
+                       : (now & MiddleButton) != 0 ? 1
+                       : (now & RightButton) != 0 ? 2
+                       : 3;
+            Report(32 | button | modifiers, x, y, 'M');
+        }
+    }
+
+    private void ReportChange(uint changed, uint now, uint bit, int code, int modifiers, int x, int y)
+    {
+        if ((changed & bit) != 0)
+            Report(code | modifiers, x, y, (now & bit) != 0 ? 'M' : 'm');
+    }
+
+    private void Report(int code, int x, int y, char final)
+    {
+        foreach (char c in $"\u001b[<{code};{x};{y}{final}")
+            emit((byte)c);
+    }
+}

@@ -135,3 +135,90 @@ public class PosixSttyTests
     public void MalformedSttySizeIsNull(string output) =>
         Assert.Null(PosixStty.ParseSize(output));
 }
+
+public class WindowsMouseDecoderTests
+{
+    private const uint Left = 0x1;
+    private const uint Right = 0x2;
+    private const uint Moved = 0x1;
+    private const uint Wheeled = 0x4;
+
+    private static (WindowsMouseDecoder Decoder, List<byte> Bytes) Make()
+    {
+        var bytes = new List<byte>();
+        return (new WindowsMouseDecoder(bytes.Add), bytes);
+    }
+
+    private static string Text(List<byte> bytes) => Encoding.ASCII.GetString(bytes.ToArray());
+
+    [Fact]
+    public void PressAndReleaseAreSgrReportsWithOneBasedCells()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(4, 2, Left, 0, 0);
+        d.OnMouse(4, 2, 0, 0, 0);
+        Assert.Equal("\u001b[<0;5;3M\u001b[<0;5;3m", Text(bytes));
+    }
+
+    [Fact]
+    public void RightButtonIsCodeTwo()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(0, 0, Right, 0, 0);
+        Assert.Equal("\u001b[<2;1;1M", Text(bytes));
+    }
+
+    [Fact]
+    public void MovingWithAButtonHeldIsADrag()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(1, 1, Left, 0, 0);
+        bytes.Clear();
+        d.OnMouse(2, 1, Left, 0, Moved);
+        Assert.Equal("\u001b[<32;3;2M", Text(bytes));
+    }
+
+    [Fact]
+    public void MovingWithNoButtonIsHover()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(7, 3, 0, 0, Moved);
+        Assert.Equal("\u001b[<35;8;4M", Text(bytes));
+    }
+
+    [Fact]
+    public void WheelDeltaSignPicksDirectionAndNotchesRepeat()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(0, 0, unchecked((uint)(120 << 16)), 0, Wheeled);
+        d.OnMouse(0, 0, unchecked((uint)((ushort)-240 << 16)), 0, Wheeled);
+        Assert.Equal("\u001b[<64;1;1M\u001b[<65;1;1M\u001b[<65;1;1M", Text(bytes));
+    }
+
+    [Fact]
+    public void ModifiersMapToSgrBits()
+    {
+        var (d, bytes) = Make();
+        d.OnMouse(0, 0, Left, 0x10 | 0x08, 0); // shift + left ctrl
+        Assert.Equal("\u001b[<20;1;1M", Text(bytes));
+    }
+
+    [Fact]
+    public void ReportsRoundTripThroughKeyParser()
+    {
+        var parser = new KeyParser();
+        var (d, bytes) = Make();
+        d.OnMouse(9, 4, Left, 0, 0);
+        d.OnMouse(12, 4, Left, 0, Moved);
+        d.OnMouse(12, 4, 0, 0, 0);
+        foreach (var b in bytes)
+            parser.Feed(b);
+
+        Assert.True(parser.TryReadMouse(out var press));
+        Assert.Equal((MouseKind.Press, 9, 4, 0), (press.Kind, press.X, press.Y, press.Button));
+        Assert.True(parser.TryReadMouse(out var drag));
+        Assert.Equal((MouseKind.Motion, 12), (drag.Kind, drag.X));
+        Assert.True(parser.TryReadMouse(out var release));
+        Assert.Equal(MouseKind.Release, release.Kind);
+    }
+}
