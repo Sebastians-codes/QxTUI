@@ -38,6 +38,8 @@ public sealed class TextView : Widget
     private int _offsetX;     // first visible column (no-wrap mode)
     private bool _pinned = true;
     private bool _dragging;
+    private bool _dragThumb;
+    private int _grabDelta;   // cursor offset inside the thumb at the press
     private bool _hasSelection;
     private bool _wrap = true;
 
@@ -212,6 +214,15 @@ public sealed class TextView : Widget
                 ScrollXBy(KeyStepX / 2);
                 return true;
 
+            case MouseKind.Press when ev.Button == 0 && OnScrollbar(ev.X):
+                // the scrollbar scrolls; it must never start a text selection
+                BeginThumbDrag(ev.Y);
+                return true;
+
+            case MouseKind.Motion when _dragThumb:
+                DragThumbTo(ev.Y);
+                return true;
+
             case MouseKind.Press when ev.Button == 0 && _count() > 0:
                 _anchor = _head = PointAt(ev.X, ev.Y);
                 _dragging = true;
@@ -229,6 +240,7 @@ public sealed class TextView : Widget
 
             case MouseKind.Release:
                 _dragging = false;
+                _dragThumb = false;
                 return false;
 
             default:
@@ -269,6 +281,42 @@ public sealed class TextView : Widget
     }
 
     private void SetSelected(bool selected) => _hasSelection = selected;
+
+    #endregion
+
+    #region Scrollbar drag
+
+    private bool OnScrollbar(int screenX) => screenX >= Rect.Right - 1 && EnsureLayout() > Rows;
+
+    private int ThumbHeight() => Math.Max(1, Rows * Rows / Math.Max(1, EnsureLayout()));
+
+    private int ThumbTop()
+    {
+        int max = MaxOffset();
+        return Rect.Y + (int)Math.Round((double)_offset * (Rect.H - ThumbHeight()) / Math.Max(1, max));
+    }
+
+    /// <summary>Grab the thumb where the cursor is (no teleport); a press anywhere else on the
+    /// track jumps the view there, centring the thumb under the cursor so the drag carries on.</summary>
+    private void BeginThumbDrag(int screenY)
+    {
+        int top = ThumbTop();
+        int height = ThumbHeight();
+        _grabDelta = screenY >= top && screenY < top + height ? screenY - top : height / 2;
+        _dragThumb = true;
+        _dragging = false;
+        DragThumbTo(screenY);
+    }
+
+    private void DragThumbTo(int screenY)
+    {
+        int max = MaxOffset();
+        int track = Math.Max(1, Rect.H - ThumbHeight());
+        double fraction = Math.Clamp((double)(screenY - Rect.Y - _grabDelta) / track, 0, 1);
+        _offset = (int)Math.Round(fraction * max);
+        _pinned = _offset >= max;
+        Invalidate();
+    }
 
     private (long Line, int Col) PointAt(int screenX, int screenY)
     {

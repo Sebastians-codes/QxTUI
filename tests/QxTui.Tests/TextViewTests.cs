@@ -601,6 +601,151 @@ public class TextViewTests
 
     #endregion
 
+    #region Scrollbar mouse
+
+    // Rig(20, 10, 100 lines): the scrollbar is column 19; rows = 10, total = 100,
+    // so the thumb is 1 row high and the view can scroll 90 rows.
+
+    [Fact]
+    public void PressOnTheScrollbar_ScrollsInsteadOfSelecting()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.Paint();
+
+        bool consumed = rig.Mouse(MouseKind.Press, 19, 5);
+        rig.Mouse(MouseKind.Motion, 19, 5);
+        rig.Mouse(MouseKind.Release, 19, 5);
+
+        Assert.True(consumed);
+        Assert.False(rig.View.HasSelection);
+        Assert.Null(rig.View.SelectedText);
+    }
+
+    [Fact]
+    public void DraggingTheThumb_ScrollsProportionally_AndNeverSelects()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.Paint();
+
+        rig.Mouse(MouseKind.Press, 19, 0); // on the thumb at the top
+        Assert.Equal(0, rig.View.Offset);  // grabbing does not move the view
+
+        rig.Mouse(MouseKind.Motion, 19, 4);
+        int quarter = rig.View.Offset;
+        rig.Mouse(MouseKind.Motion, 19, 8);
+        int most = rig.View.Offset;
+        rig.Mouse(MouseKind.Release, 19, 8);
+
+        Assert.InRange(quarter, 30, 50);   // 4 of the 9 cells the thumb can travel
+        Assert.InRange(most, 75, 90);
+        Assert.True(most > quarter);
+        Assert.False(rig.View.HasSelection);
+    }
+
+    [Fact]
+    public void DraggingTheThumbToTheBottom_ReachesTheEnd_AndRepinsTheTail()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.View.FollowTail = true;
+        rig.Paint();
+        rig.Key(Key.Home);
+        Assert.False(rig.View.Following);
+
+        rig.Mouse(MouseKind.Press, 19, 0);
+        rig.Mouse(MouseKind.Motion, 19, 12); // past the end of the track: clamps
+        rig.Mouse(MouseKind.Release, 19, 12);
+
+        Assert.Equal(90, rig.View.Offset);
+        Assert.True(rig.View.Following);
+    }
+
+    [Fact]
+    public void DraggingTheThumbBackToTheTop_Unpins()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.View.FollowTail = true;
+        rig.Paint();
+        Assert.True(rig.View.Following);
+
+        rig.Mouse(MouseKind.Press, 19, 9); // the thumb sits at the bottom while following
+        rig.Mouse(MouseKind.Motion, 19, 0);
+        rig.Mouse(MouseKind.Release, 19, 0);
+
+        Assert.Equal(0, rig.View.Offset);
+        Assert.False(rig.View.Following);
+    }
+
+    [Fact]
+    public void PressOnTheTrackAwayFromTheThumb_JumpsThereAndKeepsDragging()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.Paint();
+
+        rig.Mouse(MouseKind.Press, 19, 5);
+        int jumped = rig.View.Offset;
+        rig.Mouse(MouseKind.Motion, 19, 7);
+
+        Assert.InRange(jumped, 30, 60);
+        Assert.True(rig.View.Offset > jumped);
+    }
+
+    [Fact]
+    public void WanderingOntoTheScrollbarWhileSelectingText_StillSelects_AndDoesNotScroll()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.Paint();
+
+        rig.Mouse(MouseKind.Press, 2, 1);
+        rig.Mouse(MouseKind.Motion, 19, 3);
+        rig.Mouse(MouseKind.Release, 19, 3);
+
+        Assert.True(rig.View.HasSelection);
+        Assert.Equal(0, rig.View.Offset);
+    }
+
+    [Fact]
+    public void AfterAThumbDrag_TextSelectionWorksAgain()
+    {
+        var rig = new Rig(20, 10, NumberedLines(100));
+        rig.Paint();
+        rig.Mouse(MouseKind.Press, 19, 0);
+        rig.Mouse(MouseKind.Motion, 19, 3);
+        rig.Mouse(MouseKind.Release, 19, 3);
+
+        rig.Drag(1, 2, 4, 2);
+
+        Assert.True(rig.View.HasSelection);
+    }
+
+    [Fact]
+    public void WhenEverythingFits_TheRightmostColumnIsJustText_NoScrollbarToGrab()
+    {
+        var rig = new Rig(20, 10, NumberedLines(3));
+        rig.Paint();
+
+        bool consumed = rig.Mouse(MouseKind.Press, 19, 1);
+
+        Assert.False(consumed);
+        Assert.Equal(0, rig.View.Offset);
+    }
+
+    [Fact]
+    public void ThumbDrag_WorksOnWrappedContent()
+    {
+        var rig = new Rig(12, 5, Enumerable.Repeat(new string('x', 40), 30).ToArray()); // 4 rows each
+        rig.Paint();
+        int total = rig.View.TotalRows;
+
+        rig.Mouse(MouseKind.Press, 11, 0);
+        rig.Mouse(MouseKind.Motion, 11, 4);
+        rig.Mouse(MouseKind.Release, 11, 4);
+
+        Assert.Equal(total - 5, rig.View.Offset);
+        Assert.False(rig.View.HasSelection);
+    }
+
+    #endregion
+
     #region Through an App: Ctrl+C and the right-click menu
 
     private sealed class AppRig
