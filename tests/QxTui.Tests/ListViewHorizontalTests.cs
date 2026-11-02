@@ -453,3 +453,207 @@ public class ListViewRowClickTests
         Assert.Equal(2, rig.Clicks.Count);
     }
 }
+
+public class ListViewHoverTests
+{
+    private sealed class Probe : Widget
+    {
+        public Probe() => Clickable = true;
+        public override void Render(CellBuffer buffer) { }
+    }
+
+    private sealed class Rig
+    {
+        public readonly ListView List;
+        public readonly App App;
+        public readonly FakeTerminal Term = new(40, 12);
+
+        /// <param name="withNeighbour">Adds a 3-row widget below the list (rows 9-11) to move the pointer onto.</param>
+        public Rig(int rows = 100, int contentWidth = 0, bool trackHover = true, bool withNeighbour = false)
+        {
+            List = new ListView(() => rows) { ContentWidth = contentWidth, TrackHover = trackHover };
+            List.Node.Grow = 1f;
+            var root = new LayoutNode { Direction = FlexDirection.Column };
+            root.Add(List);
+            if (withNeighbour)
+            {
+                var probe = new Probe();
+                probe.Node.Height = 3;
+                root.Add(probe);
+            }
+            App = new App(Term, root, targetFps: 60, time: new VirtualTimeSource(), asyncPresenting: false);
+            App.RunFrame();
+        }
+
+        private void Send(string input)
+        {
+            foreach (var b in Encoding.UTF8.GetBytes(input)) Term.QueueInput(b);
+            App.RunFrame();
+        }
+
+        /// <summary>Move the pointer (no button) to a 0-based cell.</summary>
+        public void MoveTo(int x, int y) => Send($"\u001b[<35;{x + 1};{y + 1}M");
+
+        public void Wheel(int x, int y, int button) => Send($"\u001b[<{button};{x + 1};{y + 1}M");
+
+        public void Click(int x, int y)
+        {
+            Send($"\u001b[<0;{x + 1};{y + 1}M");
+            Send($"\u001b[<0;{x + 1};{y + 1}m");
+        }
+    }
+
+    [Fact]
+    public void HoverTracking_IsOffByDefault()
+    {
+        var rig = new Rig(trackHover: false);
+
+        rig.MoveTo(5, 3);
+
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void WithTrackingOn_HoverRowIsTheRowUnderThePointer()
+    {
+        var rig = new Rig();
+
+        rig.MoveTo(5, 3);
+        Assert.Equal(3, rig.List.HoverRow);
+
+        rig.MoveTo(20, 6);
+        Assert.Equal(6, rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void Hovering_NeverMovesTheCursor()
+    {
+        var rig = new Rig();
+        rig.List.Selected = 2;
+
+        rig.MoveTo(5, 7);
+
+        Assert.Equal(7, rig.List.HoverRow);
+        Assert.Equal(2, rig.List.Selected); // a detail pane driven by Selected must not flicker
+    }
+
+    [Fact]
+    public void HoverRow_IncludesTheScrollOffset()
+    {
+        var rig = new Rig();
+        rig.List.ScrollTo(10);
+        rig.App.RunFrame();
+
+        rig.MoveTo(5, 2);
+
+        Assert.Equal(12, rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void WheelScrolling_UnderAStillPointer_MovesTheHighlightToTheNewRow()
+    {
+        var rig = new Rig();
+        rig.MoveTo(5, 2);
+        Assert.Equal(2, rig.List.HoverRow);
+
+        rig.Wheel(5, 2, 65); // wheel down: the list scrolls 3 rows, the pointer did not move
+
+        Assert.Equal(3, rig.List.Offset);
+        Assert.Equal(5, rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void TheScrollbar_IsNotARow()
+    {
+        var rig = new Rig(); // 100 rows: the scrollbar is the last column
+
+        rig.MoveTo(39, 4);
+
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void MovingOntoTheScrollbar_ClearsAnEarlierHover()
+    {
+        var rig = new Rig();
+        rig.MoveTo(5, 4);
+        Assert.Equal(4, rig.List.HoverRow);
+
+        rig.MoveTo(39, 4);
+
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void TheBottomScrollbarRow_IsNotARow()
+    {
+        var rig = new Rig(contentWidth: 200); // sideways scrolling adds a bottom bar on the last line
+
+        rig.MoveTo(5, 10);
+        Assert.Equal(10, rig.List.HoverRow);
+
+        rig.MoveTo(5, 11);
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void EmptySpaceBelowTheLastRow_IsNotARow()
+    {
+        var rig = new Rig(rows: 3);
+
+        rig.MoveTo(5, 8);
+
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void WhenThePointerLeavesForAnotherWidget_TheHighlightClears()
+    {
+        var rig = new Rig(withNeighbour: true);
+        rig.MoveTo(5, 4);
+        Assert.Equal(4, rig.List.HoverRow);
+
+        rig.MoveTo(5, 10); // onto the widget below
+
+        Assert.Null(rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void ComingBack_HighlightsAgain()
+    {
+        var rig = new Rig(withNeighbour: true);
+        rig.MoveTo(5, 4);
+        rig.MoveTo(5, 10);
+
+        rig.MoveTo(5, 6);
+
+        Assert.Equal(6, rig.List.HoverRow);
+    }
+
+    [Fact]
+    public void ChangingRows_Repaints_ButMovingWithinARowDoesNot()
+    {
+        var rig = new Rig();
+        rig.MoveTo(5, 3);
+        rig.App.RunFrame();
+        long afterFirst = rig.List.RenderCount;
+
+        rig.MoveTo(9, 3); // same row, different column
+        Assert.Equal(afterFirst, rig.List.RenderCount);
+
+        rig.MoveTo(9, 4); // next row
+        Assert.True(rig.List.RenderCount > afterFirst);
+    }
+
+    [Fact]
+    public void Clicking_StillSelects_AndHoverFollowsThePointer()
+    {
+        var rig = new Rig();
+        rig.MoveTo(5, 4);
+
+        rig.Click(5, 6);
+
+        Assert.Equal(6, rig.List.Selected);
+        Assert.Equal(6, rig.List.HoverRow);
+    }
+}

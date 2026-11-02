@@ -95,6 +95,20 @@ public sealed class ListView : Widget
     /// different rows are two singles, never an accidental activation.</summary>
     public event Action<int>? Activated;
 
+    /// <summary>Track which row the pointer is over, exposed as <see cref="HoverRow"/>.
+    /// Off by default: hover costs a repaint whenever the pointer crosses a row.</summary>
+    public bool TrackHover { get; set; }
+
+    private int _hoverLocalY = -1; // widget-local line of the pointer, -1 = not on a row
+
+    /// <summary>The data row under the pointer, or null (hover tracking off, pointer
+    /// elsewhere or on the scrollbar, or past the last row). Derived from the pointer's
+    /// position, so it follows the wheel scrolling beneath a pointer that is not moving.
+    /// It is separate from <see cref="Selected"/>: hovering never moves the cursor, so a
+    /// list whose selection drives something else (a detail pane) stays put. Paint it
+    /// from <see cref="RenderRow"/>, e.g. a lighter background than the selected row.</summary>
+    public int? HoverRow => TrackHover && Hovered && _hoverLocalY >= 0 ? RowAt(_hoverLocalY) : null;
+
     /// <summary>Fired on a single left click on a data row, with the row index
     /// and the content column that was hit (the click's x plus
     /// <see cref="OffsetX"/>). For things that live inside a row: a chevron
@@ -274,7 +288,9 @@ public sealed class ListView : Widget
                     return true;
                 }
                 if (ViewerMode) return false;
-                // press on content: select that row
+                // press on content: select that row (and note where the pointer is, in case no
+                // motion event announced the move: a tap, or a terminal that only reports presses)
+                if (TrackHover) TrackPointer(ev);
                 Selected = Math.Clamp(Offset + (ev.Y - r.Y) / Math.Max(1, RowHeight),
                     0, Math.Max(0, Count() - 1));
                 Invalidate();
@@ -291,6 +307,8 @@ public sealed class ListView : Widget
                     DragTo(ev);
                     return true;
                 }
+                if (TrackHover)
+                    TrackPointer(ev);
                 return false;
 
             default: // release
@@ -298,6 +316,18 @@ public sealed class ListView : Widget
                 _dragThumbX = false;
                 return false;
         }
+    }
+
+    /// <summary>Remember where the pointer is (not on the scrollbar or its bottom bar) and
+    /// repaint when that changes the hovered row.</summary>
+    private void TrackPointer(MouseEvent ev)
+    {
+        int localY = ev.Y - Rect.Y;
+        bool onScrollbar = ShowScrollbar && ev.X >= Rect.Right - 1;
+        int newY = onScrollbar || localY < 0 || localY >= TrackH ? -1 : localY;
+        int? before = HoverRow;
+        _hoverLocalY = newY;
+        if (HoverRow != before) Invalidate();
     }
 
     private void WheelX(int dir)
