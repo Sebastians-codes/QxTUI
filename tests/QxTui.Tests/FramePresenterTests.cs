@@ -17,8 +17,14 @@ public class FramePresenterTests
         public readonly object Gate = new();
         public ManualResetEventSlim? Blocker;
 
+        /// <summary>Set the moment the writer thread is inside Write. Tests that need
+        /// "the writer is now stuck in a slow write" wait on this, not on a sleep:
+        /// under parallel-suite load thread start-up can outlast any fixed delay.</summary>
+        public readonly ManualResetEventSlim Entered = new(false);
+
         public void Write(ReadOnlySpan<byte> bytes)
         {
+            Entered.Set();
             Blocker?.Wait(TimeSpan.FromSeconds(5));
             lock (Gate)
                 Frames.Add(bytes.ToArray());
@@ -26,10 +32,12 @@ public class FramePresenterTests
 
         public int Count { get { lock (Gate) return Frames.Count; } }
 
+        /// <summary>The newest frame, or "" before any has been written (so polling
+        /// it with SpinUntil cannot throw).</summary>
         public string Last()
         {
             lock (Gate)
-                return Encoding.Latin1.GetString(Frames[^1]);
+                return Frames.Count == 0 ? "" : Encoding.Latin1.GetString(Frames[^1]);
         }
     }
 
@@ -71,8 +79,7 @@ public class FramePresenterTests
 
         // First submit is taken by the writer thread immediately and blocks.
         presenter.Submit("first"u8);
-        SpinWait.SpinUntil(() => sink.Count >= 0 && blocker.IsSet == false, TimeSpan.FromSeconds(1));
-        Thread.Sleep(50); // let the writer enter the blocked write
+        Assert.True(sink.Entered.Wait(TimeSpan.FromSeconds(5)), "the writer never reached the sink");
 
         // These pile up while the terminal is "slow": only the latest survives.
         presenter.Submit("stale1"u8);
@@ -98,7 +105,7 @@ public class FramePresenterTests
 
         var presenter = new FramePresenter(sink.Write);
         presenter.Submit("a"u8);
-        Thread.Sleep(50);
+        Assert.True(sink.Entered.Wait(TimeSpan.FromSeconds(5)), "the writer never reached the sink");
         presenter.Submit("pending-exit-seq"u8);
 
         blocker.Set();
