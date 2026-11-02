@@ -115,6 +115,51 @@ public sealed class CellBuffer : IDisposable
                 consumed = 1;
             }
 
+            // TAB: expand to the next 8-col stop as real space cells. A
+            // raw tab in the stream would make the TERMINAL jump stops and
+            // desync it from the front buffer — the classic garbled-diff
+            // glitch on tab-indented sources (Godot C#, Makefiles, …).
+            if (rune.Value == '\t')
+            {
+                i += consumed;
+                int stop = (cx / 8 + 1) * 8;
+                if (cx < clip.X) cx = Math.Min(stop, clip.X);
+                int limit = Math.Min(Width, clip.Right);
+                while (cx < stop && cx < limit)
+                {
+                    ref var tcell = ref _cells[y * Width + cx];
+                    tcell.Char = ' ';
+                    tcell.WidePad = false;
+                    tcell.Fg = fg;
+                    tcell.Bg = bg;
+                    tcell.Bold = bold;
+                    cx++;
+                    written++;
+                }
+                if (cx >= limit) break;
+                continue;
+            }
+
+            // other C0 controls + DEL: paint a space, NEVER the raw byte —
+            // a stray \r (CRLF diffs) would carriage-return the terminal
+            // mid-row and scramble everything after it
+            if (rune.Value < 0x20 || rune.Value == 0x7f)
+            {
+                i += consumed;
+                if (cx >= clip.X && cx + 1 <= Width && cx + 1 <= clip.Right)
+                {
+                    ref var ccell = ref _cells[y * Width + cx];
+                    ccell.Char = ' ';
+                    ccell.WidePad = false;
+                    ccell.Fg = fg;
+                    ccell.Bg = bg;
+                    ccell.Bold = bold;
+                    written++;
+                }
+                cx++;
+                continue;
+            }
+
             int w = UnicodeWidth.Of(rune);
             i += consumed;
             if (w == 0) continue; // combining/zwj: attaches, no column
