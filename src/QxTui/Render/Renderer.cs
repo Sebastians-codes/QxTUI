@@ -132,8 +132,13 @@ public sealed class Renderer : IDisposable
             _hasHint = false;
             var r = _hintRect;
             int d = _hintDelta;
+            // SU/SD shift WHOLE terminal rows. A rect narrower than the screen
+            // shares those rows with its neighbours (a pane beside the list, the
+            // border of the panel around it), and they would scroll on the
+            // terminal while the front buffer — which only mirrors the rect —
+            // believes they stayed put. Only full-width hints are sound.
             if (HardwareScroll && !forceFull && !_resync && d != 0 && Math.Abs(d) < r.H &&
-                r.X >= 0 && r.Y >= 0 && r.Right <= _prev.Width && r.Bottom <= _prev.Height)
+                r.X == 0 && r.Right == _prev.Width && r.Y >= 0 && r.Bottom <= _prev.Height)
             {
                 ShiftPrev(r, d);
                 scrollCmd = d > 0

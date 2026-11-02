@@ -121,6 +121,56 @@ public class HardwareScrollTests
     }
 }
 
+public class HardwareScrollSharedRowsTests
+{
+    private static CellBuffer SideBySide(int shift)
+    {
+        // columns 0-4 and 15-19 are static neighbours; 5-14 is the scrolling list
+        var b = new CellBuffer(20, 10);
+        for (int y = 0; y < 10; y++)
+            for (int x = 0; x < 20; x++)
+                b[x, y] = new Cell
+                {
+                    Char = x is >= 5 and < 15 ? (char)('a' + ((y + shift) % 26)) : (char)('0' + y),
+                    Fg = 7,
+                };
+        return b;
+    }
+
+    [Fact]
+    public void PartialWidthHint_IsIgnored_NeighboursNeverShift()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
+        var first = new ArrayBufferWriter<byte>();
+        r.Render(SideBySide(0), first);
+
+        r.ScrollHint(new Rect(5, 0, 10, 10), 3); // a list with panes on both sides
+        var second = new ArrayBufferWriter<byte>();
+        var res = r.Render(SideBySide(3), second);
+        string s = Encoding.UTF8.GetString(second.WrittenSpan);
+
+        // no region scroll: SU/SD would also have moved columns 0-4 and 15-19
+        Assert.DoesNotContain("S", s.Replace("\x1b[", ""));
+        Assert.DoesNotMatch(@"\x1b\[\d*;?\d*r", s);
+        Assert.DoesNotMatch(@"\x1b\[\d+[ST]", s);
+        // and only the list's own cells repaint — the neighbours cost nothing
+        Assert.True(res.DirtyCells <= 10 * 10, $"only the list repaints, got {res.DirtyCells}");
+    }
+
+    [Fact]
+    public void LeftAlignedButNarrowHint_IsAlsoIgnored()
+    {
+        using var r = new Renderer(20, 10, synchronizedOutput: false) { HardwareScroll = true };
+        r.Render(SideBySide(0), new ArrayBufferWriter<byte>());
+
+        r.ScrollHint(new Rect(0, 0, 15, 10), 2);
+        var outp = new ArrayBufferWriter<byte>();
+        r.Render(SideBySide(2), outp);
+
+        Assert.DoesNotMatch(@"\x1b\[\d+[ST]", Encoding.UTF8.GetString(outp.WrittenSpan));
+    }
+}
+
 public class HardwareScrollGateTests
 {
     [Fact]
@@ -192,6 +242,7 @@ public class ScrollbarColumnSurvivesScrollTests
         string frame = Encoding.UTF8.GetString(out2.WrittenSpan);
 
         Assert.DoesNotContain("│", frame);
+        Assert.DoesNotMatch(@"\x1b\[\d+[ST]", frame); // and nothing scrolled behind its back
     }
 }
 
