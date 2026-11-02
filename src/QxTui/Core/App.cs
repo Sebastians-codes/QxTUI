@@ -2,6 +2,7 @@ using System.Buffers;
 using QxTui.Animation;
 using QxTui.Layout;
 using QxTui.Render;
+using QxTui.Widgets;
 using QxTui.Terminal;
 
 namespace QxTui.Core;
@@ -1045,6 +1046,39 @@ public sealed class App : IDisposable
 
     public void Quit() => _running = false;
 
+    /// <summary>Where <see cref="Copy"/> sends text. Defaults to the system
+    /// clipboard; tests (or apps with their own clipboard) replace it.</summary>
+    public Action<string> ClipboardWriter { get; set; } = Core.Clipboard.Copy;
+
+    /// <summary>Copies text to the clipboard and, by default, says so in a toast.</summary>
+    public void Copy(string text, bool announce = true)
+    {
+        if (text.Length == 0)
+            return;
+        ClipboardWriter(text);
+        if (announce)
+            this.Toast(text.Length == 1 ? "copied 1 character" : $"copied {text.Length} characters");
+    }
+
+    /// <summary>Ctrl+C copies the focused widget's selection; Ctrl+A selects all
+    /// in it. Both fall through to the app when the widget has nothing to do,
+    /// so an app can still read Ctrl+C as "interrupt".</summary>
+    private bool HandleSelectionKey(KeyEvent key, Widget focused)
+    {
+        if (key.Key != Key.Char)
+            return false;
+        switch (key.Char)
+        {
+            case '\u0003' when focused.SelectedText is { Length: > 0 } text:
+                Copy(text);
+                return true;
+            case '\u0001':
+                return focused.SelectAll();
+            default:
+                return false;
+        }
+    }
+
     /// <summary>Execute exactly one frame. Public for headless tests.</summary>
     public RenderResult RunFrame(bool pace = false)
     {
@@ -1098,6 +1132,10 @@ public sealed class App : IDisposable
 
             // focused widget gets keys before the app-level handler
             if (Focused is { } focused && focused.HandleKey(keyEvent))
+                continue;
+
+            // copy / select-all for any widget that exposes a selection
+            if (Focused is { } selectable && HandleSelectionKey(keyEvent, selectable))
                 continue;
 
             if (OnKey is { } keyHandler && !keyHandler(keyEvent))

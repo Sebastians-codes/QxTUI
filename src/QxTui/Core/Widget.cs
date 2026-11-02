@@ -360,6 +360,26 @@ public abstract class Widget
     /// the two right-button gestures never collide.</summary>
     public MenuItem[]? MenuItems { get; set; }
 
+    /// <summary>The text Ctrl+C should copy while this widget has focus, or
+    /// null/empty when nothing is selected (Ctrl+C then falls through to the
+    /// app's OnKey, where it usually means "interrupt"). Widgets that can
+    /// select text override this; <see cref="App"/> does the copying.</summary>
+    public virtual string? SelectedText => null;
+
+    /// <summary>Ctrl+A while focused. Return true if the widget selected
+    /// everything it can.</summary>
+    public virtual bool SelectAll() => false;
+
+    /// <summary>The standard right-click items for a widget with text
+    /// selection: copy and select all. Use as <c>MenuAt = _ =&gt; CopyMenu()</c>;
+    /// they read the live selection each time the menu opens.</summary>
+    protected MenuItem[] CopyMenu() =>
+    [
+        new MenuItem("copy", Act: () => App?.Copy(SelectedText ?? ""),
+            Enabled: SelectedText is { Length: > 0 }, Hint: "ctrl+c"),
+        new MenuItem("select all", Act: () => SelectAll(), Hint: "ctrl+a"),
+    ];
+
     /// <summary>OPT-IN live context menu: called on a right-click with the
     /// clicked cell (widget-local), for menus that depend on what is under
     /// the pointer: the row of a list, say, which <see cref="ListView.RowAt"/>
