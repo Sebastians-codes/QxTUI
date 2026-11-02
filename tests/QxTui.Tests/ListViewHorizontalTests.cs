@@ -330,3 +330,126 @@ public class ListViewHorizontalTests
         Assert.Equal(0, rig.List.Rect.W);
     }
 }
+
+public class ListViewRowClickTests
+{
+    private sealed class Rig
+    {
+        public readonly ListView List;
+        public readonly App App;
+        public readonly FakeTerminal Term = new(40, 12);
+        public readonly List<(int Row, int Column)> Clicks = [];
+        public readonly List<int> Activations = [];
+
+        public Rig(int rows = 100, int contentWidth = 0)
+        {
+            List = new ListView(() => rows) { ContentWidth = contentWidth };
+            List.Node.Grow = 1f;
+            List.RowClicked += (row, column) => Clicks.Add((row, column));
+            List.Activated += Activations.Add;
+            var root = new LayoutNode { Direction = FlexDirection.Column };
+            root.Add(List);
+            App = new App(Term, root, targetFps: 60, time: new VirtualTimeSource(), asyncPresenting: false);
+            App.Focus(List);
+            App.RunFrame();
+        }
+
+        private void Send(string input)
+        {
+            foreach (var b in Encoding.UTF8.GetBytes(input)) Term.QueueInput(b);
+            App.RunFrame();
+        }
+
+        public void Click(int x, int y, int button = 0)
+        {
+            Send($"\u001b[<{button};{x + 1};{y + 1}M");
+            Send($"\u001b[<{button};{x + 1};{y + 1}m");
+        }
+    }
+
+    [Fact]
+    public void LeftClick_ReportsTheRowAndColumnUnderTheCursor()
+    {
+        var rig = new Rig();
+
+        rig.Click(7, 3);
+
+        Assert.Equal([(3, 7)], rig.Clicks);
+    }
+
+    [Fact]
+    public void ClickRow_FollowsTheScrollOffset()
+    {
+        var rig = new Rig();
+        rig.List.ScrollTo(10);
+        rig.App.RunFrame();
+
+        rig.Click(2, 2);
+
+        Assert.Equal([(12, 2)], rig.Clicks);
+    }
+
+    [Fact]
+    public void ClickColumn_IncludesTheSidewaysOffset()
+    {
+        var rig = new Rig(contentWidth: 200);
+        rig.List.ScrollXTo(20);
+        rig.App.RunFrame();
+
+        rig.Click(5, 1);
+
+        Assert.Equal([(1, 25)], rig.Clicks);
+    }
+
+    [Fact]
+    public void ClickOnTheScrollbar_IsNotARowClick()
+    {
+        var rig = new Rig(); // 100 rows: the scrollbar is the last column
+
+        rig.Click(39, 4);
+
+        Assert.Empty(rig.Clicks);
+    }
+
+    [Fact]
+    public void ClickBelowTheLastRow_IsNotARowClick()
+    {
+        var rig = new Rig(rows: 3);
+
+        rig.Click(5, 8);
+
+        Assert.Empty(rig.Clicks);
+    }
+
+    [Fact]
+    public void RightClick_IsNotARowClick()
+    {
+        var rig = new Rig();
+
+        rig.Click(5, 3, button: 2);
+
+        Assert.Empty(rig.Clicks);
+    }
+
+    [Fact]
+    public void ClickAlsoMovesTheCursor_AsItAlwaysDid()
+    {
+        var rig = new Rig();
+
+        rig.Click(5, 6);
+
+        Assert.Equal(6, rig.List.Selected);
+    }
+
+    [Fact]
+    public void DoubleClick_StillActivates_AndEachClickReports()
+    {
+        var rig = new Rig();
+
+        rig.Click(5, 3);
+        rig.Click(5, 3);
+
+        Assert.Equal([3], rig.Activations);
+        Assert.Equal(2, rig.Clicks.Count);
+    }
+}

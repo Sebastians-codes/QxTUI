@@ -95,6 +95,20 @@ public sealed class ListView : Widget
     /// different rows are two singles, never an accidental activation.</summary>
     public event Action<int>? Activated;
 
+    /// <summary>Fired on a single left click on a data row, with the row index
+    /// and the content column that was hit (the click's x plus
+    /// <see cref="OffsetX"/>). For things that live inside a row: a chevron
+    /// that folds a group, a checkbox. Clicks on the scrollbar or below the
+    /// last row do not fire it. The cursor still moves as before.</summary>
+    public event Action<int, int>? RowClicked;
+
+    public override void OnClick(Point local)
+    {
+        bool onScrollbar = ShowScrollbar && local.X >= Rect.W - 1;
+        if (onScrollbar || local.Y >= TrackH) return;
+        if (RowAt(local.Y) is int row) RowClicked?.Invoke(row, local.X + OffsetX);
+    }
+
     public override void OnDoubleClick(Point local)
     {
         if (ClickElementAt(local) is int row) Activated?.Invoke(row);
