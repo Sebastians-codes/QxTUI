@@ -1,5 +1,7 @@
+using QxTui.Animation;
 using QxTui.Core;
 using QxTui.Layout;
+using QxTui.Render;
 using QxTui.Terminal;
 using QxTui.Widgets;
 
@@ -154,5 +156,230 @@ public class SplitSequenceFlushTests
         p.Flush(); // settled lone Esc -> keypress
         Assert.True(p.TryReadKey(out var ev));
         Assert.Equal(Key.Escape, ev.Key);
+    }
+}
+
+public class ModeReportParsingTests
+{
+    private static KeyParser Feed(string input)
+    {
+        var parser = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes(input)) parser.Feed(b);
+        return parser;
+    }
+
+    [Theory]
+    [InlineData(0, false)] // not recognised
+    [InlineData(1, true)]  // set
+    [InlineData(2, true)]  // reset: supported, just off
+    [InlineData(3, true)]  // permanently set
+    [InlineData(4, false)] // permanently reset: cannot be enabled
+    public void PixelMouseReply_StatusDecidesSupport(int status, bool supported)
+    {
+        var parser = Feed($"\u001b[?1016;{status}$y");
+
+        Assert.Equal(supported, parser.PixelMouseSupported);
+    }
+
+    [Fact]
+    public void BeforeAnyReply_SupportIsUnknown() =>
+        Assert.Null(new KeyParser().PixelMouseSupported);
+
+    [Fact]
+    public void ReplyForAnotherMode_IsIgnored()
+    {
+        var parser = Feed("\u001b[?2004;1$y");
+
+        Assert.Null(parser.PixelMouseSupported);
+    }
+
+    [Fact]
+    public void TheReplyNeverLeaksIntoTheKeyStream()
+    {
+        // the trailing 'y' used to escape the aborted sequence and arrive as a typed key
+        var parser = Feed("\u001b[?1016;2$y");
+
+        Assert.False(parser.TryReadKey(out var key), $"leaked {key}");
+        Assert.False(parser.TryReadMouse(out _));
+    }
+
+    [Fact]
+    public void AReplySplitAcrossReads_StillParses_AndDoesNotLeak()
+    {
+        var parser = new KeyParser();
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("\u001b[?1016;2"))
+            parser.Feed(b);
+        Assert.False(parser.HasPending); // mid-sequence is not a lone ESC
+        parser.Flush();                  // a frame boundary falls here
+        foreach (byte b in System.Text.Encoding.ASCII.GetBytes("$y"))
+            parser.Feed(b);
+
+        Assert.True(parser.PixelMouseSupported);
+        Assert.False(parser.TryReadKey(out _));
+    }
+
+    [Fact]
+    public void OtherIntermediateSequences_AreDropped_NotTypedAsKeys()
+    {
+        var parser = Feed("\u001b[0 q"); // cursor-style style sequence: 'q' must not become a key
+
+        Assert.False(parser.TryReadKey(out var key), $"leaked {key}");
+    }
+
+    [Fact]
+    public void KeysStillParseAfterAnIntermediateSequence()
+    {
+        var parser = Feed("\u001b[?1016;2$y\u001b[1;5A\u001b[B");
+
+        Assert.True(parser.TryReadKey(out var up));
+        Assert.Equal(Key.Up, up.Key);
+        Assert.True(parser.TryReadKey(out var down));
+        Assert.Equal(Key.Down, down.Key);
+    }
+}
+
+public class PixelMouseCapabilityTests
+{
+    private const string Press = "\u001b[<0;{0};{1}M";
+
+    private sealed class Probe : Widget
+    {
+        public readonly List<MouseEvent> Events = [];
+        public Probe() => Clickable = true;
+        public override bool OnMouse(MouseEvent ev)
+        {
+            Events.Add(ev);
+            return true;
+        }
+        public override void Render(CellBuffer buffer) { }
+    }
+
+    private sealed class Rig
+    {
+        public readonly FakeTerminal Term = new(80, 40);
+        public readonly App App;
+        public readonly Probe Probe = new();
+
+        public Rig()
+        {
+            Probe.Node.Grow = 1f;
+            var root = new LayoutNode { Direction = FlexDirection.Column };
+            root.Add(Probe);
+            App = new App(Term, root, targetFps: 60, time: new VirtualTimeSource(), asyncPresenting: false);
+            App.RunFrame();
+        }
+
+        public void Feed(string input)
+        {
+            foreach (byte b in System.Text.Encoding.ASCII.GetBytes(input)) Term.QueueInput(b);
+            App.RunFrame();
+        }
+
+        /// <summary>A left press reported by the terminal at 1-based coordinates (whatever unit it uses).</summary>
+        public MouseEvent PressAt(int x, int y)
+        {
+            Probe.Events.Clear();
+            Feed(string.Format(Press, x, y));
+            return Probe.Events.First(e => e.Kind == MouseKind.Press);
+        }
+    }
+
+    // 1600x800 px over 80x40 cells = 20x20 px cells (the 14 t fallback some terminals need)
+    private const string WindowSizeReply = "\u001b[4;800;1600t";
+    private const string AskedForPixelMouse = "\u001b[?1016$p";
+    private const string EnabledPixelMouse = "\u001b[?1016h";
+
+    [Fact]
+    public void AnsweringTheSizeQuery_DoesNotSwitchToPixelCoordinates_ItAsksFirst()
+    {
+        // Windows Terminal: answers the size query, then keeps sending CELL coordinates
+        var rig = new Rig();
+
+        rig.Feed(WindowSizeReply);
+
+        Assert.Contains(AskedForPixelMouse, rig.Term.AllOutput);
+        Assert.DoesNotContain(EnabledPixelMouse, rig.Term.AllOutput);
+
+        var press = rig.PressAt(54, 37); // 1-based cell (54, 37)
+        Assert.Equal((53, 36), (press.X, press.Y)); // NOT divided by the cell size: not (2, 2)
+        Assert.Equal(-1, press.Px);                 // and no bogus pixel position
+    }
+
+    [Fact]
+    public void TheSameForThe16tAnswer()
+    {
+        var rig = new Rig();
+
+        rig.Feed("\u001b[16;10;20t");
+
+        Assert.Contains(AskedForPixelMouse, rig.Term.AllOutput);
+        Assert.DoesNotContain(EnabledPixelMouse, rig.Term.AllOutput);
+        Assert.Equal((53, 36), (rig.PressAt(54, 37).X, rig.PressAt(54, 37).Y));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void WhenTheTerminalConfirms_PixelModeIsEnabled_AndPositionsAreReadAsPixels(int status)
+    {
+        var rig = new Rig();
+        rig.Feed(WindowSizeReply);
+
+        rig.Feed($"\u001b[?1016;{status}$y");
+
+        Assert.Contains(EnabledPixelMouse, rig.Term.AllOutput);
+        var press = rig.PressAt(206, 106); // pixel (205, 105) with 20x20 px cells
+        Assert.Equal((10, 5), (press.X, press.Y));
+        Assert.Equal((205, 105), (press.Px, press.Py));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public void WhenTheTerminalSaysNo_StaysInCells(int status)
+    {
+        var rig = new Rig();
+        rig.Feed(WindowSizeReply);
+
+        rig.Feed($"\u001b[?1016;{status}$y");
+
+        Assert.DoesNotContain(EnabledPixelMouse, rig.Term.AllOutput);
+        var press = rig.PressAt(54, 37);
+        Assert.Equal((53, 36), (press.X, press.Y));
+    }
+
+    [Fact]
+    public void AterminalThatNeverAnswers_StaysInCells()
+    {
+        var rig = new Rig();
+        rig.Feed(WindowSizeReply);
+        for (int i = 0; i < 5; i++) rig.App.RunFrame();
+
+        Assert.DoesNotContain(EnabledPixelMouse, rig.Term.AllOutput);
+        Assert.Equal((53, 36), (rig.PressAt(54, 37).X, rig.PressAt(54, 37).Y));
+    }
+
+    [Fact]
+    public void ANoReplyBeforeAnySizeIsKnown_ChangesNothing()
+    {
+        var rig = new Rig();
+
+        rig.Feed("\u001b[?1016;2$y"); // an answer with no cell size to divide by
+
+        Assert.DoesNotContain(EnabledPixelMouse, rig.Term.AllOutput);
+        Assert.Equal((10, 5), (rig.PressAt(11, 6).X, rig.PressAt(11, 6).Y));
+    }
+
+    [Fact]
+    public void TheQueryIsSentOnce()
+    {
+        var rig = new Rig();
+
+        rig.Feed(WindowSizeReply);
+        for (int i = 0; i < 5; i++) rig.App.RunFrame();
+
+        string output = rig.Term.AllOutput;
+        Assert.Equal(1, output.Split(AskedForPixelMouse).Length - 1);
     }
 }

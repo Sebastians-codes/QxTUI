@@ -11,6 +11,12 @@ internal sealed class FakeTerminal(int width = 80, int height = 24) : ITerminal
     public int Height { get; set; } = height;
     public bool ResizePending { get; set; }
     public byte[]? LastFrame { get; private set; }
+
+    /// <summary>Every Write, in order: for asserting what the app sent the terminal.</summary>
+    public List<byte[]> Writes { get; } = [];
+
+    /// <summary>Everything written so far, as text.</summary>
+    public string AllOutput => System.Text.Encoding.UTF8.GetString(Writes.SelectMany(w => w).ToArray());
     public int WriteCount { get; private set; }
     public bool Entered { get; private set; }
     public bool Exited { get; private set; }
@@ -36,6 +42,7 @@ internal sealed class FakeTerminal(int width = 80, int height = 24) : ITerminal
     public void Write(ReadOnlySpan<byte> bytes)
     {
         LastFrame = bytes.ToArray();
+        Writes.Add(LastFrame);
         WriteCount++;
     }
 

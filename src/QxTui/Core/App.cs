@@ -523,11 +523,27 @@ public sealed class App : IDisposable
         }
     }
 
-    internal void SetCellPixelSize(int w, int h)
+    /// <summary>Records the cell size in pixels. <paramref name="pixelMouse"/> says whether
+    /// mouse positions are pixels (true) or still cells (false: the terminal has not
+    /// confirmed pixel reporting, see <see cref="AskPixelMouse"/>).</summary>
+    internal void SetCellPixelSize(int w, int h, bool pixelMouse = true)
     {
         _cellPixW = w;
         _cellPixH = h;
-        _pixelMouse = w > 0 && h > 0;
+        _pixelMouse = pixelMouse && w > 0 && h > 0;
+    }
+
+    private bool _pixelMouseAsked;
+
+    /// <summary>Asks whether the terminal supports pixel mouse reporting (DECRQM, mode 1016).
+    /// Mouse positions stay in cells until it says yes: answering the cell-size query does
+    /// not mean it honors the mode (Windows Terminal answers it and still sends cells, which
+    /// would otherwise be divided by the cell size and pile every click in the top-left).</summary>
+    private void AskPixelMouse()
+    {
+        if (_pixelMouseAsked) return;
+        _pixelMouseAsked = true;
+        _terminal.Write("\x1b[?1016$p"u8);
     }
 
     /// <summary>Route coordinates are cells; Px/Py survive for widgets that
@@ -1151,8 +1167,8 @@ public sealed class App : IDisposable
 
         if (_cellPixH == 0 && _keyParser.CellPixH > 0)
         {
-            SetCellPixelSize(_keyParser.CellPixW, _keyParser.CellPixH);
-            _terminal.Write("\x1b[?1016h"u8); // reply proved capability
+            SetCellPixelSize(_keyParser.CellPixW, _keyParser.CellPixH, pixelMouse: false);
+            AskPixelMouse();
         }
         else if (_cellPixH == 0 && _keyParser.WinPixH > 0 &&
                  _terminal.Height > 0 && _terminal.Width > 0)
@@ -1162,9 +1178,16 @@ public sealed class App : IDisposable
             int cw = _keyParser.WinPixW / _terminal.Width;
             if (ch >= 4 && cw >= 4) // sanity: a "cell" smaller than 4px is a lie
             {
-                SetCellPixelSize(cw, ch);
-                _terminal.Write("\x1b[?1016h"u8);
+                SetCellPixelSize(cw, ch, pixelMouse: false);
+                AskPixelMouse();
             }
+        }
+
+        // the terminal confirmed pixel reporting: switch it on, and only now read positions as pixels
+        if (_pixelMouseAsked && !_pixelMouse && _cellPixH > 0 && _keyParser.PixelMouseSupported == true)
+        {
+            _pixelMouse = true;
+            _terminal.Write("\x1b[?1016h"u8);
         }
 
         while (_running && _keyParser.TryReadMouse(out var mouseEvent))

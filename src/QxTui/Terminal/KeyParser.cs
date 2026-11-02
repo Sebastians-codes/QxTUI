@@ -45,6 +45,7 @@ public sealed class KeyParser
     private int _param0;
     private bool _isMouse;
     private bool _paramDone;
+    private byte _intermediate;
     private long _escSince;
     private State _state = State.Ground;
 
@@ -65,6 +66,7 @@ public sealed class KeyParser
                         _param0 = 0;
                         _paramDone = false;
                         _isMouse = false;
+                        _intermediate = 0;
                         break;
                     case (byte)'O':
                         _state = State.Ss3;
@@ -100,12 +102,26 @@ public sealed class KeyParser
                     break;
                 }
 
+                // intermediate byte (e.g. the '$' of a mode report): keep reading to the
+                // final byte, or the final byte would leak out as a typed key
+                if (b is >= 0x20 and <= 0x2f)
+                {
+                    _intermediate = b;
+                    break;
+                }
+
                 _state = State.Ground;
                 if (b is < 0x40 or > 0x7e)
                     break; // malformed: drop
 
                 if (_isMouse)
                     ParseMouse(b);
+                else if (_intermediate != 0)
+                {
+                    if (_intermediate == (byte)'$' && b == (byte)'y')
+                        ParseModeReport(); // DECRPM: CSI ? mode ; status $ y
+                    // any other intermediate sequence is not a key: drop it
+                }
                 else if (b == (byte)'t' && _param0 == 16)
                     ParseCellSize();   // CSI 16 ; w ; h t
                 else if (b == (byte)'t' && _param0 == 4)
@@ -223,6 +239,34 @@ public sealed class KeyParser
             CellPixW = w;
             CellPixH = h;
         }
+    }
+
+    /// <summary>Whether the terminal supports SGR-Pixels mouse reporting (mode 1016),
+    /// from its answer to the mode query <c>CSI ? 1016 $ p</c>. Null until it answers;
+    /// a terminal that never answers stays null. Answering the cell-size query proves
+    /// nothing: Windows Terminal and VTE answer it but report mouse positions in
+    /// cells, not pixels.</summary>
+    public bool? PixelMouseSupported { get; private set; }
+
+    private void ParseModeReport()
+    {
+        // params are "?1016;2": a private marker, then mode ; status
+        if (_plen < 2 || _params[0] != (byte)'?')
+            return;
+        int mode = 0, status = 0, field = 0;
+        for (int i = 1; i <= _plen; i++)
+        {
+            if (i < _plen && _params[i] >= '0' && _params[i] <= '9')
+            {
+                if (field == 0) mode = mode * 10 + (_params[i] - '0');
+                else if (field == 1) status = status * 10 + (_params[i] - '0');
+                continue;
+            }
+            field++;
+        }
+        // DECRPM status: 0 unknown, 1 set, 2 reset, 3 permanently set, 4 permanently reset
+        if (mode == 1016)
+            PixelMouseSupported = status is 1 or 2 or 3;
     }
 
     /// <summary>Window size in pixels (CSI 14 t reply). Divided by the
