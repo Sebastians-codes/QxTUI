@@ -10,7 +10,7 @@
 
     <!-- NuGet packaging -->
     <PackageId>QxTui</PackageId>
-    <Version>0.1.8</Version>
+    <Version>0.1.9</Version>
     <Authors>pmp</Authors>
     <Description>A terminal UI framework for .NET with fine-grained reactivity and damage isolation: an animating component re-renders only its own cells, declarative animations run on one global clock, the zero-alloc hot path renders at 200fps-class in pure C#, and layout is flexbox from day one.</Description>
     <PackageTags>terminal;tui;ui;console;ansi;reactive;flexbox;framework</PackageTags>

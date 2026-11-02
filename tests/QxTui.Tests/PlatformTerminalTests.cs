@@ -222,3 +222,19 @@ public class WindowsMouseDecoderTests
         Assert.Equal(MouseKind.Release, release.Kind);
     }
 }
+
+public class WindowsInputLogTests
+{
+    [Fact]
+    public void DescribesKeyMouseAndOtherRecords()
+    {
+        Assert.Equal("key down vk=0x41 char=U+0061",
+            WindowsInputLog.Describe(1, true, 0x41, 'a', 0, 0, 0, 0, 0));
+        Assert.Equal("key up vk=0x1B char=U+001B",
+            WindowsInputLog.Describe(1, false, 0x1B, 0x1B, 0, 0, 0, 0, 0));
+        Assert.Equal("mouse x=12 y=3 buttons=0x1 flags=0x1 ctrl=0x10",
+            WindowsInputLog.Describe(2, false, 0, 0, 12, 3, 1, 0x10, 1));
+        Assert.Equal("window-buffer-size", WindowsInputLog.Describe(4, false, 0, 0, 0, 0, 0, 0, 0));
+        Assert.Equal("event type=0x10", WindowsInputLog.Describe(0x10, false, 0, 0, 0, 0, 0, 0, 0));
+    }
+}

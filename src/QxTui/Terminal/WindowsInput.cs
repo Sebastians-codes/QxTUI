@@ -177,3 +177,21 @@ internal sealed class WindowsMouseDecoder(Action<byte> emit)
             emit((byte)c);
     }
 }
+
+/// <summary>One-line descriptions of raw console input records, for the opt-in
+/// input log: set <c>QXTUI_INPUT_LOG=&lt;file&gt;</c> and every record the
+/// console delivers is appended there. When "the mouse does nothing", the log
+/// shows whether the console sends mouse records, VT sequences inside key
+/// records, or nothing at all.</summary>
+internal static class WindowsInputLog
+{
+    internal static string Describe(ushort eventType, bool keyDown, ushort virtualKey, ushort character,
+        short mouseX, short mouseY, uint buttonState, uint controlState, uint eventFlags) =>
+        eventType switch
+        {
+            0x0001 => $"key {(keyDown ? "down" : "up")} vk=0x{virtualKey:X2} char=U+{character:X4}",
+            0x0002 => $"mouse x={mouseX} y={mouseY} buttons=0x{buttonState:X} flags=0x{eventFlags:X} ctrl=0x{controlState:X}",
+            0x0004 => "window-buffer-size",
+            _ => $"event type=0x{eventType:X}",
+        };
+}

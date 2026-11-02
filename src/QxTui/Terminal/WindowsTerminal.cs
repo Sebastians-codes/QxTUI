@@ -128,6 +128,7 @@ public sealed class WindowsTerminal : ITerminal
     private readonly System.Collections.Concurrent.ConcurrentQueue<byte> _input = new();
     private readonly WindowsInputDecoder _decoder;
     private readonly WindowsMouseDecoder _mouse;
+    private readonly StreamWriter? _inputLog;
     private int _windowLeft;
     private int _windowTop;
     private readonly CancellationTokenSource _cts = new();
@@ -153,6 +154,11 @@ public sealed class WindowsTerminal : ITerminal
         QuerySize();
         _decoder = new WindowsInputDecoder(_input.Enqueue);
         _mouse = new WindowsMouseDecoder(_input.Enqueue);
+        if (Environment.GetEnvironmentVariable("QXTUI_INPUT_LOG") is { Length: > 0 } logPath)
+        {
+            try { _inputLog = new StreamWriter(logPath, append: true) { AutoFlush = true }; }
+            catch (Exception) { /* diagnostics must never stop the app */ }
+        }
 
         _readerThread = new Thread(ReadLoop)
         {
@@ -275,6 +281,9 @@ public sealed class WindowsTerminal : ITerminal
                 for (int i = 0; i < read; i++)
                 {
                     ref readonly var record = ref records[i];
+                    _inputLog?.WriteLine(WindowsInputLog.Describe(record.EventType, record.KeyDown != 0,
+                        record.VirtualKeyCode, record.UnicodeChar, record.MouseX, record.MouseY,
+                        record.ButtonState, record.MouseControlKeyState, record.MouseEventFlags));
                     if (record.EventType == KeyEvent)
                         _decoder.OnKey(record.KeyDown != 0, record.RepeatCount,
                             record.VirtualKeyCode, (char)record.UnicodeChar);
@@ -302,6 +311,7 @@ public sealed class WindowsTerminal : ITerminal
         try { _readerThread.Join(500); } catch { /* best effort */ }
         _in.Dispose();
         _out.Dispose();
+        _inputLog?.Dispose();
         _cts.Dispose();
     }
 }
